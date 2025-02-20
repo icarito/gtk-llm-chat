@@ -11,15 +11,15 @@
 - [x] Test application launch from CLI with multiple instances
 
 ## Phase 2: Core UI Layout
-- [ ] Implement vertical box layout hierarchy
-- [ ] Create ScrolledWindow for message history
-- [ ] Set up input area box with proper proportions
-- [ ] Configure TextView with:
-  - [ ] Dynamic height adjustment
-  - [ ] Enter vs Shift+Enter handling
-  - [ ] Minimum/maximum line limits
-- [ ] Add Send button with keyboard shortcut
-- [ ] Verify UI responsiveness at different window sizes
+- [x] Implement vertical box layout hierarchy
+- [x] Create ScrolledWindow for message history
+- [x] Set up input area box with proper proportions
+- [x] Configure TextView with:
+  - [x] Dynamic height adjustment
+  - [x] Enter vs Shift+Enter handling
+  - [x] Minimum/maximum line limits
+- [x] Add Send button with keyboard shortcut
+- [x] Verify UI responsiveness at different window sizes
 
 ## Phase 3: Message Handling
 - [ ] Implement Message class with:
