@@ -9,6 +9,7 @@
 - [x] Set default window size to 600x700
 - [x] Verify window independence between instances
 - [x] Test application launch from CLI with multiple instances
+- [ ] Center window on screen (Known GTK4 issue - window positioning unreliable)
 
 ## Phase 2: Core UI Layout
 - [x] Implement vertical box layout hierarchy
@@ -51,16 +52,16 @@
 - [x] Implement cancellation support
 
 ## Phase 5: Error Handling & Status
-- [ ] Create ErrorWidget components:
-  - [ ] Warning icon integration
-  - [ ] Styling hierarchy
-  - [ ] Error message formatting
-- [ ] Implement error capture system for:
+- [x] Create ErrorWidget components:
+  - [x] Warning icon integration
+  - [x] Styling hierarchy
+  - [x] Error message formatting
+- [x] Implement error capture system for:
   - [x] Subprocess failures
   - [ ] Invalid CIDs
   - [ ] Model errors
 - [ ] Add status bar with:
-  - [ ] Connection indicators
+  - [x] Connection indicators (via window title)
   - [ ] Loading animations
 - [ ] Create retry mechanism for failed messages
 - [ ] Implement graceful degradation for critical errors

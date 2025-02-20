@@ -65,6 +65,36 @@ class MessageWidget(Gtk.Box):
         self.content_label.set_text(new_content)
 
 
+class ErrorWidget(Gtk.Box):
+    """Widget para mostrar mensajes de error"""
+    
+    def __init__(self, message):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        
+        self.add_css_class('error-message')
+        self.set_margin_start(6)
+        self.set_margin_end(6)
+        self.set_margin_top(3)
+        self.set_margin_bottom(3)
+        
+        # Icono de advertencia
+        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        icon.add_css_class('error-icon')
+        self.append(icon)
+        
+        # Contenedor del mensaje
+        message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        message_box.add_css_class('error-content')
+        
+        # Texto del error
+        label = Gtk.Label(label=message)
+        label.set_wrap(True)
+        label.set_xalign(0)
+        message_box.append(label)
+        
+        self.append(message_box)
+
+
 class LLMProcess:
     def __init__(self):
         self.process = None
@@ -73,27 +103,35 @@ class LLMProcess:
 
     def initialize(self, callback):
         """Inicia el proceso LLM"""
-        if not self.process:
-            print("Iniciando proceso LLM...")
-            self.launcher = Gio.SubprocessLauncher.new(
-                Gio.SubprocessFlags.STDIN_PIPE | 
-                Gio.SubprocessFlags.STDOUT_PIPE |
-                Gio.SubprocessFlags.STDERR_PIPE
-            )
-            self.process = self.launcher.spawnv(['llm', 'chat'])
-            
-            # Configurar streams
-            self.stdin = self.process.get_stdin_pipe()
-            self.stdout = self.process.get_stdout_pipe()
-            
-            # Leer mensaje inicial
-            self.stdout.read_bytes_async(
-                4096,  # tamaño del buffer
-                GLib.PRIORITY_DEFAULT,
-                None,  # cancelable
-                self._handle_initial_output,
-                callback
-            )
+        try:
+            if not self.process:
+                print("Iniciando proceso LLM...")
+                self.launcher = Gio.SubprocessLauncher.new(
+                    Gio.SubprocessFlags.STDIN_PIPE | 
+                    Gio.SubprocessFlags.STDOUT_PIPE |
+                    Gio.SubprocessFlags.STDERR_PIPE
+                )
+                
+                try:
+                    self.process = self.launcher.spawnv(['llm', 'chat'])
+                except GLib.Error as e:
+                    callback(None, f"Error al iniciar LLM: {e.message}")
+                    return
+                
+                # Configurar streams
+                self.stdin = self.process.get_stdin_pipe()
+                self.stdout = self.process.get_stdout_pipe()
+                
+                # Leer mensaje inicial
+                self.stdout.read_bytes_async(
+                    4096,
+                    GLib.PRIORITY_DEFAULT,
+                    None,
+                    self._handle_initial_output,
+                    callback
+                )
+        except Exception as e:
+            callback(None, f"Error inesperado: {str(e)}")
 
     def execute(self, messages, callback):
         """Ejecuta el LLM con los mensajes dados"""
@@ -193,6 +231,28 @@ class LLMChatApplication(Adw.Application):
         window = LLMChatWindow(application=self)
         window.present()
 
+    def do_startup(self):
+        # Llamar al método padre usando do_startup
+        Adw.Application.do_startup(self)
+        
+        # Configurar acciones
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self.on_about_activate)
+        self.add_action(about_action)
+
+    def on_about_activate(self, action, param):
+        """Muestra el diálogo Acerca de"""
+        about = Adw.AboutWindow(
+            transient_for=self.get_active_window(),
+            application_name="LLM Chat",
+            application_icon="dialog-information-symbolic",
+            developer_name="Tu Nombre",
+            version="1.0",
+            developers=["Tu Nombre"],
+            copyright="© 2024 Tu Nombre"
+        )
+        about.present()
+
 
 class LLMChatWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -204,16 +264,35 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Configurar la ventana principal
         self.set_title("LLM Chat")
         self.set_default_size(600, 700)
-
-        # Inicializar la cola de mensajes (solo para mostrar)
+        
+        # Inicializar la cola de mensajes
         self.message_queue = []
         
         # Mantener referencia al último mensaje enviado
         self.last_message = None
+        
+        # Crear header bar
+        header = Adw.HeaderBar()
+        self.title_widget = Adw.WindowTitle.new("LLM Chat", "Iniciando...")
+        header.set_title_widget(self.title_widget)
+        
+        # Botón de menú
+        menu_button = Gtk.MenuButton()
+        menu_button.set_icon_name("open-menu-symbolic")
+        
+        # Crear menú
+        menu = Gio.Menu.new()
+        menu.append("Acerca de", "app.about")
+        menu_button.set_menu_model(menu)
+        header.pack_end(menu_button)
 
         # Contenedor principal
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        main_box.append(header)
 
+        # Contenedor para el chat
+        chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        
         # ScrolledWindow para el historial de mensajes
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
@@ -261,11 +340,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         input_box.append(self.input_text)
         input_box.append(send_button)
 
-        main_box.append(scroll)
-        main_box.append(input_box)
-
+        chat_box.append(scroll)
+        chat_box.append(input_box)
+        
+        main_box.append(chat_box)
+        
         self.set_content(main_box)
-
+        
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
@@ -285,6 +366,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
             .timestamp {
                 font-size: 0.8em;
                 opacity: 0.7;
+            }
+            
+            .error-message {
+                background-color: alpha(@error_color, 0.1);
+                border-radius: 6px;
+                padding: 8px;
+            }
+            
+            .error-icon {
+                color: @error_color;
+            }
+            
+            .error-content {
+                padding: 3px;
             }
         """.encode())
 
@@ -367,23 +462,33 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.llm.execute([self.last_message], self._handle_llm_response)
         return False
 
-    def _handle_initial_response(self, model_name):
+    def _show_error(self, message):
+        """Muestra un mensaje de error en el chat"""
+        error_widget = ErrorWidget(message)
+        self.messages_box.append(error_widget)
+        self._scroll_to_bottom()
+
+    def _handle_initial_response(self, model_name, error=None):
         """Maneja la respuesta inicial del LLM"""
-        if model_name:
-            self._add_message_to_queue(
-                f"Iniciando chat con {model_name}",
-                "system"
-            )
+        if error:
+            self._show_error(error)
+            self.title_widget.set_subtitle("Error de conexión")
+        elif model_name:
+            self.title_widget.set_subtitle(model_name)
+        else:
+            self._show_error("No se pudo iniciar el chat con el modelo")
+            self.title_widget.set_subtitle("Sin conexión")
 
     def _handle_llm_response(self, response):
         """Maneja la respuesta del LLM"""
-        if response is not None:
-            self.current_message_widget.update_content(response)
-            self._scroll_to_bottom()
-        else:
+        if response is None:
             if self.current_message_widget:
                 self.current_message_widget.get_parent().remove(self.current_message_widget)
                 self.current_message_widget = None
+            self._show_error("Error al generar respuesta. Intente nuevamente.")
+        else:
+            self.current_message_widget.update_content(response)
+            self._scroll_to_bottom()
 
     def _on_cancel_pressed(self, controller, keyval, keycode, state):
         """Maneja la cancelación con Ctrl+C"""
