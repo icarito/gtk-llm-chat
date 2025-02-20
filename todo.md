@@ -40,16 +40,25 @@
 - [x] Create LLMProcess controller class
 - [x] Implement async subprocess execution
 - [x] Set up stdout/stderr capture system
-- [ ] Develop CLI command builder with:
+- [x] Develop CLI command builder with:
   - [x] Basic command construction
-  - [ ] Model parameter handling
-  - [ ] System prompt injection
-  - [ ] CID management
+  - [x] Model parameter handling
+  - [x] System prompt injection
+  - [x] CID management
 - [ ] Create streaming response parser:
   - [ ] Regex pattern matching
   - [x] Response buffer system
 - [x] Add typing indicators
 - [x] Implement cancellation support
+- [x] Implement argument parsing:
+  - [x] Set up argparse with:
+    - [x] --cid: Conversation ID
+    - [x] -s: System prompt
+    - [x] -m: Model selection
+    - [x] -c: Continue last conversation
+  - [x] Create config dictionary from parsed args
+  - [x] Pass config to LLMProcess constructor
+  - [x] Update LLMProcess to use config for llm chat command
 
 ## Phase 5: Error Handling & Status
 - [x] Create ErrorWidget components:
@@ -58,8 +67,8 @@
   - [x] Error message formatting
 - [x] Implement error capture system for:
   - [x] Subprocess failures
-  - [ ] Invalid CIDs
-  - [ ] Model errors
+  - [x] Invalid CIDs
+  - [x] Model errors
 - [ ] Add status bar with:
   - [x] Connection indicators (via window title)
   - [ ] Loading animations

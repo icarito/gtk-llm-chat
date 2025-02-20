@@ -1,5 +1,6 @@
 import sys
 import gi
+import argparse
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -8,7 +9,7 @@ import asyncio
 import subprocess
 import threading
 from datetime import datetime
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
 
 
 class Message:
@@ -95,11 +96,35 @@ class ErrorWidget(Gtk.Box):
         self.append(message_box)
 
 
+def parse_args(argv):
+    """Parsea los argumentos de la línea de comandos"""
+    parser = argparse.ArgumentParser(description='GTK Frontend para LLM')
+    parser.add_argument('--cid', type=str, help='ID de la conversación a continuar')
+    parser.add_argument('-s', '--system', type=str, help='Prompt del sistema')
+    parser.add_argument('-m', '--model', type=str, help='Modelo a utilizar')
+    parser.add_argument('-c', '--continue-last', action='store_true', 
+                       help='Continuar última conversación')
+    
+    # Parsear solo nuestros argumentos
+    args = parser.parse_args(argv[1:])  # [1:] para omitir el nombre del script
+    
+    # Crear diccionario de configuración
+    config = {
+        'cid': args.cid,
+        'system': args.system,
+        'model': args.model,
+        'continue_last': args.continue_last
+    }
+    
+    return config
+
+
 class LLMProcess:
-    def __init__(self):
+    def __init__(self, config=None):
         self.process = None
         self.is_running = False
         self.launcher = None
+        self.config = config or {}
 
     def initialize(self, callback):
         """Inicia el proceso LLM"""
@@ -112,8 +137,23 @@ class LLMProcess:
                     Gio.SubprocessFlags.STDERR_PIPE
                 )
                 
+                # Construir comando con argumentos
+                cmd = ['llm', 'chat']
+                
+                if self.config.get('cid'):
+                    cmd.extend(['--cid', self.config['cid']])
+                elif self.config.get('continue_last'):
+                    cmd.append('-c')
+                
+                if self.config.get('system'):
+                    cmd.extend(['-s', self.config['system']])
+                
+                if self.config.get('model'):
+                    cmd.extend(['-m', self.config['model']])
+                
                 try:
-                    self.process = self.launcher.spawnv(['llm', 'chat'])
+                    print(f"Ejecutando comando: {' '.join(cmd)}")
+                    self.process = self.launcher.spawnv(cmd)
                 except GLib.Error as e:
                     callback(None, f"Error al iniciar LLM: {e.message}")
                     return
@@ -225,10 +265,11 @@ class LLMChatApplication(Adw.Application):
             application_id="org.gnome.LLMChat",
             flags=Gio.ApplicationFlags.FLAGS_NONE
         )
+        self.config = None
 
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
-        window = LLMChatWindow(application=self)
+        window = LLMChatWindow(application=self, config=self.config)
         window.present()
 
     def do_startup(self):
@@ -255,11 +296,11 @@ class LLMChatApplication(Adw.Application):
 
 
 class LLMChatWindow(Adw.ApplicationWindow):
-    def __init__(self, **kwargs):
+    def __init__(self, config=None, **kwargs):
         super().__init__(**kwargs)
         
-        # Inicializar LLMProcess
-        self.llm = LLMProcess()
+        # Inicializar LLMProcess con la configuración
+        self.llm = LLMProcess(config)
         
         # Configurar la ventana principal
         self.set_title("LLM Chat")
@@ -508,9 +549,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
 
 def main():
+    # Parsear argumentos ANTES de que GTK los vea
+    argv = [arg for arg in sys.argv if not arg.startswith(('--gtk', '--gdk', '--display'))]
+    config = parse_args(argv)
+    
+    # Pasar solo los argumentos de GTK a la aplicación
+    gtk_args = [arg for arg in sys.argv if arg.startswith(('--gtk', '--gdk', '--display'))]
+    gtk_args.insert(0, sys.argv[0])  # Agregar el nombre del programa
+    
     # Crear y ejecutar la aplicación
     app = LLMChatApplication()
-    return app.run(sys.argv)
+    app.config = config
+    return app.run(gtk_args)
 
 
 if __name__ == "__main__":
