@@ -1,11 +1,13 @@
 import sys
 import gi
-import asyncio
-import subprocess
-from datetime import datetime
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
+
+import asyncio
+import subprocess
+import threading
+from datetime import datetime
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 
@@ -55,39 +57,128 @@ class MessageWidget(Gtk.Box):
 
         self.append(message_box)
 
+        # Guardar referencia al label para actualizaciones
+        self.content_label = label
+
+    def update_content(self, new_content):
+        """Actualiza el contenido del mensaje"""
+        self.content_label.set_text(new_content)
+
 
 class LLMProcess:
-    """Controlador para ejecutar el LLM como un subproceso asíncrono"""
-
     def __init__(self):
         self.process = None
+        self.is_running = False
+        self.launcher = None
 
-    async def execute(self, messages):
-        """Ejecuta el LLM con los mensajes dados"""
-        # Construir el comando
-        cmd = ["llm", "chat"]
-        for msg in messages:
-            cmd.extend(["--message", f"{msg.sender}: {msg.content}"])
-
-        try:
-            # Crear y ejecutar el proceso
-            self.process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+    def initialize(self, callback):
+        """Inicia el proceso LLM"""
+        if not self.process:
+            print("Iniciando proceso LLM...")
+            self.launcher = Gio.SubprocessLauncher.new(
+                Gio.SubprocessFlags.STDIN_PIPE | 
+                Gio.SubprocessFlags.STDOUT_PIPE |
+                Gio.SubprocessFlags.STDERR_PIPE
+            )
+            self.process = self.launcher.spawnv(['llm', 'chat'])
+            
+            # Configurar streams
+            self.stdin = self.process.get_stdin_pipe()
+            self.stdout = self.process.get_stdout_pipe()
+            
+            # Leer mensaje inicial
+            self.stdout.read_bytes_async(
+                4096,  # tamaño del buffer
+                GLib.PRIORITY_DEFAULT,
+                None,  # cancelable
+                self._handle_initial_output,
+                callback
             )
 
-            # Capturar la salida
-            stdout, stderr = await self.process.communicate()
+    def execute(self, messages, callback):
+        """Ejecuta el LLM con los mensajes dados"""
+        if not self.process:
+            self.initialize(lambda _: self.execute(messages, callback))
+            return
 
-            if stderr:
-                print(f"Error: {stderr.decode()}")
-
-            return stdout.decode().strip()
+        try:
+            self.is_running = True
+            
+            # Enviar solo el último mensaje
+            if messages:
+                stdin_data = f"{messages[-1].sender}: {messages[-1].content}\n"
+                print(f"Enviando al LLM:\n{stdin_data}")
+                self.stdin.write_bytes(GLib.Bytes(stdin_data.encode('utf-8')))
+            
+            # Leer respuesta
+            self._read_response(callback)
 
         except Exception as e:
             print(f"Error ejecutando LLM: {e}")
-            return None
+            callback(None)
+            self.is_running = False
+
+    def _handle_initial_output(self, stdout, result, callback):
+        """Maneja la salida inicial del proceso"""
+        try:
+            bytes_read = stdout.read_bytes_finish(result)
+            if bytes_read:
+                text = bytes_read.get_data().decode('utf-8')
+                if "Chatting with" in text:
+                    model_name = text.split("Chatting with")[1].split("\n")[0].strip()
+                    print(f"Usando modelo: {model_name}")
+                    callback(model_name)
+                    return
+            callback(None)
+        except Exception as e:
+            print(f"Error leyendo salida inicial: {e}")
+            callback(None)
+
+    def _read_response(self, callback, accumulated=""):
+        """Lee la respuesta del LLM de forma incremental"""
+        if not self.is_running:
+            return
+
+        self.stdout.read_bytes_async(
+            1024,  # tamaño del buffer
+            GLib.PRIORITY_DEFAULT,
+            None,  # cancelable
+            self._handle_response,
+            (callback, accumulated)
+        )
+
+    def _handle_response(self, stdout, result, user_data):
+        """Maneja cada chunk de la respuesta"""
+        callback, accumulated = user_data
+        try:
+            bytes_read = stdout.read_bytes_finish(result)
+            if bytes_read:
+                text = bytes_read.get_data().decode('utf-8')
+                if text.strip() == ">":  # Prompt encontrado
+                    if accumulated:  # Solo llamar callback si hay respuesta
+                        callback(accumulated.strip())
+                    self.is_running = False
+                    return
+
+                accumulated += text
+                if accumulated.strip():  # Solo actualizar si hay contenido
+                    callback(accumulated.strip())
+                self._read_response(callback, accumulated)
+            else:
+                if accumulated.strip():  # Solo llamar callback si hay respuesta
+                    callback(accumulated.strip())
+                self.is_running = False
+
+        except Exception as e:
+            print(f"Error leyendo respuesta: {e}")
+            callback(None)
+            self.is_running = False
+
+    def cancel(self):
+        """Cancela la generación actual"""
+        self.is_running = False
+        if self.process:
+            self.process.force_exit()
 
 
 class LLMChatApplication(Adw.Application):
@@ -107,13 +198,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # Configurar el loop de eventos
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+        # Inicializar LLMProcess
+        self.llm = LLMProcess()
         
         # Configurar la ventana principal
         self.set_title("LLM Chat")
         self.set_default_size(600, 700)
+
+        # Inicializar la cola de mensajes (solo para mostrar)
+        self.message_queue = []
+        
+        # Mantener referencia al último mensaje enviado
+        self.last_message = None
 
         # Contenedor principal
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -170,12 +266,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.set_content(main_box)
 
-        # Agregar cola de mensajes
-        self.message_queue = []
-
-        # Agregar controlador LLM
-        self.llm = LLMProcess()
-
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
@@ -204,6 +294,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
+        # Agregar soporte para cancelación
+        self.current_message_widget = None
+        
+        # Configurar atajo para cancelación
+        cancel_controller = Gtk.EventControllerKey()
+        cancel_controller.connect('key-pressed', self._on_cancel_pressed)
+        self.add_controller(cancel_controller)
+
+        # Iniciar el LLM al arrancar
+        self.llm.initialize(self._handle_initial_response)
+
     def _on_text_changed(self, buffer):
         lines = buffer.get_line_count()
         # Ajustar altura entre 3 y 6 líneas
@@ -227,6 +328,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if content := self._sanitize_input(content):
             message = Message(content, sender)
             self.message_queue.append(message)
+            
+            if sender == "user":
+                self.last_message = message
 
             # Crear y mostrar el widget del mensaje
             message_widget = MessageWidget(message)
@@ -250,22 +354,44 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._start_llm_task)
     
     def _start_llm_task(self):
-        """Inicia la tarea del LLM en el loop de eventos"""
-        future = self.loop.create_task(self._process_llm_response())
-        future.add_done_callback(
-            lambda f: GLib.idle_add(self._handle_llm_response, f.result())
-        )
-        return False  # Importante para GLib.idle_add
-    
+        """Inicia la tarea del LLM"""
+        print("Iniciando tarea LLM...")
+        
+        # Crear widget vacío para la respuesta
+        self.current_message_widget = MessageWidget(
+            Message("", sender="assistant"))
+        self.messages_box.append(self.current_message_widget)
+        
+        # Solo enviar el último mensaje
+        if self.last_message:
+            self.llm.execute([self.last_message], self._handle_llm_response)
+        return False
+
+    def _handle_initial_response(self, model_name):
+        """Maneja la respuesta inicial del LLM"""
+        if model_name:
+            self._add_message_to_queue(
+                f"Iniciando chat con {model_name}",
+                "system"
+            )
+
     def _handle_llm_response(self, response):
-        """Maneja la respuesta del LLM en el hilo principal"""
-        if response:
-            self._add_message_to_queue(response, sender="assistant")
-        return False  # Importante para GLib.idle_add
-    
-    async def _process_llm_response(self):
-        """Procesa la respuesta del LLM de forma asíncrona"""
-        return await self.llm.execute(self.message_queue)
+        """Maneja la respuesta del LLM"""
+        if response is not None:
+            self.current_message_widget.update_content(response)
+            self._scroll_to_bottom()
+        else:
+            if self.current_message_widget:
+                self.current_message_widget.get_parent().remove(self.current_message_widget)
+                self.current_message_widget = None
+
+    def _on_cancel_pressed(self, controller, keyval, keycode, state):
+        """Maneja la cancelación con Ctrl+C"""
+        if keyval == Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK:
+            if self.llm.is_running:
+                self.llm.cancel()
+            return True
+        return False
 
     def _scroll_to_bottom(self):
         """Desplaza la vista al último mensaje"""

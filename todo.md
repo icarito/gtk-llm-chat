@@ -46,9 +46,9 @@
   - [ ] CID management
 - [ ] Create streaming response parser:
   - [ ] Regex pattern matching
-  - [ ] Response buffer system
-- [ ] Add typing indicators
-- [ ] Implement cancellation support
+  - [x] Response buffer system
+- [x] Add typing indicators
+- [x] Implement cancellation support
 
 ## Phase 5: Error Handling & Status
 - [ ] Create ErrorWidget components:
@@ -73,7 +73,7 @@
 - [ ] Build SQLite storage system:
   - [ ] Message schema design
   - [ ] CID-based conversation tracking
-  - [ ] Auto-save implementation
+  - [x] Auto-save implementation (usando persistencia nativa del LLM)
 - [ ] Create history navigation controls
 - [ ] Add "New Conversation" button
 
