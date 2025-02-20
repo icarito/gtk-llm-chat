@@ -287,10 +287,10 @@ class LLMChatApplication(Adw.Application):
             transient_for=self.get_active_window(),
             application_name="LLM Chat",
             application_icon="dialog-information-symbolic",
-            developer_name="Tu Nombre",
+            developer_name="Sebastian Silva",
             version="1.0",
-            developers=["Tu Nombre"],
-            copyright="© 2024 Tu Nombre"
+            developers=["Sebastian Silva <sebastian@fuentelibre.org>"],
+            copyright="© 2024 Sebastian Silva"
         )
         about.present()
 

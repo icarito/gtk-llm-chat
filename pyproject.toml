@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gtk-llm-chat"
+version = "0.1.0"
+description = "Una interfaz GTK para chat con LLMs"
+readme = "README.md"
+authors = [{ name = "Sebastian Silva", email = "sebastian@fuentelibre.org" }]
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+keywords = ["gtk", "chat", "llm", "ai"]
+dependencies = [
+    "PyGObject>=3.42.0",
+    "python-llm",
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/tuusuario/gtk-llm-chat"
+Repository = "https://github.com/tuusuario/gtk-llm-chat.git"
+
+[project.scripts]
+gtk-llm-chat = "gtk_llm_chat:main"
+
+[tool.hatch.build]
+packages = ["gtk_llm_chat"] 
