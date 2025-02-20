@@ -4,13 +4,51 @@ from datetime import datetime
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, Gdk
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 class Message:
     def __init__(self, content, sender="user", timestamp=None):
         self.content = content
         self.sender = sender
         self.timestamp = timestamp or datetime.now()
+
+class MessageWidget(Gtk.Box):
+    """Widget para mostrar un mensaje individual"""
+    def __init__(self, message):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        
+        # Configurar el estilo según el remitente
+        is_user = message.sender == "user"
+        self.add_css_class('message')
+        self.add_css_class('user-message' if is_user else 'assistant-message')
+        
+        # Configurar alineación
+        self.set_halign(Gtk.Align.END if is_user else Gtk.Align.START)
+        self.set_margin_start(50 if is_user else 6)
+        self.set_margin_end(6 if is_user else 50)
+        self.set_margin_top(3)
+        self.set_margin_bottom(3)
+        
+        # Crear el contenedor del mensaje
+        message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        message_box.add_css_class('message-content')
+        
+        # Agregar el texto del mensaje
+        label = Gtk.Label(label=message.content)
+        label.set_wrap(True)
+        label.set_selectable(True)
+        label.set_xalign(0)
+        message_box.append(label)
+        
+        # Agregar timestamp
+        time_label = Gtk.Label(
+            label=message.timestamp.strftime("%H:%M"),
+            css_classes=['timestamp']
+        )
+        time_label.set_halign(Gtk.Align.END)
+        message_box.append(time_label)
+        
+        self.append(message_box)
 
 class LLMChatApplication(Adw.Application):
     def __init__(self):
@@ -85,6 +123,37 @@ class LLMChatWindow(Adw.ApplicationWindow):
         main_box.append(input_box)
         
         self.set_content(main_box)
+        
+        # Agregar cola de mensajes
+        self.message_queue = []
+        
+        # Agregar CSS provider
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data("""
+            .message { padding: 8px; }
+            .message-content { padding: 6px; }
+            
+            .user-message .message-content {
+                background-color: @blue_3;
+                border-radius: 12px 12px 0 12px;
+            }
+            
+            .assistant-message .message-content {
+                background-color: @card_bg_color;
+                border-radius: 12px 12px 12px 0;
+            }
+            
+            .timestamp {
+                font-size: 0.8em;
+                opacity: 0.7;
+            }
+        """.encode())
+        
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
     
     def _on_text_changed(self, buffer):
         lines = buffer.get_line_count()
@@ -105,10 +174,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return text.strip()
     
     def _add_message_to_queue(self, content, sender="user"):
-        """Agrega un nuevo mensaje a la cola"""
+        """Agrega un nuevo mensaje a la cola y lo muestra"""
         if content := self._sanitize_input(content):
             message = Message(content, sender)
             self.message_queue.append(message)
+            
+            # Crear y mostrar el widget del mensaje
+            message_widget = MessageWidget(message)
+            self.messages_box.append(message_widget)
+            
+            # Auto-scroll al último mensaje
+            self._scroll_to_bottom()
+            
             print(f"[{message.timestamp}] {message.sender}: {message.content}")
             return True
         return False
@@ -120,6 +197,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._add_message_to_queue(text):
             # Limpiar el buffer de entrada
             buffer.set_text("")
+    
+    def _scroll_to_bottom(self):
+        """Desplaza la vista al último mensaje"""
+        def scroll_after():
+            adj = self.messages_box.get_parent().get_vadjustment()
+            adj.set_value(adj.get_upper() - adj.get_page_size())
+        # Programar el scroll para después de que se actualice el layout
+        GLib.idle_add(scroll_after)
 
 def main():
     # Crear y ejecutar la aplicación
