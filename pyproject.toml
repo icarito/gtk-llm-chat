@@ -16,7 +16,7 @@ classifiers = [
 ]
 keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
-    "gtk4",
+    # "gtk4",  # Comentado para evitar el error
     "PyGObject>=3.42.0",
     "python-llm",
 ]
