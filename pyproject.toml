@@ -11,7 +11,7 @@ authors = [{ name = "Sebastian Silva", email = "sebastian@fuentelibre.org" }]
 license = { file = "LICENSE" }
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GPLv3 License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
 ]
 keywords = ["gtk", "chat", "llm", "ai"]
