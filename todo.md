@@ -1,12 +1,14 @@
 # LLM Frontend Project Checklist
 
 ## Phase 1: Application Foundation
-- [ ] Create Gtk.Application subclass with unique org.gtk.llm-chat ID
-- [ ] Implement multi-instance window management
-- [ ] Set up Libadwaita styling baseline
-- [ ] Create primary window template (600x700)
-- [ ] Verify window independence between instances
-- [ ] Test application launch from CLI with multiple instances
+- [x] Create Gtk.Application subclass with unique ID
+- [x] Implement window creation on activation
+- [x] Support multiple instances (new window per launch)
+- [x] Style with Libadwaita
+- [x] Create empty window titled "LLM Chat"
+- [x] Set default window size to 600x700
+- [x] Verify window independence between instances
+- [x] Test application launch from CLI with multiple instances
 
 ## Phase 2: Core UI Layout
 - [ ] Implement vertical box layout hierarchy
