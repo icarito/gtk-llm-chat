@@ -36,10 +36,11 @@
 - [x] Connect message submission to display system
 
 ## Phase 4: LLM Integration
-- [ ] Create LLMProcess controller class
-- [ ] Implement async subprocess execution
-- [ ] Set up stdout/stderr capture system
+- [x] Create LLMProcess controller class
+- [x] Implement async subprocess execution
+- [x] Set up stdout/stderr capture system
 - [ ] Develop CLI command builder with:
+  - [x] Basic command construction
   - [ ] Model parameter handling
   - [ ] System prompt injection
   - [ ] CID management
@@ -55,9 +56,9 @@
   - [ ] Styling hierarchy
   - [ ] Error message formatting
 - [ ] Implement error capture system for:
+  - [x] Subprocess failures
   - [ ] Invalid CIDs
   - [ ] Model errors
-  - [ ] Subprocess failures
 - [ ] Add status bar with:
   - [ ] Connection indicators
   - [ ] Loading animations
