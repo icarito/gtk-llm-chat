@@ -22,12 +22,12 @@
 - [x] Verify UI responsiveness at different window sizes
 
 ## Phase 3: Message Handling
-- [ ] Implement Message class with:
-  - [ ] Sender type (user/assistant/error)
-  - [ ] Content storage
-  - [ ] Timestamp tracking
-- [ ] Create message queue system
-- [ ] Add input sanitization pipeline
+- [x] Implement Message class with:
+  - [x] Sender type (user/assistant/error)
+  - [x] Content storage
+  - [x] Timestamp tracking
+- [x] Create message queue system
+- [x] Add input sanitization pipeline
 - [ ] Build MessageWidget components:
   - [ ] CSS styling classes
   - [ ] Alignment logic

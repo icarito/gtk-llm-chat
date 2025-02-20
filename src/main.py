@@ -1,9 +1,16 @@
 import sys
 import gi
+from datetime import datetime
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk
+
+class Message:
+    def __init__(self, content, sender="user", timestamp=None):
+        self.content = content
+        self.sender = sender
+        self.timestamp = timestamp or datetime.now()
 
 class LLMChatApplication(Adw.Application):
     def __init__(self):
@@ -93,11 +100,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return True
         return False
     
+    def _sanitize_input(self, text):
+        """Sanitiza el texto de entrada"""
+        return text.strip()
+    
+    def _add_message_to_queue(self, content, sender="user"):
+        """Agrega un nuevo mensaje a la cola"""
+        if content := self._sanitize_input(content):
+            message = Message(content, sender)
+            self.message_queue.append(message)
+            print(f"[{message.timestamp}] {message.sender}: {message.content}")
+            return True
+        return False
+    
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
-        if text.strip():
-            # TODO: Implementar el envío del mensaje
+        
+        if self._add_message_to_queue(text):
+            # Limpiar el buffer de entrada
             buffer.set_text("")
 
 def main():
