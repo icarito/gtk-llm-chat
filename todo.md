@@ -9,7 +9,7 @@
 - [x] Set default window size to 600x700
 - [x] Verify window independence between instances
 - [x] Test application launch from CLI with multiple instances
-- [ ] Center window on screen (Known GTK4 issue - window positioning unreliable)
+- [ ] ~~Center window on screen (Known GTK4 issue - window positioning unreliable)~~
 
 ## Phase 2: Core UI Layout
 - [x] Implement vertical box layout hierarchy
@@ -45,9 +45,9 @@
   - [x] Model parameter handling
   - [x] System prompt injection
   - [x] CID management
-- [ ] Create streaming response parser:
-  - [ ] Regex pattern matching
+- [x] Create streaming response parser:
   - [x] Response buffer system
+  - [x] Clean prompt character (">") from responses
 - [x] Add typing indicators
 - [x] Implement cancellation support
 - [x] Implement argument parsing:
@@ -69,37 +69,36 @@
   - [x] Subprocess failures
   - [x] Invalid CIDs
   - [x] Model errors
-- [ ] Add status bar with:
+- [x] Add status bar with:
   - [x] Connection indicators (via window title)
-  - [ ] Loading animations
-- [ ] Create retry mechanism for failed messages
-- [ ] Implement graceful degradation for critical errors
+  - [x] Model name display
+- [ ] Create retry mechanism for failed messages (need to see how that looks like on the cli)
+- [ ] Implement graceful degradation for critical errors (what errors?)
 
 ## Phase 6: Configuration & Persistence
-- [ ] Set up GSettings schema
-- [ ] Create model selector dropdown
-- [ ] Implement system prompt editor
+- [ ] Set up GSettings schema (what for?)
+- [ ] Create model selector dropdown (where?)
+- [ ] Implement system prompt editor (where?)
 - [ ] Add conversation ID tracking
-- [ ] Build SQLite storage system:
-  - [ ] Message schema design
+- [ ] ~~Build SQLite storage system:~~
+  - [ ] ~~Message schema design~~
   - [ ] CID-based conversation tracking
   - [x] Auto-save implementation (usando persistencia nativa del LLM)
-- [ ] Create history navigation controls
-- [ ] Add "New Conversation" button
+- [ ] Create history navigation controls (where?)
+- [ ] Add "New Conversation" button (where?)
 
 ## Phase 7: UI Polish
-- [ ] Implement CSS for:
-  - [ ] Dark/light mode support
-  - [ ] Message bubble styling
-  - [ ] Error state visuals
-- [ ] Apply GNOME HIG spacing rules
-- [ ] Add accessibility features:
+- [x] Implement CSS for:
+  - [x] Message bubble styling
+  - [x] Error state visuals
+- [x] Apply GNOME HIG spacing rules
+- [x] Add accessibility features:
   - [ ] Screen reader labels
-  - [ ] Keyboard navigation
-  - [ ] Contrast validation
+  - [] Keyboard navigation
+  - [x] Input focus on window open
 - [ ] Create loading animations
 - [ ] Implement keyboard shortcuts overlay
-- [ ] Verify touchpad gesture support
+- [ ] ~~Verify touchpad gesture support~~
 
 ## Testing & Validation
 - [ ] Create test suite for:

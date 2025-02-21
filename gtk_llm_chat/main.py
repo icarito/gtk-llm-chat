@@ -234,7 +234,7 @@ class LLMProcess:
                 text = bytes_read.get_data().decode('utf-8')
                 if text.strip() == ">":  # Prompt encontrado
                     if accumulated:  # Solo llamar callback si hay respuesta
-                        callback(accumulated.strip())
+                        callback(accumulated.strip().rstrip(">"))  # Eliminar ">"
                     self.is_running = False
                     return
 
@@ -271,6 +271,7 @@ class LLMChatApplication(Adw.Application):
         # Crear una nueva ventana para esta instancia
         window = LLMChatWindow(application=self, config=self.config)
         window.present()
+        window.input_text.grab_focus()  # Enfocar el cuadro de entrada
 
     def do_startup(self):
         # Llamar al método padre usando do_startup
