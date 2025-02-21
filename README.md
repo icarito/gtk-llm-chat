@@ -15,14 +15,17 @@ Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs).
 
 ## Instalación
 
-pip install gtk-llm
+```
+pipx install llm               # requerido por gtk-llm-chat
+pipx install gtk-llm-chat
+```
 
 ### Requisitos del Sistema
 
+- [llm](https://llm.datasette.io/en/stable/)
 - Python 3.8 o superior
 - GTK 4.0
 - libadwaita
-- python-llm
 
 En sistemas basados en Debian/Ubuntu:
 ```
