@@ -11,6 +11,7 @@ import threading
 from datetime import datetime
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
 from gtk_llm_chat.llm_process import Message, LLMProcess
+from gtk_llm_chat.markdown_view import MarkdownView
 
 
 class ErrorWidget(Gtk.Box):
@@ -54,26 +55,35 @@ class MessageWidget(Gtk.Box):
         self.add_css_class('message')
         self.add_css_class('user-message' if is_user else 'assistant-message')
 
-        # Configurar alineación
-        self.set_halign(Gtk.Align.END if is_user else Gtk.Align.START)
-        self.set_margin_start(50 if is_user else 6)
-        self.set_margin_end(6 if is_user else 50)
-        self.set_margin_top(3)
-        self.set_margin_bottom(3)
-
+        # Crear un contenedor con margen para centrar el contenido
+        margin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        margin_box.set_hexpand(True)
+        
         # Crear el contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         message_box.add_css_class('message-content')
+        message_box.set_hexpand(True)
+        
+        # Agregar espaciadores flexibles a los lados
+        if is_user:
+            margin_box.append(Gtk.Box(hexpand=True))  # Espaciador izquierdo
+            margin_box.append(message_box)
+            margin_box.append(Gtk.Box(hexpand=False))  # Espaciador derecho pequeño
+        else:
+            margin_box.append(Gtk.Box(hexpand=False))  # Espaciador izquierdo pequeño
+            margin_box.append(message_box)
+            margin_box.append(Gtk.Box(hexpand=True))  # Espaciador derecho
 
         # Quitar el prefijo "user:" si existe
         content = message.content
         if is_user and content.startswith("user:"):
             content = content[5:].strip()
-        label = Gtk.Label(label=content)
-        label.set_wrap(True)
-        label.set_selectable(True)
-        label.set_xalign(0)
-        message_box.append(label)
+            
+        # Usar MarkdownView para el contenido
+        self.content_view = MarkdownView()
+        self.content_view.set_hexpand(True)
+        self.content_view.set_markdown(content)
+        message_box.append(self.content_view)
 
         # Agregar timestamp
         time_label = Gtk.Label(
@@ -83,14 +93,15 @@ class MessageWidget(Gtk.Box):
         time_label.set_halign(Gtk.Align.END)
         message_box.append(time_label)
 
-        self.append(message_box)
-
-        # Guardar referencia al label para actualizaciones
-        self.content_label = label
+        self.append(margin_box)
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
-        self.content_label.set_text(new_content)
+        self.content_view.set_markdown(new_content)
+        # Asegurar que se haga scroll al actualizar el contenido
+        window = self.get_root()
+        if isinstance(window, LLMChatWindow):
+            window._scroll_to_bottom()
 
 
 def parse_args(argv):
@@ -313,8 +324,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
-            .message { padding: 8px; }
-            .message-content { padding: 6px; }
+            .message { 
+                padding: 8px;
+            }
+            
+            .message-content { 
+                padding: 6px;
+                min-width: 400px;
+            }
             
             .user-message .message-content {
                 background-color: @blue_3;
@@ -343,6 +360,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
             
             .error-content {
                 padding: 3px;
+            }
+            
+            textview {
+                background: none;
+                color: inherit;
+                padding: 3px;
+            }
+            
+            textview text {
+                background: none;
+            }
+            
+            .user-message textview text {
+                color: white;
+            }
+            
+            .user-message textview text selection {
+                background-color: rgba(255,255,255,0.3);
+                color: white;
             }
         """.encode())
 
@@ -476,10 +512,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _scroll_to_bottom(self):
         """Desplaza la vista al último mensaje"""
         def scroll_after():
-            adj = self.messages_box.get_parent().get_vadjustment()
+            scroll = self.messages_box.get_parent()
+            adj = scroll.get_vadjustment()
             adj.set_value(adj.get_upper() - adj.get_page_size())
+            return False  # Importante para que no se repita
         # Programar el scroll para después de que se actualice el layout
-        GLib.idle_add(scroll_after)
+        GLib.timeout_add(50, scroll_after)  # Pequeño delay para asegurar que el layout está actualizado
 
     def display_message(self, content, is_user=True):
         """Muestra un mensaje en la ventana de chat"""

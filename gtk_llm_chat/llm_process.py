@@ -135,18 +135,23 @@ class LLMProcess:
             bytes_read = stdout.read_bytes_finish(result)
             if bytes_read:
                 text = bytes_read.get_data().decode('utf-8')
-                if text.strip() == ">":  # Prompt encontrado
-                    if accumulated:  # Solo llamar callback si hay respuesta
-                        callback(accumulated.strip().rstrip(">"))  # Eliminar ">"
-                    self.is_running = False
-                    return
-
                 accumulated += text
-                if accumulated.strip():  # Solo actualizar si hay contenido
+                
+                # Solo actualizar si hay contenido
+                if accumulated.strip():
+                    # Si este chunk es solo '>' y no hay más datos, es el prompt final
+                    if text.strip() == ">":
+                        final_text = accumulated.strip()[:-1].strip()  # Quitar el último '>'
+                        if final_text:
+                            callback(final_text)
+                        self.is_running = False
+                        return
                     callback(accumulated.strip())
+                
                 self._read_response(callback, accumulated)
             else:
-                if accumulated.strip():  # Solo llamar callback si hay respuesta
+                # No hay más datos para leer
+                if accumulated.strip():
                     callback(accumulated.strip())
                 self.is_running = False
 
