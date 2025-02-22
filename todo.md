@@ -45,6 +45,9 @@
   - [x] Model parameter handling
   - [x] System prompt injection
   - [x] CID management
+  - [x] Template support (-t)
+  - [x] Template parameters (-p)
+  - [x] Model options (-o)
 - [x] Create streaming response parser:
   - [x] Response buffer system
   - [x] Clean prompt character (">") from responses
@@ -56,6 +59,9 @@
     - [x] -s: System prompt
     - [x] -m: Model selection
     - [x] -c: Continue last conversation
+    - [x] -t: Template selection
+    - [x] -p: Template parameters
+    - [x] -o: Model options
   - [x] Create config dictionary from parsed args
   - [x] Pass config to LLMProcess constructor
   - [x] Update LLMProcess to use config for llm chat command
@@ -84,6 +90,7 @@
   - [ ] ~~Message schema design~~
   - [ ] CID-based conversation tracking
   - [x] Auto-save implementation (usando persistencia nativa del LLM)
+- [x] Template support
 - [ ] Create history navigation controls (where?)
 - [ ] Add "New Conversation" button (where?)
 
@@ -94,7 +101,11 @@
 - [x] Apply GNOME HIG spacing rules
 - [x] Add accessibility features:
   - [ ] Screen reader labels
-  - [] Keyboard navigation
+  - [x] Keyboard navigation
+    - [x] Enter to send
+    - [x] Shift+Enter for newline
+    - [ ] ~~Ctrl+C to cancel~~ (unsupported by llm)
+    - [x] Escape to minimize
   - [x] Input focus on window open
 - [ ] Create loading animations
 - [ ] Implement keyboard shortcuts overlay
