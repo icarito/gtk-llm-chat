@@ -1,6 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk, Pango
+import markdown_it
 
 class MarkdownView(Gtk.TextView):
     """TextView personalizado que renderiza texto con formato markdown básico"""
@@ -12,7 +13,7 @@ class MarkdownView(Gtk.TextView):
         self.set_cursor_visible(False)
         
         # Configurar tags para formato
-        self.buffer = self.get_buffer()
+        self.buffer = Gtk.TextBuffer()
         self.buffer.create_tag("bold", weight=Pango.Weight.BOLD)
         self.buffer.create_tag("italic", style=Pango.Style.ITALIC)
         self.buffer.create_tag("code", family="monospace", background="rgba(0,0,0,0.1)")
@@ -25,6 +26,7 @@ class MarkdownView(Gtk.TextView):
         self.buffer.create_tag("ul", left_margin=20)
         self.buffer.create_tag("ol", left_margin=20)
         self.buffer.create_tag("strikethrough", strikethrough=True)
+        self.set_buffer(self.buffer)
         
         # Controlador para links
         click_controller = Gtk.GestureClick()
@@ -47,118 +49,98 @@ class MarkdownView(Gtk.TextView):
                 Gtk.show_uri(None, url, Gdk.CURRENT_TIME)
                 break
 
-    def set_markdown(self, text):
+    def set_markdown(self, text, tag_name):
         """Renderiza texto markdown"""
-        self.buffer.set_text("")
         self.links.clear()
         
-        # Procesar el texto línea por línea
-        current_pos = self.buffer.get_start_iter()
+        md = markdown_it.MarkdownIt()
+        tokens = md.parse(text)
         
-        lines = text.split('\n')
-        in_code_block = False
-        code_block_text = []
+        start_mark = None
         
-        for line in lines:
-            if line.startswith('```'):
-                in_code_block = not in_code_block
-                continue
-
-            if in_code_block:
-                self.buffer.insert(current_pos, line + '\n')
-                continue
-
-            # Headers
-            if line.startswith('# '):
-                self.buffer.insert_with_tags_by_name(current_pos, line[2:], "h1")
-                self.buffer.insert(current_pos, '\n')
-                continue
-            elif line.startswith('## '):
-                self.buffer.insert_with_tags_by_name(current_pos, line[3:], "h2")
-                self.buffer.insert(current_pos, '\n')
-                continue
-            elif line.startswith('### '):
-                self.buffer.insert_with_tags_by_name(current_pos, line[4:], "h3")
-                self.buffer.insert(current_pos, '\n')
-                continue
-            elif line.startswith('#### '):
-                self.buffer.insert_with_tags_by_name(current_pos, line[5:], "h4")
-                self.buffer.insert(current_pos, '\n')
-                continue
-
-            # Lists
-            if line.startswith('* ') or line.startswith('- '):
-                self.buffer.insert_with_tags_by_name(current_pos, line, "ul")
-                self.buffer.insert(current_pos, '\n')
-                continue
-            elif line.startswith(('1. ', '2. ', '3. ', '4. ', '5. ', '6. ', '7. ', '8. ', '9. ')):
-                self.buffer.insert_with_tags_by_name(current_pos, line, "ol")
-                self.buffer.insert(current_pos, '\n')
-                continue
-
-            # Procesar línea normal
-            remaining_text = line
-            while remaining_text:
-                # Buscar el próximo marcador de formato
-                markers = {
-                    '**': ('bold', 2),
-                    '*': ('italic', 1),
-                    '`': ('code', 1),
-                    '[': ('link', 1),
-                    '***': ('bold_italic', 3),
-                    '~~': ('strikethrough', 2)
-                }
-
-                next_marker_pos = float('inf')
-                next_marker = None
-
-                for marker, (tag, length) in markers.items():
-                    pos = remaining_text.find(marker)
-                    if pos != -1 and pos < next_marker_pos:
-                        next_marker_pos = pos
-                        next_marker = (marker, tag, length)
-
-                if next_marker is None or next_marker_pos == float('inf'):
-                    # No hay más marcadores, insertar el texto restante
-                    self.buffer.insert(current_pos, remaining_text)
-                    break
-
-                # Insertar texto antes del marcador
-                if next_marker_pos > 0:
-                    self.buffer.insert(current_pos, remaining_text[:next_marker_pos])
-
-                marker, tag, length = next_marker
-                remaining_text = remaining_text[next_marker_pos + length:]
-
-                # Procesar el formato
-                if marker == '[':
-                    # Procesar link [texto](url)
-                    link_end = remaining_text.find(']')
-                    if link_end != -1 and remaining_text[link_end:].startswith(']('):
-                        url_start = link_end + 2
-                        url_end = remaining_text.find(')', url_start)
-                        if url_end != -1:
-                            link_text = remaining_text[:link_end]
-                            url = remaining_text[url_start:url_end]
-
-                            start_mark = self.buffer.create_mark(None, current_pos, True)
-                            self.buffer.insert_with_tags_by_name(current_pos, link_text, "link")
-                            end_mark = self.buffer.create_mark(None, current_pos, True)
-
-                            self.links[url] = (start_mark, end_mark)
-
-                            remaining_text = remaining_text[url_end + 1:]
-                            continue
-
-                # Buscar el cierre del formato
-                end_pos = remaining_text.find(marker)
-                if end_pos != -1:
-                    formatted_text = remaining_text[:end_pos]
-                    self.buffer.insert_with_tags_by_name(current_pos, formatted_text, tag)
-                    remaining_text = remaining_text[end_pos + length:]
-                else:
-                    # No se encontró el cierre, tratar como texto normal
-                    self.buffer.insert(current_pos, marker)
-
-            # Agregar salto de línea al final de cada línea
-            self.buffer.insert(current_pos, '\n')
+        for token in tokens:
+            print(f"Token type: {token.type}, content: {token.content}")
+            
+            if token.type == 'paragraph_open':
+                pass
+            elif token.type == 'paragraph_close':
+                self.buffer.insert_at_cursor('\n', -1)
+            elif token.type == 'inline':
+                self.buffer.insert_at_cursor(token.content, -1)
+            elif token.type == 'strong_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 'strong_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    self.buffer.apply_tag_by_name("bold", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
+            elif token.type == 'em_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 'em_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    self.buffer.apply_tag_by_name("italic", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
+            elif token.type == 'code_inline':
+                start_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                self.buffer.insert_at_cursor(token.content, -1)
+                end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                self.buffer.apply_tag_by_name("code", start_iter, end_iter)
+            elif token.type == 'link_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+                self.links[token.attrs['href']] = start_mark
+            elif token.type == 'link_close':
+                url = next((url for url, start in self.links.items() if start == start_mark), None)
+                if url:
+                    end_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    end_iter = self.buffer.get_iter_at_mark(end_mark)
+                    self.buffer.apply_tag_by_name("link", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    del self.links[url]
+                    start_mark = None
+            elif token.type == 'heading_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 'heading_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    level = token.tag[1]  # Extract heading level (1-6)
+                    tag_name = f"h{level}"
+                    self.buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
+            elif token.type == 'list_item_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 'list_item_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    if token.tag == 'ul':
+                        self.buffer.apply_tag_by_name("ul", start_iter, end_iter)
+                    elif token.tag == 'ol':
+                        self.buffer.apply_tag_by_name("ol", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
+            elif token.type == 's_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 's_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    self.buffer.apply_tag_by_name("strikethrough", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
+            elif token.type == 'strong_em_open' or token.type == 'em_strong_open':
+                start_mark = self.buffer.create_mark(None, self.buffer.get_iter_at_mark(self.buffer.get_insert()), True)
+            elif token.type == 'strong_em_close' or token.type == 'em_strong_close':
+                if start_mark:
+                    end_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+                    start_iter = self.buffer.get_iter_at_mark(start_mark)
+                    self.buffer.apply_tag_by_name("bold_italic", start_iter, end_iter)
+                    self.buffer.delete_mark(start_mark)
+                    start_mark = None
