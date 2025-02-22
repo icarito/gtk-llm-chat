@@ -65,8 +65,11 @@ class MessageWidget(Gtk.Box):
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         message_box.add_css_class('message-content')
 
-        # Agregar el texto del mensaje
-        label = Gtk.Label(label=message.content)
+        # Quitar el prefijo "user:" si existe
+        content = message.content
+        if is_user and content.startswith("user:"):
+            content = content[5:].strip()
+        label = Gtk.Label(label=content)
         label.set_wrap(True)
         label.set_selectable(True)
         label.set_xalign(0)
@@ -128,12 +131,43 @@ class LLMChatApplication(Adw.Application):
             flags=Gio.ApplicationFlags.FLAGS_NONE
         )
         self.config = None
+        self.chat_history = None
+        
+        # Agregar manejador de señales
+        import signal
+        signal.signal(signal.SIGINT, self._handle_sigint)
+
+    def _handle_sigint(self, signum, frame):
+        """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
+        print("\nCerrando aplicación...")
+        self.quit()
 
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
         window = LLMChatWindow(application=self, config=self.config)
         window.present()
         window.input_text.grab_focus()  # Enfocar el cuadro de entrada
+
+        if self.config and self.config.get('cid'):
+            from gtk_llm_chat.db_operations import ChatHistory
+            self.chat_history = ChatHistory()
+            try:
+                history = self.chat_history.get_conversation_history(self.config['cid'])
+                # Aquí deberías implementar la lógica para mostrar el historial
+                # en tu interfaz gráfica
+                for entry in history:
+                    # Asumiendo que tienes un método para mostrar mensajes
+                    window.display_message(
+                        entry['prompt'],
+                        is_user=True
+                    )
+                    window.display_message(
+                        entry['response'],
+                        is_user=False
+                    )
+            except ValueError as e:
+                print(f"Error: {e}")
+                return
 
     def do_startup(self):
         # Llamar al método padre usando do_startup
@@ -157,10 +191,28 @@ class LLMChatApplication(Adw.Application):
         )
         about.present()
 
+    def do_shutdown(self):
+        """Limpia recursos antes de cerrar la aplicación"""
+        print("Cerrando conexiones...")
+        if self.chat_history:
+            self.chat_history.close()
+        
+        # Obtener la ventana activa y cerrar el LLM si está corriendo
+        window = self.get_active_window()
+        if window and hasattr(window, 'llm'):
+            if window.llm.is_running:
+                window.llm.cancel()
+        
+        # Llamar al método padre
+        Adw.Application.do_shutdown(self)
+
 
 class LLMChatWindow(Adw.ApplicationWindow):
     def __init__(self, config=None, **kwargs):
         super().__init__(**kwargs)
+        
+        # Conectar señal de cierre de ventana
+        self.connect('close-request', self._on_close_request)
         
         # Asegurar que config no sea None
         self.config = config or {}
@@ -428,6 +480,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
             adj.set_value(adj.get_upper() - adj.get_page_size())
         # Programar el scroll para después de que se actualice el layout
         GLib.idle_add(scroll_after)
+
+    def display_message(self, content, is_user=True):
+        """Muestra un mensaje en la ventana de chat"""
+        message = self.Message(content, "user" if is_user else "assistant")
+        message_widget = MessageWidget(message)
+        self.messages_box.append(message_widget)
+        self._scroll_to_bottom()
+
+    def _on_close_request(self, window):
+        """Maneja el cierre de la ventana de manera elegante"""
+        if self.llm.is_running:
+            self.llm.cancel()
+        return False  # Permite que la ventana se cierre
 
 
 def main():
