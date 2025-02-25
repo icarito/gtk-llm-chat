@@ -58,7 +58,7 @@ class LLMProcess:
                     print(f"Ejecutando comando: {' '.join(cmd)}")
                     self.process = self.launcher.spawnv(cmd)
                 except GLib.Error as e:
-                    callback(None, f"Error al iniciar LLM: {e.message}")
+                    callback(None, f"Error al iniciar LLM: {str(e)}")
                     return
                 
                 # Configurar streams
@@ -142,7 +142,7 @@ class LLMProcess:
                     # Si este chunk es solo '>' y no hay más datos, es el prompt final
                     if text.strip() == ">":
                         final_text = accumulated.strip()[:-1].strip()  # Quitar el último '>'
-                        if final_text:
+                        if final_text and final_text.endswith(">"):
                             callback(final_text)
                         self.is_running = False
                         return
@@ -164,4 +164,4 @@ class LLMProcess:
         """Cancela la generación actual"""
         self.is_running = False
         if self.process:
-            self.process.force_exit() 
+            self.process.force_exit()
