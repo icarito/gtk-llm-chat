@@ -14,6 +14,13 @@ class MarkdownView(Gtk.TextView):
         self.md = MarkdownIt()
         self.bold_tag = self.buffer.create_tag("bold", weight=Pango.Weight.BOLD)
         self.italic_tag = self.buffer.create_tag("italic", style=Pango.Style.ITALIC)
+        self.heading_tags = {
+            '1': self.buffer.create_tag("h1", weight=Pango.Weight.BOLD, size=24 * Pango.SCALE),
+            '2': self.buffer.create_tag("h2", weight=Pango.Weight.BOLD, size=20 * Pango.SCALE),
+            '3': self.buffer.create_tag("h3", weight=Pango.Weight.BOLD, size=16 * Pango.SCALE),
+            '4': self.buffer.create_tag("h4", weight=Pango.Weight.BOLD, size=12 * Pango.SCALE),
+            '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD, size=10 * Pango.SCALE),
+        }
         self.current_tags = []
 
     def set_markdown(self, text):
@@ -47,8 +54,12 @@ class MarkdownView(Gtk.TextView):
             elif token.type == 'paragraph_close':
                 self.insert_text("\n")
             elif token.type == 'heading_open':
-                pass # ignore the title formatting
+                level = token.tag[1]
+                if level in self.heading_tags:
+                    self.apply_tag(self.heading_tags[level])
             elif token.type == 'heading_close':
+                level = token.tag[1]
+                self.remove_tag(self.heading_tags[level])
                 self.insert_text("\n")
             elif token.type == 'inline':
                 for child in token.children:
@@ -92,7 +103,7 @@ if __name__ == "__main__":
         win.set_title("Markdown TextView")
         win.set_default_size(400, 300)
 
-        markdown_text = "# Título\nEste es un **texto en negrita** y _cursiva_."
+        markdown_text = "# Título 1\n## Título 2\n### Título 3\nEste es un **texto en negrita** y _cursiva_."
         
         markdown_view = MarkdownView()
         markdown_view.render_markdown(markdown_text)
@@ -105,4 +116,3 @@ if __name__ == "__main__":
 
     app.connect('activate', on_activate)
     app.run()
-
