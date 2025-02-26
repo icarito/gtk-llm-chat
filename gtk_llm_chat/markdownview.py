@@ -24,7 +24,9 @@ class MarkdownView(Gtk.TextView):
             '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD, size=10 * Pango.SCALE),
         }
         self.code_tag = self.buffer.create_tag("code", family="monospace", background="gray")
-        
+        # Tag para código en línea (diferente del bloque de código)
+        self.code_inline_tag = self.buffer.create_tag("code_inline", family="monospace", background="#444444")
+
         # Tags para listas (con soporte para anidación)
         self.list_tags = {
             1: self.buffer.create_tag("list_1", left_margin=30),
@@ -100,6 +102,12 @@ class MarkdownView(Gtk.TextView):
                         self.apply_tag(self.bold_tag)
                     elif child.type == 'strong_close':
                         self.remove_tag(self.bold_tag)
+                    # Soporte para código en línea
+                    elif child.type == 'code_inline':
+                        # Para código en línea, aplicamos el tag, insertamos el contenido y quitamos el tag
+                        self.apply_tag(self.code_inline_tag)
+                        self.insert_text(child.content)
+                        self.remove_tag(self.code_inline_tag)
             # Manejo de listas con viñetas
             elif token.type == 'bullet_list_open':
                 # Incrementamos el nivel de lista y aplicamos el tag de lista
@@ -148,8 +156,10 @@ class MarkdownView(Gtk.TextView):
                         self.insert_text("▪ ")
             elif token.type == 'list_item_close':
                 self.in_list_item = False
+            elif token.type == 'html_block':
+                pass
             else:
-                print ("Unknown markdown token:", token)
+                print ("Unknown markdown token:", token.type)
 
     def insert_text(self, text):
         # Insertar texto con las etiquetas actuales
@@ -183,6 +193,7 @@ if __name__ == "__main__":
         markdown_text = "# Título 1\n## Título 2\n### Título 3\nEste es un **texto en negrita** y _cursiva_."
         markdown_text += "\n```\n"
         markdown_text += "Este es un bloque de código.\n"
+        markdown_text += "var x = 10;\n"
         markdown_text += "```\n"
         markdown_text += "\nLista de ejemplo:\n"
         markdown_text += "* Elemento 1\n  * Subelemento 1.1\n  * Subelemento 1.2\n* Elemento 2\n* Elemento 3\n"
@@ -190,6 +201,8 @@ if __name__ == "__main__":
         markdown_text += "1. Primer elemento\n"
         markdown_text += "2. Segundo elemento\n"
         markdown_text += "   1. Subelemento 2.1\n"
+        markdown_text += "\nTexto con `código en línea` y emoji 😊\n"
+        markdown_text += "hola `amigo` 😊\n"
 
         
         markdown_view = MarkdownView()

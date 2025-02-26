@@ -537,7 +537,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         message = self.Message(content, "user" if is_user else "assistant")
         message_widget = MessageWidget(message)
         self.messages_box.append(message_widget)
-        self._scroll_to_bottom()
+        GLib.idle_add(self._scroll_to_bottom)
 
     def _on_close_request(self, window):
         """Maneja el cierre de la ventana de manera elegante"""
