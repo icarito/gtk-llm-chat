@@ -11,7 +11,7 @@ import threading
 from datetime import datetime
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
 from gtk_llm_chat.llm_process import Message, LLMProcess
-from gtk_llm_chat.markdown_view import MarkdownView
+from gtk_llm_chat.markdownview import MarkdownView
 
 
 class ErrorWidget(Gtk.Box):
@@ -480,7 +480,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _handle_initial_response(self, model_name):
         """Maneja la respuesta inicial del LLM"""
-        print("Ejecutando _handle_initial_response en main.py")
         if model_name:
             self.title_widget.set_subtitle(model_name)
         else:
