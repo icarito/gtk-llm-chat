@@ -4,17 +4,20 @@ from datetime import datetime
 
 from gi.repository import GObject
 
+
 class Message:
     def __init__(self, content, sender="user", timestamp=None):
         self.content = content
         self.sender = sender
         self.timestamp = timestamp or datetime.now()
 
+
 class LLMProcess(GObject.Object):
     __gsignals__ = {
         'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'model-name': (GObject.SignalFlags.RUN_LAST, None, (str,))
     }
+
     def __init__(self, config=None):
         GObject.Object.__init__(self)
         self.process = None
@@ -28,34 +31,34 @@ class LLMProcess(GObject.Object):
             if not self.process:
                 print("Iniciando proceso LLM...")
                 self.launcher = Gio.SubprocessLauncher.new(
-                    Gio.SubprocessFlags.STDIN_PIPE | 
+                    Gio.SubprocessFlags.STDIN_PIPE |
                     Gio.SubprocessFlags.STDOUT_PIPE |
                     Gio.SubprocessFlags.STDERR_PIPE
                 )
-                
+
                 # Construir comando con argumentos
                 cmd = ['llm', 'chat']
-                
+
                 # Agregar argumentos básicos
                 if self.config.get('cid'):
                     cmd.extend(['--cid', self.config['cid']])
                 elif self.config.get('continue_last'):
                     cmd.append('-c')
-                
+
                 if self.config.get('system'):
                     cmd.extend(['-s', self.config['system']])
-                
+
                 if self.config.get('model'):
                     cmd.extend(['-m', self.config['model']])
-                
+
                 # Agregar template y parámetros
                 if self.config.get('template'):
                     cmd.extend(['-t', self.config['template']])
-                
+
                 if self.config.get('params'):
                     for param in self.config['params']:
                         cmd.extend(['-p', param[0], param[1]])
-                        
+
                 # Agregar opciones del modelo
                 if self.config.get('options'):
                     for opt in self.config['options']:
@@ -67,11 +70,11 @@ class LLMProcess(GObject.Object):
                 except GLib.Error as e:
                     print(f"Error al iniciar LLM: {str(e)}")
                     return
-                
+
                 # Configurar streams
                 self.stdin = self.process.get_stdin_pipe()
                 self.stdout = self.process.get_stdout_pipe()
-                
+
                 # Leer mensaje inicial
                 self.stdout.read_bytes_async(
                     4096,
@@ -90,7 +93,7 @@ class LLMProcess(GObject.Object):
 
         try:
             self.is_running = True
-            
+
             # Enviar solo el último mensaje
             if messages:
                 stdin_data = f"{messages[-1].sender}: {messages[-1].content}\n"
@@ -113,13 +116,9 @@ class LLMProcess(GObject.Object):
                     model_name = text.split("Chatting with")[
                         1].split("\n")[0].strip()
                     print(f"Usando modelo: {model_name}")
-                    if "> " in text:
-                        end_of_model_name = text.find("\n")
-                        text = text[end_of_model_name + 1:].strip()
-                        self.emit('model-name', model_name)
-                    else:
-                        print("No se encontró '> ' en la salida inicial")
-
+                    end_of_model_name = text.find("\n")
+                    text = text[end_of_model_name + 1:].strip()
+                    self.emit('model-name', model_name)
                 else:
                     self._read_response(self._emit_response)
                     print(
@@ -153,12 +152,13 @@ class LLMProcess(GObject.Object):
             if bytes_read:
                 text = bytes_read.get_data().decode('utf-8')
                 accumulated += text
-                
+
                 # Solo actualizar si hay contenido
                 if accumulated.strip():
                     # Si este chunk es solo '>' y no hay más datos, es el prompt final
                     if text.strip() == ">" and accumulated.endswith("\n> "):
-                        final_text = accumulated.strip()[:-1].strip()  # Quitar el último '>'
+                        # Quitar el último '>'
+                        final_text = accumulated.strip()[:-1].strip()
                         if final_text:
                             callback(final_text)
                             print(text)
@@ -166,9 +166,9 @@ class LLMProcess(GObject.Object):
                         return
                     callback(accumulated.strip())
                     print(text, end="")
-                    #print(f"Emitiendo respuesta: {accumulated.strip()}")
+                    # print(f"Emitiendo respuesta: {accumulated.strip()}")
                     self.emit('response', accumulated.strip())
-                
+
                 self._read_response(callback, accumulated)
             else:
                 # No hay más datos para leer
@@ -185,5 +185,6 @@ class LLMProcess(GObject.Object):
         self.is_running = False
         if self.process:
             self.process.force_exit()
+
 
 GObject.type_register(LLMProcess)
