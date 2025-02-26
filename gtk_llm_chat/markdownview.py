@@ -1,9 +1,9 @@
+from markdown_it.token import Token
+from markdown_it import MarkdownIt
+import re
+from gi.repository import Gtk, Pango, Gdk
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Pango, Gdk
-import re
-from markdown_it import MarkdownIt
-from markdown_it.token import Token
 
 
 class MarkdownView(Gtk.TextView):
@@ -14,9 +14,11 @@ class MarkdownView(Gtk.TextView):
         self.set_cursor_visible(False)
         self.buffer = self.get_buffer()
         self.md = MarkdownIt()
-        self.bold_tag = self.buffer.create_tag("bold", weight=Pango.Weight.BOLD)
+        self.bold_tag = self.buffer.create_tag(
+            "bold", weight=Pango.Weight.BOLD)
 
-        self.italic_tag = self.buffer.create_tag("italic", style=Pango.Style.ITALIC)
+        self.italic_tag = self.buffer.create_tag(
+            "italic", style=Pango.Style.ITALIC)
         self.heading_tags = {
             '1': self.buffer.create_tag("h1", weight=Pango.Weight.BOLD, size=24 * Pango.SCALE),
             '2': self.buffer.create_tag("h2", weight=Pango.Weight.BOLD, size=20 * Pango.SCALE),
@@ -24,14 +26,16 @@ class MarkdownView(Gtk.TextView):
             '4': self.buffer.create_tag("h4", weight=Pango.Weight.BOLD, size=12 * Pango.SCALE),
             '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD, size=10 * Pango.SCALE),
         }
-        self.code_tag = self.buffer.create_tag("code", family="monospace", background="gray")
+        self.code_tag = self.buffer.create_tag(
+            "code", family="monospace", background="gray")
         # Tag para código en línea (diferente del bloque de código)
-        self.code_inline_tag = self.buffer.create_tag("code_inline", family="monospace", background="#444444")
-        
+        self.code_inline_tag = self.buffer.create_tag(
+            "code_inline", family="monospace", background="#444444")
+
         # Tag para <think> o <thinking>
         self.thinking_tag = self.buffer.create_tag(
             "thinking", style=Pango.Style.ITALIC, scale=0.8,
-            left_margin=20, right_margin=20 
+            left_margin=20, right_margin=20
         )
 
         # Tags para listas (con soporte para anidación)
@@ -40,7 +44,7 @@ class MarkdownView(Gtk.TextView):
             2: self.buffer.create_tag("list_2", left_margin=50),
             3: self.buffer.create_tag("list_3", left_margin=70),
         }
-        
+
         # Variable para rastrear si estamos dentro de un elemento de lista
         self.in_list_item = False
         self.in_ordered_list = False
@@ -61,45 +65,46 @@ class MarkdownView(Gtk.TextView):
         # Patrones para buscar <think> o <thinking>
         think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
         thinking_pattern = re.compile(r'<thinking>(.*?)</thinking>', re.DOTALL)
-        
+
         # Combinar los resultados de ambos patrones
         all_matches = []
         for pattern in [think_pattern, thinking_pattern]:
             for match in pattern.finditer(text):
-                all_matches.append((match.start(), match.end(), match.group(1)))
-        
+                all_matches.append(
+                    (match.start(), match.end(), match.group(1)))
+
         # Ordenar por posición inicial
         all_matches.sort(key=lambda x: x[0])
-        
+
         last_end = 0
         for start, end, content in all_matches:
             # Agregar texto normal antes del pensamiento
             if start > last_end:
                 fragments.append((text[last_end:start], False))
-            
+
             # Agregar pensamiento
             fragments.append((content, True))
             last_end = end
-        
+
         # Agregar texto restante después del último pensamiento
         if last_end < len(text):
             fragments.append((text[last_end:], False))
-        
+
         return fragments
 
     def render_markdown(self, text):
         # Limpiar el buffer antes de empezar
         self.buffer.set_text("", -1)
-        
+
         # Procesar etiquetas de pensamiento
         fragments = self.process_thinking_tags(text)
-        
+
         for fragment_text, is_thinking in fragments:
             if is_thinking:
                 self.insert_thinking(fragment_text)
             else:
                 self.render_markdown_fragment(fragment_text)
-            
+
     def render_markdown_fragment(self, text):
         # Parsear Markdown con markdown-it-py
         tokens = self.md.parse(text)
@@ -122,7 +127,7 @@ class MarkdownView(Gtk.TextView):
             elif token.type == 'text':
                 self.insert_text(token.content)
             elif token.type == 'paragraph_open':
-                pass
+                self.insert_text("\n")
             elif token.type == 'paragraph_close':
                 self.insert_text("\n")
 
@@ -156,7 +161,8 @@ class MarkdownView(Gtk.TextView):
                         self.remove_tag(self.bold_tag)
                     # Soporte para código en línea
                     elif child.type == 'code_inline':
-                        # Para código en línea, aplicamos el tag, insertamos el contenido y quitamos el tag
+                        # Para código en línea, aplicamos el tag,
+                        # insertamos el contenido y quitamos el tag
                         self.apply_tag(self.code_inline_tag)
                         self.insert_text(child.content)
                         self.remove_tag(self.code_inline_tag)
@@ -211,7 +217,7 @@ class MarkdownView(Gtk.TextView):
             elif token.type == 'html_block':
                 pass
             else:
-                print ("Unknown markdown token:", token.type)
+                print("Unknown markdown token:", token.type)
 
     def insert_text(self, text):
         # Insertar texto con las etiquetas actuales
@@ -221,7 +227,7 @@ class MarkdownView(Gtk.TextView):
             self.buffer.insert_with_tags(iter, text, *tags)
         else:
             self.buffer.insert(iter, text)
-    
+
     def insert_thinking(self, text):
         """
         Inserta texto de pensamiento con el formato especial
@@ -265,7 +271,6 @@ if __name__ == "__main__":
         markdown_text += "\nTexto con `código en línea` y emoji 😊\n"
         markdown_text += "hola `amigo` 😊\n"
 
-        
         markdown_view = MarkdownView()
         markdown_view.render_markdown(markdown_text)
 

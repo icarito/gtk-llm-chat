@@ -1,11 +1,15 @@
-import gi
-from gi.repository import GLib, Gio
-from datetime import datetime
+"""
+Everything related to talking to llm as a subprocess.
+"""
 
-from gi.repository import GObject
+from datetime import datetime
+from gi.repository import GLib, Gio, GObject
 
 
 class Message:
+    """
+    Representa un mensaje
+    """
     def __init__(self, content, sender="user", timestamp=None):
         self.content = content
         self.sender = sender
@@ -13,6 +17,9 @@ class Message:
 
 
 class LLMProcess(GObject.Object):
+    """
+    Maneja el subproceso
+    """
     __gsignals__ = {
         'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'model-name': (GObject.SignalFlags.RUN_LAST, None, (str,))

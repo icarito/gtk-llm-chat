@@ -1,46 +1,43 @@
+"""
+Gtk LLM Chat - A frontend for `llm`
+"""
 import sys
-import gi
 import argparse
-
+import gi
+from gtk_llm_chat.markdownview import MarkdownView
+from gtk_llm_chat.llm_process import Message, LLMProcess
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-
-import asyncio
-import subprocess
-import threading
-from datetime import datetime
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
-from gtk_llm_chat.llm_process import Message, LLMProcess
-from gtk_llm_chat.markdownview import MarkdownView
 
 
 class ErrorWidget(Gtk.Box):
     """Widget para mostrar mensajes de error"""
-    
+
     def __init__(self, message):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        
+
         self.add_css_class('error-message')
         self.set_margin_start(6)
         self.set_margin_end(6)
         self.set_margin_top(3)
         self.set_margin_bottom(3)
-        
+
         # Icono de advertencia
         icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
         icon.add_css_class('error-icon')
         self.append(icon)
-        
+
         # Contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         message_box.add_css_class('error-content')
-        
+
         # Texto del error
         label = Gtk.Label(label=message)
         label.set_wrap(True)
         label.set_xalign(0)
         message_box.append(label)
-        
+
         self.append(message_box)
 
 
@@ -58,19 +55,21 @@ class MessageWidget(Gtk.Box):
         # Crear un contenedor con margen para centrar el contenido
         margin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         margin_box.set_hexpand(True)
-        
+
         # Crear el contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         message_box.add_css_class('message-content')
         message_box.set_hexpand(True)
-        
+
         # Agregar espaciadores flexibles a los lados
         if is_user:
             margin_box.append(Gtk.Box(hexpand=True))  # Espaciador izquierdo
             margin_box.append(message_box)
-            margin_box.append(Gtk.Box(hexpand=False))  # Espaciador derecho pequeño
+            # Espaciador derecho pequeño
+            margin_box.append(Gtk.Box(hexpand=False))
         else:
-            margin_box.append(Gtk.Box(hexpand=False))  # Espaciador izquierdo pequeño
+            # Espaciador izquierdo pequeño
+            margin_box.append(Gtk.Box(hexpand=False))
             margin_box.append(message_box)
             margin_box.append(Gtk.Box(hexpand=True))  # Espaciador derecho
 
@@ -78,7 +77,7 @@ class MessageWidget(Gtk.Box):
         content = message.content
         if is_user and content.startswith("user:"):
             content = content[5:].strip()
-            
+
         # Usar MarkdownView para el contenido
         self.content_view = MarkdownView()
         self.content_view.set_hexpand(True)
@@ -107,20 +106,22 @@ class MessageWidget(Gtk.Box):
 def parse_args(argv):
     """Parsea los argumentos de la línea de comandos"""
     parser = argparse.ArgumentParser(description='GTK Frontend para LLM')
-    parser.add_argument('--cid', type=str, help='ID de la conversación a continuar')
+    parser.add_argument('--cid', type=str,
+                        help='ID de la conversación a continuar')
     parser.add_argument('-s', '--system', type=str, help='Prompt del sistema')
     parser.add_argument('-m', '--model', type=str, help='Modelo a utilizar')
-    parser.add_argument('-c', '--continue-last', action='store_true', 
-                       help='Continuar última conversación')
-    parser.add_argument('-t', '--template', type=str, help='Template a utilizar')
-    parser.add_argument('-p', '--param', nargs=2, action='append', 
-                       metavar=('KEY', 'VALUE'), help='Parámetros para el template')
+    parser.add_argument('-c', '--continue-last', action='store_true',
+                        help='Continuar última conversación')
+    parser.add_argument('-t', '--template', type=str,
+                        help='Template a utilizar')
+    parser.add_argument('-p', '--param', nargs=2, action='append',
+                        metavar=('KEY', 'VALUE'), help='Parámetros para el template')
     parser.add_argument('-o', '--option', nargs=2, action='append',
-                       metavar=('KEY', 'VALUE'), help='Opciones para el modelo')
-    
+                        metavar=('KEY', 'VALUE'), help='Opciones para el modelo')
+
     # Parsear solo nuestros argumentos
     args = parser.parse_args(argv[1:])
-    
+
     # Crear diccionario de configuración
     config = {
         'cid': args.cid,
@@ -131,7 +132,7 @@ def parse_args(argv):
         'params': args.param,
         'options': args.option
     }
-    
+
     return config
 
 
@@ -143,7 +144,7 @@ class LLMChatApplication(Adw.Application):
         )
         self.config = None
         self.chat_history = None
-        
+
         # Agregar manejador de señales
         import signal
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -163,7 +164,8 @@ class LLMChatApplication(Adw.Application):
             from gtk_llm_chat.db_operations import ChatHistory
             self.chat_history = ChatHistory()
             try:
-                history = self.chat_history.get_conversation_history(self.config['cid'])
+                history = self.chat_history.get_conversation_history(
+                    self.config['cid'])
                 # Aquí deberías implementar la lógica para mostrar el historial
                 # en tu interfaz gráfica
                 for entry in history:
@@ -183,7 +185,7 @@ class LLMChatApplication(Adw.Application):
     def do_startup(self):
         # Llamar al método padre usando do_startup
         Adw.Application.do_startup(self)
-        
+
         # Configurar acciones
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about_activate)
@@ -207,13 +209,13 @@ class LLMChatApplication(Adw.Application):
         print("Cerrando conexiones...")
         if self.chat_history:
             self.chat_history.close()
-        
+
         # Obtener la ventana activa y cerrar el LLM si está corriendo
         window = self.get_active_window()
         if window and hasattr(window, 'llm'):
             if window.llm.is_running:
                 window.llm.cancel()
-        
+
         # Llamar al método padre
         Adw.Application.do_shutdown(self)
 
@@ -221,39 +223,40 @@ class LLMChatApplication(Adw.Application):
 class LLMChatWindow(Adw.ApplicationWindow):
     def __init__(self, config=None, **kwargs):
         super().__init__(**kwargs)
-        
+
         # Conectar señal de cierre de ventana
         self.connect('close-request', self._on_close_request)
-        
+
         # Asegurar que config no sea None
         self.config = config or {}
-        
+
         # Inicializar LLMProcess con la configuración
         self.llm = LLMProcess(self.config)
-        
+
         # Mantener referencia a la clase Message
         self.Message = Message
-        
+
         # Configurar la ventana principal
-        title = self.config.get('template') or "LLM Chat"  # Asegurar que title nunca sea None
+        # Asegurar que title nunca sea None
+        title = self.config.get('template') or "LLM Chat"
         self.set_title(title)
         self.set_default_size(600, 700)
-        
+
         # Inicializar la cola de mensajes
         self.message_queue = []
-        
+
         # Mantener referencia al último mensaje enviado
         self.last_message = None
-        
+
         # Crear header bar
         header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle.new(title, "Iniciando...")
         header.set_title_widget(self.title_widget)
-        
+
         # Botón de menú
         menu_button = Gtk.MenuButton()
         menu_button.set_icon_name("open-menu-symbolic")
-        
+
         # Crear menú
         menu = Gio.Menu.new()
         menu.append("Acerca de", "app.about")
@@ -266,7 +269,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Contenedor para el chat
         chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        
+
         # ScrolledWindow para el historial de mensajes
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
@@ -316,11 +319,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         chat_box.append(scroll)
         chat_box.append(input_box)
-        
+
         main_box.append(chat_box)
-        
+
         self.set_content(main_box)
-        
+
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
@@ -390,7 +393,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Agregar soporte para cancelación
         self.current_message_widget = None
-        
+
         # Configurar atajo para cancelación
         cancel_controller = Gtk.EventControllerKey()
         cancel_controller.connect('key-pressed', self._on_cancel_pressed)
@@ -433,7 +436,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if content := self._sanitize_input(content):
             message = self.Message(content, sender)
             self.message_queue.append(message)
-            
+
             if sender == "user":
                 self.last_message = message
 
@@ -451,22 +454,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(),
-                             buffer.get_end_iter(), True)
-        
+                               buffer.get_end_iter(), True)
+
         if self._add_message_to_queue(text):
             buffer.set_text("")
             # Usar GLib.idle_add para ejecutar la tarea asíncrona
             GLib.idle_add(self._start_llm_task)
-    
+
     def _start_llm_task(self):
         """Inicia la tarea del LLM"""
         print("Iniciando tarea LLM...")
-        
+
         # Crear widget vacío para la respuesta
         self.current_message_widget = MessageWidget(
             self.Message("", sender="assistant"))
         self.messages_box.append(self.current_message_widget)
-        
+
         # Solo enviar el último mensaje
         if self.last_message:
             self.llm.execute([self.last_message])
@@ -530,7 +533,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             adj.set_value(adj.get_upper() - adj.get_page_size())
             return False  # Importante para que no se repita
         # Programar el scroll para después de que se actualice el layout
-        GLib.timeout_add(50, scroll_after)  # Pequeño delay para asegurar que el layout está actualizado
+        # Pequeño delay para asegurar que el layout está actualizado
+        GLib.timeout_add(50, scroll_after)
 
     def display_message(self, content, is_user=True):
         """Muestra un mensaje en la ventana de chat"""
@@ -547,14 +551,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
 
 def main():
+    """
+    Aquí inicia todo
+    """
     # Parsear argumentos ANTES de que GTK los vea
-    argv = [arg for arg in sys.argv if not arg.startswith(('--gtk', '--gdk', '--display'))]
+    argv = [arg for arg in sys.argv if not arg.startswith(
+        ('--gtk', '--gdk', '--display'))]
     config = parse_args(argv)
-    
+
     # Pasar solo los argumentos de GTK a la aplicación
-    gtk_args = [arg for arg in sys.argv if arg.startswith(('--gtk', '--gdk', '--display'))]
+    gtk_args = [arg for arg in sys.argv if arg.startswith(
+        ('--gtk', '--gdk', '--display'))]
     gtk_args.insert(0, sys.argv[0])  # Agregar el nombre del programa
-    
+
     # Crear y ejecutar la aplicación
     app = LLMChatApplication()
     app.config = config
