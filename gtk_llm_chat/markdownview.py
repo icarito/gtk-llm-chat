@@ -1,9 +1,9 @@
 from markdown_it.token import Token
 from markdown_it import MarkdownIt
 import re
-from gi.repository import Gtk, Pango, Gdk
 import gi
 gi.require_version('Gtk', '4.0')
+from gi.repository import Gtk, Pango, Gdk
 
 
 class MarkdownView(Gtk.TextView):

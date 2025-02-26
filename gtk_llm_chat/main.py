@@ -4,11 +4,11 @@ Gtk LLM Chat - A frontend for `llm`
 import sys
 import argparse
 import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
 from gtk_llm_chat.markdownview import MarkdownView
 from gtk_llm_chat.llm_process import Message, LLMProcess
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
 
 
 class ErrorWidget(Gtk.Box):
