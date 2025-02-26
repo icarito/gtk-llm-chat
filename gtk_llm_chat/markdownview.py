@@ -1,6 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Pango, Gdk
+import re
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
@@ -26,6 +27,12 @@ class MarkdownView(Gtk.TextView):
         self.code_tag = self.buffer.create_tag("code", family="monospace", background="gray")
         # Tag para código en línea (diferente del bloque de código)
         self.code_inline_tag = self.buffer.create_tag("code_inline", family="monospace", background="#444444")
+        
+        # Tag para <think> o <thinking>
+        self.thinking_tag = self.buffer.create_tag(
+            "thinking", style=Pango.Style.ITALIC, scale=0.8,
+            left_margin=20, right_margin=20 
+        )
 
         # Tags para listas (con soporte para anidación)
         self.list_tags = {
@@ -44,13 +51,58 @@ class MarkdownView(Gtk.TextView):
     def set_markdown(self, text):
         return self.render_markdown(text)
 
-    def render_markdown(self, text):
-        # Parsear Markdown con markdown-it-py
-        tokens = self.md.parse(text)
+    def process_thinking_tags(self, text):
+        """
+        Procesa las etiquetas <think> o <thinking> en el texto.
+        Devuelve una lista de fragmentos alternando texto normal y pensamiento.
+        Cada fragmento es una tupla (texto, es_pensamiento).
+        """
+        fragments = []
+        # Patrones para buscar <think> o <thinking>
+        think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
+        thinking_pattern = re.compile(r'<thinking>(.*?)</thinking>', re.DOTALL)
+        
+        # Combinar los resultados de ambos patrones
+        all_matches = []
+        for pattern in [think_pattern, thinking_pattern]:
+            for match in pattern.finditer(text):
+                all_matches.append((match.start(), match.end(), match.group(1)))
+        
+        # Ordenar por posición inicial
+        all_matches.sort(key=lambda x: x[0])
+        
+        last_end = 0
+        for start, end, content in all_matches:
+            # Agregar texto normal antes del pensamiento
+            if start > last_end:
+                fragments.append((text[last_end:start], False))
+            
+            # Agregar pensamiento
+            fragments.append((content, True))
+            last_end = end
+        
+        # Agregar texto restante después del último pensamiento
+        if last_end < len(text):
+            fragments.append((text[last_end:], False))
+        
+        return fragments
 
-        # Limpiar el buffer
+    def render_markdown(self, text):
+        # Limpiar el buffer antes de empezar
         self.buffer.set_text("", -1)
         
+        # Procesar etiquetas de pensamiento
+        fragments = self.process_thinking_tags(text)
+        
+        for fragment_text, is_thinking in fragments:
+            if is_thinking:
+                self.insert_thinking(fragment_text)
+            else:
+                self.render_markdown_fragment(fragment_text)
+            
+    def render_markdown_fragment(self, text):
+        # Parsear Markdown con markdown-it-py
+        tokens = self.md.parse(text)
         # Aplicar formato
         self.apply_pango_format(tokens)
 
@@ -169,6 +221,15 @@ class MarkdownView(Gtk.TextView):
             self.buffer.insert_with_tags(iter, text, *tags)
         else:
             self.buffer.insert(iter, text)
+    
+    def insert_thinking(self, text):
+        """
+        Inserta texto de pensamiento con el formato especial
+        """
+        # Insertar el contenido del pensamiento con el estilo especial
+        iter = self.buffer.get_end_iter()
+        self.buffer.insert_with_tags(iter, text, self.thinking_tag)
+        self.insert_text("\n")
 
     def apply_tag(self, tag):
         # Aplicar una etiqueta al texto actual
