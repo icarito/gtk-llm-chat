@@ -402,7 +402,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.add_controller(escape_controller)
 
         # Iniciar el LLM al arrancar
-        self.llm.initialize(self._handle_initial_response)
+        self.llm.initialize()
+
+        # Conectar la señal de respuesta del LLM
+        self.llm.connect('response', self._on_llm_response)
+
+        # Conectar la señal de nombre del modelo del LLM
+        self.llm.connect('model-name', self._on_llm_model_name)
 
     def _on_text_changed(self, buffer):
         lines = buffer.get_line_count()
@@ -463,8 +469,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         
         # Solo enviar el último mensaje
         if self.last_message:
-            self.llm.execute([self.last_message], self._handle_llm_response)
-        return False
+            self.llm.execute([self.last_message])
+        return
 
     def _show_error(self, message):
         """Muestra un mensaje de error en el chat"""
@@ -472,16 +478,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.append(error_widget)
         self._scroll_to_bottom()
 
-    def _handle_initial_response(self, model_name, error=None):
+    def _handle_initial_response(self, model_name):
         """Maneja la respuesta inicial del LLM"""
-        if error:
-            self._show_error(error)
-            self.title_widget.set_subtitle("Error de conexión")
-        elif model_name:
+        print("Ejecutando _handle_initial_response en main.py")
+        if model_name:
             self.title_widget.set_subtitle(model_name)
         else:
             self._show_error("No se pudo iniciar el chat con el modelo")
             self.title_widget.set_subtitle("Sin conexión")
+
+    def _on_llm_model_name(self, llm_process, model_name):
+        """Maneja la señal de nombre del modelo del LLM"""
+        self._handle_initial_response(model_name)
 
     def _handle_llm_response(self, response):
         """Maneja la respuesta del LLM"""
@@ -491,6 +499,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.current_message_widget = None
             self._show_error("Error al generar respuesta. Intente nuevamente.")
         else:
+            self.current_message_widget.update_content(response)
+            self._scroll_to_bottom()
+
+    def _on_llm_response(self, llm_process, response):
+        """Maneja la señal de respuesta del LLM"""
+        if self.current_message_widget:
             self.current_message_widget.update_content(response)
             self._scroll_to_bottom()
 
