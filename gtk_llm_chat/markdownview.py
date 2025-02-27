@@ -37,6 +37,14 @@ class MarkdownView(Gtk.TextView):
             "thinking", style=Pango.Style.ITALIC, scale=0.8,
             left_margin=20, right_margin=20
         )
+        # Tag para blockquote (citas)
+        self.blockquote_tag = self.buffer.create_tag(
+            "blockquote", 
+            left_margin=30, 
+            style=Pango.Style.ITALIC,
+            background="gray"
+        )
+
 
         # Tags para listas (con soporte para anidación)
         self.list_tags = {
@@ -174,6 +182,16 @@ class MarkdownView(Gtk.TextView):
                 if self.list_level == 1:
                     self.insert_text("\n")
                 self.apply_tag(self.list_tags[min(self.list_level, 3)])
+            # Soporte para blockquote (citas)
+            elif token.type == 'blockquote_open':
+                # Aplicamos el estilo de blockquote
+                self.insert_text("\n")
+                self.apply_tag(self.blockquote_tag)
+            elif token.type == 'blockquote_close':
+                # Quitamos el estilo de blockquote
+                self.remove_tag(self.blockquote_tag)
+                self.insert_text("\n")
+
             elif token.type == 'bullet_list_close':
                 # Decrementamos el nivel de lista y quitamos el tag
                 self.list_level -= 1
@@ -252,6 +270,7 @@ class MarkdownView(Gtk.TextView):
 if __name__ == "__main__":
     app = Gtk.Application(application_id='com.example.MarkdownApp')
 
+
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
         win.set_title("Markdown TextView")
@@ -272,6 +291,9 @@ if __name__ == "__main__":
         markdown_text += "hola `amigo` 😊\n"
 
         markdown_view = MarkdownView()
+        markdown_text += "\nCita de ejemplo:\n"
+        markdown_text += "> Esta es una cita en markdown. Las citas se muestran con un estilo especial.\n"
+
         markdown_view.render_markdown(markdown_text)
 
         scrolled_window = Gtk.ScrolledWindow()
