@@ -160,9 +160,12 @@ class LLMChatApplication(Adw.Application):
         window.present()
         window.input_text.grab_focus()  # Enfocar el cuadro de entrada
 
-        if self.config and self.config.get('cid'):
+        if self.config and (self.config.get('cid') 
+                            or self.config.get('continue_last')):
             from gtk_llm_chat.db_operations import ChatHistory
             self.chat_history = ChatHistory()
+            if not self.config.get('cid'):
+                self.config['cid'] = self.chat_history.get_last_cid()
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])

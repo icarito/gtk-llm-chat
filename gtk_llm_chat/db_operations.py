@@ -50,6 +50,13 @@ class ChatHistory:
 
         return history
 
+    def get_last_cid(self) -> Optional[str]:
+        """Obtiene el último ID de conversación."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        return row['id'] if row else None
+
     def close(self):
         """Cierra la conexión a la base de datos."""
-        self.conn.close() 
+        self.conn.close()
