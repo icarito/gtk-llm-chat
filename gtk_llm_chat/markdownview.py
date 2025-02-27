@@ -135,9 +135,9 @@ class MarkdownView(Gtk.TextView):
             elif token.type == 'text':
                 self.insert_text(token.content)
             elif token.type == 'paragraph_open':
-                self.insert_text("\n")
+                pass
             elif token.type == 'paragraph_close':
-                self.insert_text("\n")
+                self.insert_text("\n\n")
 
             elif token.type == 'heading_open':
                 level = token.tag[1]
