@@ -104,7 +104,6 @@ class LLMProcess(GObject.Object):
             # Enviar solo el último mensaje
             if messages:
                 stdin_data = f"{messages[-1].sender}: {messages[-1].content}\n"
-                print(f"Enviando al LLM:\n{stdin_data}")
                 self.stdin.write_bytes(GLib.Bytes(stdin_data.encode('utf-8')))
 
             self._read_response(self._emit_response)
@@ -172,8 +171,7 @@ class LLMProcess(GObject.Object):
                         self.is_running = False
                         return
                     callback(accumulated.strip())
-                    print(text, end="")
-                    # print(f"Emitiendo respuesta: {accumulated.strip()}")
+                    print(text, end="", flush=True)
                     self.emit('response', accumulated.strip())
 
                 self._read_response(callback, accumulated)

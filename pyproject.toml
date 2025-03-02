@@ -29,6 +29,7 @@ Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
+gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"
 
 [tool.hatch.build]
 packages = ["gtk_llm_chat"]

@@ -1,16 +1,13 @@
 """
 An applet to browse LLM conversations
 """
-from db_operations import ChatHistory
+import os
+import subprocess
 import gi
+from gtk_llm_chat.db_operations import ChatHistory
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gtk, AyatanaAppIndicator3 as AppIndicator
-import subprocess
-import os
-
-def on_menu_item_click(widget):
-    print("¡Opción seleccionada!")
 
 def on_quit(widget):
     Gtk.main_quit()
@@ -68,4 +65,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

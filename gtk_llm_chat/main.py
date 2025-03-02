@@ -1,14 +1,17 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
-import os,sys
+from gtk_llm_chat.db_operations import ChatHistory
+from gtk_llm_chat.llm_process import Message, LLMProcess
+from gtk_llm_chat.markdownview import MarkdownView
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import argparse
+import os
+import signal
+import sys
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gtk_llm_chat.markdownview import MarkdownView
-from gtk_llm_chat.llm_process import Message, LLMProcess
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 
 class ErrorWidget(Gtk.Box):
@@ -99,8 +102,6 @@ class MessageWidget(Gtk.Box):
         self.content_view.set_markdown(new_content)
         # Asegurar que se haga scroll al actualizar el contenido
         window = self.get_root()
-        if isinstance(window, LLMChatWindow):
-            window._scroll_to_bottom()
 
 
 def parse_args(argv):
@@ -137,6 +138,10 @@ def parse_args(argv):
 
 
 class LLMChatApplication(Adw.Application):
+    """
+    Clase para una instancia de un chat
+    """
+
     def __init__(self):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
@@ -146,7 +151,6 @@ class LLMChatApplication(Adw.Application):
         self.chat_history = None
 
         # Agregar manejador de señales
-        import signal
         signal.signal(signal.SIGINT, self._handle_sigint)
 
     def _handle_sigint(self, signum, frame):
@@ -160,7 +164,7 @@ class LLMChatApplication(Adw.Application):
 
         # Configurar el icono de la aplicación
         self._setup_icon()
-        
+
         # Configurar acciones
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about_activate)
@@ -168,26 +172,22 @@ class LLMChatApplication(Adw.Application):
 
     def _setup_icon(self):
         """Configura el ícono de la aplicación"""
-        try:
-            # Establecer directorio de búsqueda
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-            icon_theme.add_search_path(current_dir)
-        except Exception as e:
-            print(f"Error al establecer el ícono: {e}")
+        # Establecer directorio de búsqueda
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        icon_theme.add_search_path(current_dir)
 
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
         window = LLMChatWindow(application=self, config=self.config)
-        
+
         # Establecer el ícono por nombre (sin extensión .svg)
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
         window.input_text.grab_focus()  # Enfocar el cuadro de entrada
 
-        if self.config and (self.config.get('cid') 
+        if self.config and (self.config.get('cid')
                             or self.config.get('continue_last')):
-            from gtk_llm_chat.db_operations import ChatHistory
             self.chat_history = ChatHistory()
             if not self.config.get('cid'):
                 self.config['cid'] = self.chat_history.get_last_cid()
@@ -237,6 +237,9 @@ class LLMChatApplication(Adw.Application):
 
 
 class LLMChatWindow(Adw.ApplicationWindow):
+    """
+    A chat window
+    """
     def __init__(self, config=None, **kwargs):
         super().__init__(**kwargs)
 
