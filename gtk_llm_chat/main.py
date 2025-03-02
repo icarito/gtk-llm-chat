@@ -1,7 +1,7 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
-import sys
+import os,sys
 import argparse
 import gi
 gi.require_version('Gtk', '4.0')
@@ -139,7 +139,7 @@ def parse_args(argv):
 class LLMChatApplication(Adw.Application):
     def __init__(self):
         super().__init__(
-            application_id="org.gnome.LLMChat",
+            application_id="org.fuentelibre.gtk_llm_Chat",
             flags=Gio.ApplicationFlags.FLAGS_NONE
         )
         self.config = None
@@ -154,9 +154,34 @@ class LLMChatApplication(Adw.Application):
         print("\nCerrando aplicación...")
         self.quit()
 
+    def do_startup(self):
+        # Llamar al método padre usando do_startup
+        Adw.Application.do_startup(self)
+
+        # Configurar el icono de la aplicación
+        self._setup_icon()
+        
+        # Configurar acciones
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self.on_about_activate)
+        self.add_action(about_action)
+
+    def _setup_icon(self):
+        """Configura el ícono de la aplicación"""
+        try:
+            # Establecer directorio de búsqueda
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            icon_theme.add_search_path(current_dir)
+        except Exception as e:
+            print(f"Error al establecer el ícono: {e}")
+
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
         window = LLMChatWindow(application=self, config=self.config)
+        
+        # Establecer el ícono por nombre (sin extensión .svg)
+        window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
         window.input_text.grab_focus()  # Enfocar el cuadro de entrada
 
@@ -169,10 +194,7 @@ class LLMChatApplication(Adw.Application):
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])
-                # Aquí deberías implementar la lógica para mostrar el historial
-                # en tu interfaz gráfica
                 for entry in history:
-                    # Asumiendo que tienes un método para mostrar mensajes
                     window.display_message(
                         entry['prompt'],
                         is_user=True
@@ -184,15 +206,6 @@ class LLMChatApplication(Adw.Application):
             except ValueError as e:
                 print(f"Error: {e}")
                 return
-
-    def do_startup(self):
-        # Llamar al método padre usando do_startup
-        Adw.Application.do_startup(self)
-
-        # Configurar acciones
-        about_action = Gio.SimpleAction.new("about", None)
-        about_action.connect("activate", self.on_about_activate)
-        self.add_action(about_action)
 
     def on_about_activate(self, action, param):
         """Muestra el diálogo Acerca de"""

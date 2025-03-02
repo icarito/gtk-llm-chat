@@ -12,8 +12,11 @@ class ChatHistory:
         else:
             self.db_path = db_path
         
-        self.conn = sqlite3.connect(self.db_path)
-        self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.row_factory = sqlite3.Row
+        except sqlite3.Error as e:
+            raise ConnectionError(f"Error al conectar a la base de datos: {e}")
 
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:
         """Obtiene el historial completo de una conversación específica."""
@@ -56,6 +59,21 @@ class ChatHistory:
         cursor.execute("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
         row = cursor.fetchone()
         return row['id'] if row else None
+
+    def get_conversations(self, limit: int, offset: int) -> List[Dict]:
+        """Obtiene una lista de las últimas conversaciones con un límite y un offset."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM conversations
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        
+        conversations = []
+        for row in cursor.fetchall():
+            conversations.append(dict(row))
+        
+        return conversations
 
     def close(self):
         """Cierra la conexión a la base de datos."""
