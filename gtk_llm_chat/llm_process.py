@@ -101,9 +101,17 @@ class LLMProcess(GObject.Object):
         try:
             self.is_running = True
 
+            def add_multiline_if_needed(input):
+                if "\n" in input:
+                    return input.replace("\n", '<br> ')
+                else:
+                    return input
+
             # Enviar solo el último mensaje
             if messages:
-                stdin_data = f"{messages[-1].sender}: {messages[-1].content}\n"
+                stdin_data = f"""{messages[-1].sender}: {
+                    add_multiline_if_needed(messages[-1].content)
+                    }\n"""
                 self.stdin.write_bytes(GLib.Bytes(stdin_data.encode('utf-8')))
 
             self._read_response(self._emit_response)
