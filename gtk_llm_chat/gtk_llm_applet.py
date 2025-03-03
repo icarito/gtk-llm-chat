@@ -3,13 +3,16 @@ An applet to browse LLM conversations
 """
 import os
 import subprocess
+import signal
 import gi
 from gtk_llm_chat.db_operations import ChatHistory
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
-from gi.repository import Gtk, AyatanaAppIndicator3 as AppIndicator
+from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
 
-def on_quit(widget):
+def on_quit(*args):
+    """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
+    print("\nCerrando aplicación...")
     Gtk.main_quit()
 
 def add_last_conversations_to_menu(menu):
@@ -52,15 +55,29 @@ def create_menu():
     return menu
 
 def main():
-    icon_path = os.path.join(os.path.dirname(__file__), 'hicolor/scalable/apps/robot.svg')
+    chat_history = ChatHistory()
+    icon_path = os.path.join(os.path.dirname(__file__), 'hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg')
     indicator = AppIndicator.Indicator.new(
-        "com.example.AppIndicatorDemo",
+        "org.fuentelibre.gtk_llm_Applet",
         icon_path,
         AppIndicator.IndicatorCategory.APPLICATION_STATUS
     )
     indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+
+    def on_db_changed(file_monitor, nada, file, event_type, indicator, *args):
+        if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
+            indicator.set_menu(create_menu())
+
+    if hasattr(chat_history, 'db_path'):
+        file = Gio.File.new_for_path(chat_history.db_path)
+        file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
+        file_monitor.connect("changed", lambda *args: on_db_changed(*args, indicator))
+
     indicator.set_menu(create_menu())
 
+
+    # Agregar manejador de señales
+    signal.signal(signal.SIGINT, on_quit)
     Gtk.main()
 
 if __name__ == "__main__":
