@@ -5,10 +5,10 @@ import os
 import subprocess
 import signal
 import gi
-from gtk_llm_chat.db_operations import ChatHistory
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
+from gtk_llm_chat.db_operations import ChatHistory
 
 def on_quit(*args):
     """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
@@ -22,8 +22,9 @@ def add_last_conversations_to_menu(menu):
 
     for conversation in last_conversations:
         conversation_name = conversation['name'].removeprefix("user: ")
+        conversation_id = conversation['id']
         menu_item = Gtk.MenuItem(label=conversation_name)
-        menu_item.connect("activate", lambda w, cid=conversation['id']: open_conversation(cid))
+        menu_item.connect("activate", lambda w, cid=conversation_id: open_conversation(cid))
         menu.append(menu_item)
 
 def open_conversation(conversation_id):

@@ -3,8 +3,6 @@ Gtk LLM Chat - A frontend for `llm`
 """
 from gtk_llm_chat.db_operations import ChatHistory
 from gtk_llm_chat.llm_process import Message, LLMProcess
-from gtk_llm_chat.markdownview import MarkdownView
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import argparse
 import os
 import signal
@@ -12,6 +10,8 @@ import sys
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+from gtk_llm_chat.markdownview import MarkdownView
 
 
 class ErrorWidget(Gtk.Box):
