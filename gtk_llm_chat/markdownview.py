@@ -232,10 +232,12 @@ class MarkdownView(Gtk.TextView):
                         self.insert_text("▪ ")
             elif token.type == 'list_item_close':
                 self.in_list_item = False
+            elif token.type == 'hr':
+                self.insert_text("\n" + "⁕" * 5 + "\n\n")
             elif token.type == 'html_block':
                 pass
             else:
-                print("Unknown markdown token:", token.type)
+                print("Unknown markdown token:", token.type, flush=True)
 
     def insert_text(self, text):
         # Insertar texto con las etiquetas actuales
