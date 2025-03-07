@@ -229,7 +229,7 @@ class LLMChatApplication(Adw.Application):
         # Obtener la ventana activa y cerrar el LLM si está corriendo
         window = self.get_active_window()
         if window and hasattr(window, 'llm'):
-            if window.llm.is_running:
+            if window.llm.is_generating:
                 window.llm.cancel()
 
         # Llamar al método padre
@@ -413,6 +413,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Agregar soporte para cancelación
         self.current_message_widget = None
 
+        # Variable para acumular la respuesta
+        self.accumulated_response = ""
+
         # Configurar atajo para cancelación
         cancel_controller = Gtk.EventControllerKey()
         cancel_controller.connect('key-pressed', self._on_cancel_pressed)
@@ -428,6 +431,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Conectar la señal de respuesta del LLM
         self.llm.connect('response', self._on_llm_response)
+
+        # Conectar la señal de nombre del modelo del LLM
+        self.llm.connect('ready', self._on_llm_ready)
 
         # Conectar la señal de nombre del modelo del LLM
         self.llm.connect('model-name', self._on_llm_model_name)
@@ -485,13 +491,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         print("Iniciando tarea LLM...")
 
         # Crear widget vacío para la respuesta
+        self.accumulated_response = ""  # Reiniciar la respuesta acumulada
         self.current_message_widget = MessageWidget(
             self.Message("", sender="assistant"))
         self.messages_box.append(self.current_message_widget)
 
         # Solo enviar el último mensaje
+
         if self.last_message:
-            self.llm.execute([self.last_message])
+            self.llm.send_message([self.last_message])
         return
 
     def _show_error(self, message):
@@ -512,6 +520,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja la señal de nombre del modelo del LLM"""
         self._handle_initial_response(model_name)
 
+    def _on_llm_ready(self, llm_process):
+        """Maneja la señal de que el LLM está listo para nueva entrada"""
+        self.input_text.grab_focus()  # Enfocar el cuadro de entrada
+
     def _handle_llm_response(self, response):
         """Maneja la respuesta del LLM"""
         if response is None:
@@ -525,15 +537,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_llm_response(self, llm_process, response):
         """Maneja la señal de respuesta del LLM"""
-        if self.current_message_widget:
-            self.current_message_widget.update_content(response)
-            self._scroll_to_bottom()
+        # Obtener el contenido actual y agregar el nuevo token
+        if not self.current_message_widget:
+            return
+            
+        # Actualizar el widget con la respuesta acumulada
+        self.accumulated_response += response
+
+        self.current_message_widget.update_content(self.accumulated_response)
+        self._scroll_to_bottom()
 
     def _on_cancel_pressed(self, controller, keyval, keycode, state):
         """Maneja la cancelación con Ctrl+C"""
         if keyval == Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.llm.is_running:
+            if self.llm.is_generating:
                 self.llm.cancel()
+                self.accumulated_response = ""  # Limpiar la respuesta acumulada
             return True
         return False
 
@@ -564,7 +583,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, window):
         """Maneja el cierre de la ventana de manera elegante"""
-        if self.llm.is_running:
+        if self.llm.is_generating:
             self.llm.cancel()
         return False  # Permite que la ventana se cierre
 

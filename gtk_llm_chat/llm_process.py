@@ -1,5 +1,5 @@
 """
-Everything related to talking to llm as a subprocess.
+Manejo simplificado del proceso LLM como subproceso.
 """
 
 from datetime import datetime
@@ -18,19 +18,21 @@ class Message:
 
 class LLMProcess(GObject.Object):
     """
-    Maneja el subproceso
+    Maneja el subproceso LLM y emite señales con las respuestas
     """
     __gsignals__ = {
-        'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-        'model-name': (GObject.SignalFlags.RUN_LAST, None, (str,))
+        'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),  # Emite cada token de respuesta
+        'model-name': (GObject.SignalFlags.RUN_LAST, None, (str,)),  # Emite el nombre del modelo
+        'ready': (GObject.SignalFlags.RUN_LAST, None, ())  # Emite cuando está listo para nueva entrada
     }
 
     def __init__(self, config=None):
         GObject.Object.__init__(self)
         self.process = None
-        self.is_running = False
+        self.is_generating = False
         self.launcher = None
         self.config = config or {}
+        self.token_queue = []  # Cola para almacenar tokens
 
     def initialize(self):
         """Inicia el proceso LLM"""
@@ -92,33 +94,29 @@ class LLMProcess(GObject.Object):
         except Exception as e:
             print(f"Error inesperado: {str(e)}")
 
-    def execute(self, messages):
+    def send_message(self, messages):
         """Ejecuta el LLM con los mensajes dados"""
         if not self.process:
             self.initialize()
             return
 
         try:
-            self.is_running = True
-
-            def add_multiline_if_needed(input):
-                if "\n" in input:
-                    return input.replace("\n", '<br> ')
-                else:
-                    return input
+            self.is_generating = True
 
             # Enviar solo el último mensaje
             if messages:
-                stdin_data = f"""{messages[-1].sender}: {
-                    add_multiline_if_needed(messages[-1].content)
-                    }\n"""
-                self.stdin.write_bytes(GLib.Bytes(stdin_data.encode('utf-8')))
+                # Enviar mensaje sin formateo especial
+                message = messages[-1]
+                stdin_data = f"{message.sender}: {message.content}\n"
+                if "\n" in message.content:
+                    stdin_data = f"!multi\n{message.sender}: {message.content}\n!end\n"
+                self.stdin.write_bytes(GLib.Bytes(stdin_data.encode("utf-8")))
 
             self._read_response(self._emit_response)
 
         except Exception as e:
             print(f"Error ejecutando LLM: {e}")
-            self.is_running = False
+            self.is_generating = False
 
     def _handle_initial_output(self, stdout, result):
         """Maneja la salida inicial del proceso"""
@@ -126,78 +124,75 @@ class LLMProcess(GObject.Object):
             bytes_read = stdout.read_bytes_finish(result)
             if bytes_read:
                 text = bytes_read.get_data().decode('utf-8')
+                # Extraer el nombre del modelo si está presente (con o sin espacio)
                 if "Chatting with" in text:
-                    model_name = text.split("Chatting with")[
-                        1].split("\n")[0].strip()
+                    model_name = text.split("Chatting with")[1].split("\n")[0].strip()
                     print(f"Usando modelo: {model_name}")
-                    end_of_model_name = text.find("\n")
-                    text = text[end_of_model_name + 1:].strip()
                     self.emit('model-name', model_name)
-                else:
-                    self._read_response(self._emit_response)
-                    print(
-                        f"No se encontró 'Chatting with' en la salida inicial: {text}")
+                
+                # Continuar leyendo la respuesta
+                self._read_response(self._emit_response)
+                
         except Exception as e:
             print(f"Error leyendo salida inicial: {e}")
 
     def _read_response(self, callback, accumulated=""):
         """Lee la respuesta del LLM de forma incremental"""
-        if not self.is_running:
-            print("No se está ejecutando, saliendo de _read_response")
-            return
-
+        # Leer bytes de forma asíncrona
         self.stdout.read_bytes_async(
-            1024,  # tamaño del buffer
+            1024,
             GLib.PRIORITY_DEFAULT,
-            None,  # cancelable
+            None,
             self._handle_response,
-            (callback, accumulated)
+            callback
         )
 
     def _emit_response(self, text):
         """Emite la señal de respuesta"""
+        # Agregar token a la cola
+        self.token_queue.append(text)
+        # Emitir señal con el token
         self.emit('response', text)
 
     def _handle_response(self, stdout, result, user_data):
-        """Maneja cada chunk de la respuesta"""
-        callback, accumulated = user_data
+        """Maneja cada token de la respuesta"""
+        callback = user_data
         try:
-            bytes_read = stdout.read_bytes_finish(result)
-            if bytes_read:
-                text = bytes_read.get_data().decode('utf-8')
-                accumulated += text
-
-                # Solo actualizar si hay contenido
-                if accumulated.strip():
-                    # Si este chunk es solo '>' y no hay más datos, es el prompt final
-                    if text.strip() == ">" and accumulated.endswith("\n> "):
-                        # Quitar el último '>'
-                        final_text = accumulated.strip()[:-1].strip()
-                        if final_text:
-                            callback(final_text)
-                            print(text)
-                        self.is_running = False
-                        return
-                    callback(accumulated.strip())
-                    print(text, end="", flush=True)
-                    self.emit('response', accumulated.strip())
-
-                self._read_response(callback, accumulated)
-            else:
-                # No hay más datos para leer
-                if accumulated.strip():
-                    callback(accumulated.strip())
-                self.is_running = False
-
+            try:
+                bytes_read = stdout.read_bytes_finish(result)
+                if bytes_read:
+                    text = bytes_read.get_data().decode('utf-8')
+                    
+                    # Detectar si el modelo está listo para nueva entrada
+                    if text.strip() == ">" or text.endswith("\n> ") or text.endswith("> "):
+                        self.emit('ready')
+                        print("Modelo listo para nueva entrada")
+                    else:
+                        # Emitir el token recibido
+                        callback(text)
+                        print(text, end="", flush=True)
+                    
+                    self._read_response(callback)
+                else:
+                    self.is_generating = False
+            except Gio.Error as e:
+                print(f"Error de GIO al leer respuesta: {e}")
+                self.is_generating = False
         except Exception as e:
             print(f"Error leyendo respuesta: {e}")
-            self.is_running = False
+            self.is_generating = False
 
     def cancel(self):
         """Cancela la generación actual"""
-        self.is_running = False
+        self.is_generating = False
         if self.process:
             self.process.force_exit()
+            self.is_generating = False
+            try:
+                self.stdin.close()
+            except Exception:
+                pass
+            self.token_queue.clear()  # Limpiar la cola de tokens
 
 
 GObject.type_register(LLMProcess)

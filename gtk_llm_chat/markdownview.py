@@ -236,6 +236,10 @@ class MarkdownView(Gtk.TextView):
                 self.insert_text("\n" + "⁕" * 5 + "\n\n")
             elif token.type == 'html_block':
                 pass
+            elif token.type == 'code_block':
+                self.insert_text("\n")
+                self.insert_text(token.content)
+                self.insert_text("\n")
             else:
                 print("Unknown markdown token:", token.type, flush=True)
 
