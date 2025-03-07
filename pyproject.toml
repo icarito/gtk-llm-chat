@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtk-llm-chat"
-version = "1.1.0"
+version = "1.1.1"
 description = "Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs)"
 readme = "README.md"
 authors = [{ name = "Sebastian Silva", email = "sebastian@fuentelibre.org" }]
@@ -16,7 +16,6 @@ classifiers = [
 ]
 keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
-    # "gtk4",  # Comentado para evitar el error
     "PyGObject>=3.42.0",
     "markdown-it-py"
 ]
@@ -31,6 +30,8 @@ Repository = "https://github.com/icarito/gtk_llm_chat.git"
 gtk-llm-chat = "gtk_llm_chat.main:main"
 gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"
 
-[tool.hatch.build]
-packages = ["gtk_llm_chat"]
-requires = ["Cython"] # Adding Cython as build dependendcy
+[tool.setuptools.packages.find]
+exclude = ["desktop*"]
+
+[tool.setuptools.data-files]
+"share/applications" = ["desktop/gtk-llm-chat.desktop", "desktop/gtk-llm-applet.desktop"]

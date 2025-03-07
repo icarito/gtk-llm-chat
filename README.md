@@ -11,7 +11,6 @@ Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs).
 - Soporte para streaming de respuestas en tiempo real
 - Historial de mensajes con desplazamiento automático
 - Atajos de teclado (Enter para enviar, Shift+Enter para nueva línea)
-- Soporte para cancelación de generación (Ctrl+C)
 
 ## Instalación
 
@@ -26,10 +25,11 @@ pipx install gtk-llm-chat
 - Python 3.8 o superior
 - GTK 4.0
 - libadwaita
+- libayatana-appindicator
 
 En sistemas basados en Debian/Ubuntu:
 ```
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 libayatana-appindicator3-1
 ```
 
 ## Uso
@@ -54,7 +54,7 @@ Para configurar el entorno de desarrollo:
 git clone https://github.com/icarito/gtk-llm-chat.git
 cd gtk-llm-chat
 python -m venv venv
-source venv/bin/activate  # En Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -e ".[dev]"
 ```
 
