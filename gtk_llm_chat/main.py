@@ -145,7 +145,7 @@ class LLMChatApplication(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
-            flags=Gio.ApplicationFlags.FLAGS_NONE
+            flags=Gio.ApplicationFlags.NON_UNIQUE
         )
         self.config = None
         self.chat_history = None
