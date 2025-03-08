@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtk-llm-chat"
-version = "1.1.1"
+version = "1.2.0"
 description = "Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs)"
 readme = "README.md"
 authors = [{ name = "Sebastian Silva", email = "sebastian@fuentelibre.org" }]
