@@ -1,8 +1,6 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
-from gtk_llm_chat.db_operations import ChatHistory
-from gtk_llm_chat.llm_process import Message, LLMProcess
 import argparse
 import os
 import signal
@@ -11,7 +9,11 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gtk_llm_chat.markdownview import MarkdownView
+from gtk_llm_chat.db_operations import ChatHistory
+from gtk_llm_chat.llm_process import Message, LLMProcess
 
 
 class ErrorWidget(Gtk.Box):

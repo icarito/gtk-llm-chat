@@ -1,4 +1,3 @@
-from markdown_it.token import Token
 from markdown_it import MarkdownIt
 import re
 import gi
@@ -20,7 +19,7 @@ class MarkdownView(Gtk.TextView):
 
         self.italic_tag = self.buffer.create_tag(
             "italic", style=Pango.Style.ITALIC)
-        
+
         self.strike_tag = self.buffer.create_tag(
             "strike", strikethrough=True)
 
@@ -244,7 +243,7 @@ class MarkdownView(Gtk.TextView):
 
 
 if __name__ == "__main__":
-    app = Gtk.Application(application_id='com.example.MarkdownApp')
+    app = Gtk.Application(application_id='org.fuentelibre.MarkdownDemo')
 
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)

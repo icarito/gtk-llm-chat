@@ -4,10 +4,13 @@ An applet to browse LLM conversations
 import os
 import subprocess
 import signal
+import sys
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gtk_llm_chat.db_operations import ChatHistory
 
 def on_quit(*args):
@@ -55,6 +58,7 @@ def create_menu():
     menu.show_all()
     return menu
 
+
 def main():
     chat_history = ChatHistory()
     icon_path = os.path.join(os.path.dirname(__file__), 'hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg')
@@ -76,10 +80,10 @@ def main():
 
     indicator.set_menu(create_menu())
 
-
     # Agregar manejador de señales
     signal.signal(signal.SIGINT, on_quit)
     Gtk.main()
+
 
 if __name__ == "__main__":
     main()
