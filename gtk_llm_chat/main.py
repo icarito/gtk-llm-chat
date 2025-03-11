@@ -1,10 +1,6 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
-from gtk_llm_chat.llm_process import Message, LLMProcess
-from gtk_llm_chat.db_operations import ChatHistory
-from gtk_llm_chat.markdownview import MarkdownView
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import argparse
 import os
 import signal
@@ -12,8 +8,12 @@ import sys
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from gtk_llm_chat.llm_process import Message, LLMProcess
+from gtk_llm_chat.db_operations import ChatHistory
+from gtk_llm_chat.markdownview import MarkdownView
 
 
 class ErrorWidget(Gtk.Box):
@@ -159,6 +159,7 @@ class LLMChatApplication(Adw.Application):
         """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
         print("\nCerrando aplicación...")
         self.quit()
+        Gtk.main_quit()
 
     def do_startup(self):
         # Llamar al método padre usando do_startup
@@ -441,6 +442,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Conectar la señal de nombre del modelo del LLM
         self.llm.connect('model-name', self._on_llm_model_name)
 
+        # Conectar los errres
+        self.llm.connect("error", lambda llm, msg: self._show_error(msg))
+
     def _on_text_changed(self, buffer):
         lines = buffer.get_line_count()
         # Ajustar altura entre 3 y 6 líneas
@@ -614,3 +618,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# flake8: noqa E402

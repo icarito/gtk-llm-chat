@@ -27,7 +27,9 @@ class LLMProcess(GObject.Object):
         # Emite el nombre del modelo
         'model-name': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # Emite cuando está listo para nueva entrada
-        'ready': (GObject.SignalFlags.RUN_LAST, None, ())
+        'ready': (GObject.SignalFlags.RUN_LAST, None, ()),
+        # Emite cando llm reporta un error
+        'error': (GObject.SignalFlags.RUN_LAST, None, (str,))
     }
 
     def __init__(self, config=None):
@@ -88,6 +90,7 @@ class LLMProcess(GObject.Object):
                 # Configurar streams
                 self.stdin = self.process.get_stdin_pipe()
                 self.stdout = self.process.get_stdout_pipe()
+                self.stderr = self.process.get_stderr_pipe()
 
                 # Leer mensaje inicial
                 self.stdout.read_bytes_async(
@@ -95,6 +98,13 @@ class LLMProcess(GObject.Object):
                     GLib.PRIORITY_DEFAULT,
                     None,
                     self._handle_initial_output
+                )
+
+                self.stderr.read_bytes_async(
+                    4096,
+                    GLib.PRIORITY_DEFAULT,
+                    None,
+                    self._handle_error
                 )
         except Exception as e:
             print(f"Error inesperado: {str(e)}")
@@ -190,6 +200,18 @@ class LLMProcess(GObject.Object):
             print(f"Error leyendo respuesta: {e}")
             self.reading_response = False
             self.is_generating = False
+
+    def _handle_error(self, stderr, result):
+        """Maneja los errores del proceso"""
+        try:
+            bytes_read = stderr.read_bytes_finish(result)
+            if bytes_read:
+                error = bytes_read.get_data().decode('utf-8')
+                print(f"Error en LLM: {error}")
+                # Emitimos una señal
+                self.emit('error', error)
+        except Exception as e:
+            print(f"Error leyendo salida de error: {e}")
 
     def cancel(self):
         """Cancela la generación actual"""
