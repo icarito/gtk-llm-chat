@@ -36,7 +36,7 @@ class ChatHistory:
 
         # Obtenemos todas las respuestas de la conversación
         cursor.execute("""
-            SELECT r.*, c.name as conversation_name 
+            SELECT r.*, c.name as conversation_name
             FROM responses r
             JOIN conversations c ON r.conversation_id = c.id
             WHERE r.conversation_id = ?
@@ -64,7 +64,7 @@ class ChatHistory:
         return row['id'] if row else None
 
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
-        """Obtiene una lista de las últimas conversaciones con un límite y un offset."""
+        """Obtiene una lista de las últimas conversaciones"""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT * FROM conversations

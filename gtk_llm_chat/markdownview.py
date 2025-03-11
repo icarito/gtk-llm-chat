@@ -2,7 +2,7 @@ from markdown_it import MarkdownIt
 import re
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Pango, Gdk
+from gi.repository import Gtk, Pango  # noqa: E402
 
 
 class MarkdownView(Gtk.TextView):
@@ -32,11 +32,16 @@ class MarkdownView(Gtk.TextView):
         )
 
         self.heading_tags = {
-            '1': self.buffer.create_tag("h1", weight=Pango.Weight.BOLD, size=24 * Pango.SCALE),
-            '2': self.buffer.create_tag("h2", weight=Pango.Weight.BOLD, size=20 * Pango.SCALE),
-            '3': self.buffer.create_tag("h3", weight=Pango.Weight.BOLD, size=16 * Pango.SCALE),
-            '4': self.buffer.create_tag("h4", weight=Pango.Weight.BOLD, size=12 * Pango.SCALE),
-            '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD, size=10 * Pango.SCALE),
+            '1': self.buffer.create_tag("h1", weight=Pango.Weight.BOLD,
+                                        size=24 * Pango.SCALE),
+            '2': self.buffer.create_tag("h2", weight=Pango.Weight.BOLD,
+                                        size=20 * Pango.SCALE),
+            '3': self.buffer.create_tag("h3", weight=Pango.Weight.BOLD,
+                                        size=16 * Pango.SCALE),
+            '4': self.buffer.create_tag("h4", weight=Pango.Weight.BOLD,
+                                        size=12 * Pango.SCALE),
+            '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD,
+                                        size=10 * Pango.SCALE),
         }
         self.code_tag = self.buffer.create_tag(
             "code", family="monospace", background="gray")
@@ -47,8 +52,8 @@ class MarkdownView(Gtk.TextView):
             left_margin=20, right_margin=20
         )
         self.blockquote_tag = self.buffer.create_tag(
-            "blockquote", 
-            left_margin=30, 
+            "blockquote",
+            left_margin=30,
             style=Pango.Style.ITALIC,
             background="gray"
         )
@@ -250,25 +255,27 @@ if __name__ == "__main__":
         win.set_title("Markdown TextView")
         win.set_default_size(400, 300)
 
-        markdown_text = "# Título 1\n## Título 2\n### Título 3\nEste es un **texto en negrita** y _cursiva_."
-        markdown_text += "\n```\n"
-        markdown_text += "Este es un bloque de código.\n"
-        markdown_text += "var x = 10;\n"
-        markdown_text += "```\n"
-        markdown_text += "\nLista de ejemplo:\n"
-        markdown_text += "* Elemento 1\n  * Subelemento 1.1\n  * Subelemento 1.2\n* Elemento 2\n* Elemento 3\n"
-        markdown_text += "\nLista numerada:\n"
-        markdown_text += "1. Primer elemento\n"
-        markdown_text += "2. Segundo elemento\n"
-        markdown_text += "   1. Subelemento 2.1\n"
-        markdown_text += "\nTexto con `código en línea` y emoji 😊\n"
-        markdown_text += "hola `amigo` 😊\n"
+        markdown_text = """# Título 1\n## Título 2\n### Título 3\nEste es un
+        **texto en negrita** y _cursiva_.
+        \n```\n"
+        Este es un bloque de código.\n"
+        var x = 10;\n"
+        ```\n"
+        \nLista de ejemplo:\n"
+        * Elemento 1\n  * Subelemento 1.1\n  * Subelemento 1.2\n* Elemento 2
+        * Elemento 3\n"
+        \nLista numerada:\n"
+        1. Primer elemento\n"
+        2. Segundo elemento\n"
+           1. Subelemento 2.1\n"
+        \nTexto con `código en línea` y emoji 😊\n"
+        hola `amigo` 😊\n"""
 
         markdown_view = MarkdownView()
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_child(markdown_view)
         win.set_child(scrolled_window)
-        
+
         markdown_view.render_markdown(markdown_text)
         win.present()
 

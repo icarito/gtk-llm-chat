@@ -1,6 +1,10 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
+from gtk_llm_chat.llm_process import Message, LLMProcess
+from gtk_llm_chat.db_operations import ChatHistory
+from gtk_llm_chat.markdownview import MarkdownView
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import argparse
 import os
 import signal
@@ -8,12 +12,8 @@ import sys
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from gtk_llm_chat.markdownview import MarkdownView
-from gtk_llm_chat.db_operations import ChatHistory
-from gtk_llm_chat.llm_process import Message, LLMProcess
 
 
 class ErrorWidget(Gtk.Box):
@@ -102,8 +102,6 @@ class MessageWidget(Gtk.Box):
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.content_view.set_markdown(new_content)
-        # Asegurar que se haga scroll al actualizar el contenido
-        window = self.get_root()
 
 
 def parse_args(argv):
@@ -118,9 +116,11 @@ def parse_args(argv):
     parser.add_argument('-t', '--template', type=str,
                         help='Template a utilizar')
     parser.add_argument('-p', '--param', nargs=2, action='append',
-                        metavar=('KEY', 'VALUE'), help='Parámetros para el template')
+                        metavar=('KEY', 'VALUE'),
+                        help='Parámetros para el template')
     parser.add_argument('-o', '--option', nargs=2, action='append',
-                        metavar=('KEY', 'VALUE'), help='Opciones para el modelo')
+                        metavar=('KEY', 'VALUE'),
+                        help='Opciones para el modelo')
 
     # Parsear solo nuestros argumentos
     args = parser.parse_args(argv[1:])
@@ -224,7 +224,7 @@ class LLMChatApplication(Adw.Application):
 
     def do_shutdown(self):
         """Limpia recursos antes de cerrar la aplicación"""
-        print("Cerrando conexiones...")
+        print("\nCerrando conexiones...")
         if self.chat_history:
             self.chat_history.close()
 
@@ -242,6 +242,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     """
     A chat window
     """
+
     def __init__(self, config=None, **kwargs):
         super().__init__(**kwargs)
 
@@ -348,58 +349,58 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
-            .message { 
+            .message {
                 padding: 8px;
             }
-            
-            .message-content { 
+
+            .message-content {
                 padding: 6px;
                 min-width: 400px;
             }
-            
+
             .user-message .message-content {
                 background-color: @blue_3;
                 border-radius: 12px 12px 0 12px;
             }
-            
+
             .assistant-message .message-content {
                 background-color: @card_bg_color;
                 border-radius: 12px 12px 12px 0;
             }
-            
+
             .timestamp {
                 font-size: 0.8em;
                 opacity: 0.7;
             }
-            
+
             .error-message {
                 background-color: alpha(@error_color, 0.1);
                 border-radius: 6px;
                 padding: 8px;
             }
-            
+
             .error-icon {
                 color: @error_color;
             }
-            
+
             .error-content {
                 padding: 3px;
             }
-            
+
             textview {
                 background: none;
                 color: inherit;
                 padding: 3px;
             }
-            
+
             textview text {
                 background: none;
             }
-            
+
             .user-message textview text {
                 color: white;
             }
-            
+
             .user-message textview text selection {
                 background-color: rgba(255,255,255,0.3);
                 color: white;
@@ -474,7 +475,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Auto-scroll al último mensaje
             self._scroll_to_bottom()
 
-            print(f"[{message.timestamp}] {message.sender}: {message.content}")
+            print(f"\n\n{message.sender}: {message.content}\n\n")
             return True
         return False
 
@@ -490,7 +491,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _start_llm_task(self):
         """Inicia la tarea del LLM"""
-        print("Iniciando tarea LLM...")
 
         # Crear widget vacío para la respuesta
         self.accumulated_response = ""  # Reiniciar la respuesta acumulada
@@ -530,7 +530,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja la respuesta del LLM"""
         if response is None:
             if self.current_message_widget:
-                self.current_message_widget.get_parent().remove(self.current_message_widget)
+                parent = self.current_message_widget.get_parent()
+                parent.remove(self.current_message_widget)
                 self.current_message_widget = None
             self._show_error("Error al generar respuesta. Intente nuevamente.")
         else:
@@ -542,7 +543,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Obtener el contenido actual y agregar el nuevo token
         if not self.current_message_widget:
             return
-            
+
         # Actualizar el widget con la respuesta acumulada
         self.accumulated_response += response
 
@@ -554,7 +555,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if keyval == Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK:
             if self.llm.is_generating:
                 self.llm.cancel()
-                self.accumulated_response = ""  # Limpiar la respuesta acumulada
+            # Limpiar la respuesta acumulada
+                self.accumulated_response = ""
             return True
         return False
 
