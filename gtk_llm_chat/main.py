@@ -593,6 +593,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja el cierre de la ventana de manera elegante"""
         if self.llm.is_generating:
             self.llm.cancel()
+        sys.exit()
         return False  # Permite que la ventana se cierre
 
 
