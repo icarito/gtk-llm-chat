@@ -3,6 +3,8 @@ Gtk LLM Chat - A frontend for `llm`
 """
 import argparse
 import os
+import json
+import re 
 import signal
 import sys
 import gi
@@ -159,7 +161,6 @@ class LLMChatApplication(Adw.Application):
         """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
         print("\nCerrando aplicación...")
         self.quit()
-        Gtk.main_quit()
 
     def do_startup(self):
         # Llamar al método padre usando do_startup
@@ -225,7 +226,6 @@ class LLMChatApplication(Adw.Application):
 
     def do_shutdown(self):
         """Limpia recursos antes de cerrar la aplicación"""
-        print("\nCerrando conexiones...")
         if self.chat_history:
             self.chat_history.close()
 
@@ -479,7 +479,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Auto-scroll al último mensaje
             self._scroll_to_bottom()
 
-            print(f"\n\n{message.sender}: {message.content}\n\n")
+            print(f"\n\n{message.sender}: {message.content}\n")
             return True
         return False
 
@@ -510,6 +510,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _show_error(self, message):
         """Muestra un mensaje de error en el chat"""
+        print(message, file=sys.stderr)
+        if self.current_message_widget:
+            parent = self.current_message_widget.get_parent()
+            parent.remove(self.current_message_widget)
+            self.current_message_widget = None
+        if message.startswith("Traceback"):
+            message = message.split("\n")[-2]
+            # Let's see if we find some json in the message
+            try:
+                json_part = re.search(r"{.*}", message).group()
+                error = json.loads(json_part.replace("'", '"')
+                                            .replace('None', 'null'))
+                message = error.get('error').get('message')
+            except json.JSONDecodeError:
+                pass
         error_widget = ErrorWidget(message)
         self.messages_box.append(error_widget)
         self._scroll_to_bottom()
@@ -533,10 +548,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _handle_llm_response(self, response):
         """Maneja la respuesta del LLM"""
         if response is None:
-            if self.current_message_widget:
-                parent = self.current_message_widget.get_parent()
-                parent.remove(self.current_message_widget)
-                self.current_message_widget = None
             self._show_error("Error al generar respuesta. Intente nuevamente.")
         else:
             self.current_message_widget.update_content(response)

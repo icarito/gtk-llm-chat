@@ -1,7 +1,6 @@
 """
 Manejo simplificado del proceso LLM como subproceso.
 """
-
 from datetime import datetime
 from gi.repository import GLib, Gio, GObject
 
@@ -29,7 +28,9 @@ class LLMProcess(GObject.Object):
         # Emite cuando está listo para nueva entrada
         'ready': (GObject.SignalFlags.RUN_LAST, None, ()),
         # Emite cando llm reporta un error
-        'error': (GObject.SignalFlags.RUN_LAST, None, (str,))
+        'error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # Emite cuando el proceso termina
+        'process-terminated': (GObject.SignalFlags.RUN_LAST, None, (int,))
     }
 
     def __init__(self, config=None):
@@ -40,6 +41,8 @@ class LLMProcess(GObject.Object):
         self.config = config or {}
         self.token_queue = []  # Cola para almacenar tokens
         self.reading_response = False
+        self._error_buffer = ""
+        self.process_finished = False
 
     def initialize(self):
         """Inicia el proceso LLM"""
@@ -77,12 +80,13 @@ class LLMProcess(GObject.Object):
 
                 # Agregar opciones del modelo
                 if self.config.get('options'):
-                    for opt in self.config['options']:
+                    for opt in self.config.get('options'):
                         cmd.extend(['-o', opt[0], opt[1]])
 
                 try:
                     print(f"Ejecutando comando: {' '.join(cmd)}")
                     self.process = self.launcher.spawnv(cmd)
+                    self.process.wait_async(None, self._on_process_finished)
                 except GLib.Error as e:
                     print(f"Error al iniciar LLM: {str(e)}")
                     return
@@ -156,7 +160,7 @@ class LLMProcess(GObject.Object):
 
     def _read_response(self, callback, accumulated=""):
         """Lee la respuesta del LLM de forma incremental"""
-        if not self.reading_response:
+        if not self.reading_response and not self.process_finished:
             self.reading_response = True
             # Leer bytes de forma asíncrona
             self.stdout.read_bytes_async(
@@ -179,23 +183,24 @@ class LLMProcess(GObject.Object):
         callback = user_data
         try:
             bytes_read = stdout.read_bytes_finish(result)
-            if bytes_read:
-                text = bytes_read.get_data().decode('utf-8')
+            if not self.process_finished:
+                if bytes_read:
+                    text = bytes_read.get_data().decode('utf-8')
 
-                # Detectar si el modelo está listo para nueva entrada
-                if text.strip() == ">" or \
-                        text.endswith("\n> ") or \
-                        text.endswith("> "):
-                    self.emit('ready')
+                    # Detectar si el modelo está listo para nueva entrada
+                    if text.strip() == ">" or \
+                            text.endswith("\n> ") or \
+                            text.endswith("> "):
+                        self.emit('ready')
+                    else:
+                        # Emitir el token recibido
+                        callback(text)
+                        print(text, end="", flush=True)
+
+                    self.reading_response = False
+                    self._read_response(callback)
                 else:
-                    # Emitir el token recibido
-                    callback(text)
-                    print(text, end="", flush=True)
-
-                self.reading_response = False
-                self._read_response(callback)
-            else:
-                self.is_generating = False
+                    self.is_generating = False
         except Exception as e:
             print(f"Error leyendo respuesta: {e}")
             self.reading_response = False
@@ -206,12 +211,26 @@ class LLMProcess(GObject.Object):
         try:
             bytes_read = stderr.read_bytes_finish(result)
             if bytes_read:
-                error = bytes_read.get_data().decode('utf-8')
-                print(f"Error en LLM: {error}")
-                # Emitimos una señal
-                self.emit('error', error)
+                chunk = bytes_read.get_data().decode('utf-8')
+                self._error_buffer += chunk
+                if chunk:
+                    stderr.read_bytes_async(
+                        4096,
+                        GLib.PRIORITY_DEFAULT,
+                        None,
+                        self._handle_error
+                    )
+                else:
+                    self.emit('error', self._error_buffer)
+                    self._error_buffer = ""
         except Exception as e:
             print(f"Error leyendo salida de error: {e}")
+
+    def _on_process_finished(self, process, result):
+        """Maneja la terminación del subproceso."""
+        exit_status = process.wait_finish(result)
+        self.process_finished = True
+        self.emit('process-terminated', exit_status)
 
     def cancel(self):
         """Cancela la generación actual"""
