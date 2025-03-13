@@ -332,13 +332,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.add_controller(key_controller)
 
         # Botón enviar
-        send_button = Gtk.Button(label="Enviar")
-        send_button.connect('clicked', self._on_send_clicked)
-        send_button.add_css_class('suggested-action')
+        self.send_button = Gtk.Button(label="Enviar")
+        self.send_button.connect('clicked', self._on_send_clicked)
+        self.send_button.add_css_class('suggested-action')
 
         # Ensamblar la interfaz
         input_box.append(self.input_text)
-        input_box.append(send_button)
+        input_box.append(self.send_button)
 
         chat_box.append(scroll)
         chat_box.append(input_box)
@@ -444,6 +444,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Conectar los errres
         self.llm.connect("error", lambda llm, msg: self._show_error(msg))
+
+        # Si el proceso termina, bloqueemos la entrada
+        self.llm.connect("process-terminated", lambda llm, e: self.set_enabled(False))
+
+    def set_enabled(self, enabled):
+        """Habilita o deshabilita la entrada de texto"""
+        self.input_text.set_sensitive(enabled)
+        self.send_button.set_sensitive(enabled)
 
     def _on_text_changed(self, buffer):
         lines = buffer.get_line_count()
