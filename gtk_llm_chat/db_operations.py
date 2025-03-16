@@ -56,12 +56,29 @@ class ChatHistory:
 
         return history
 
-    def get_last_cid(self) -> Optional[str]:
+    def get_last_conversation(self):
         """Obtiene el último ID de conversación."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
+        cursor.execute("SELECT * FROM conversations ORDER BY id DESC LIMIT 1")
         row = cursor.fetchone()
-        return row['id'] if row else None
+        return dict(row) if row else None
+
+    def get_conversation(self, conversation_id: str):
+        """Obtiene una conversación específica."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def set_conversation_title(self, conversation_id: str, title: str):
+        """Establece el título de una conversación."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE conversations SET name = ? WHERE id = ?",
+            (title, conversation_id)
+        )
+        self.conn.commit()
 
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
         """Obtiene una lista de las últimas conversaciones"""
