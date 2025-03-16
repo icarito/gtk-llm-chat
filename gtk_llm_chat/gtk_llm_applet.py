@@ -11,7 +11,7 @@ gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from gtk_llm_chat.db_operations import ChatHistory
+from db_operations import ChatHistory
 
 
 def on_quit(*args):

@@ -80,6 +80,16 @@ class ChatHistory:
         )
         self.conn.commit()
 
+    def delete_conversation(self, conversation_id: str):
+        """Elimina una conversación específica."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        cursor.execute(
+            "DELETE FROM responses WHERE conversation_id = ?",
+            (conversation_id,))
+        self.conn.commit()
+
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
         """Obtiene una lista de las últimas conversaciones"""
         cursor = self.conn.cursor()

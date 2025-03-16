@@ -1,7 +1,6 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
-from gtk_llm_chat.db_operations import ChatHistory
 import argparse
 import os
 import json
@@ -12,10 +11,12 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
-from gtk_llm_chat.markdownview import MarkdownView
-from gtk_llm_chat.llm_process import Message, LLMProcess
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from db_operations import ChatHistory
+from markdownview import MarkdownView
+from llm_process import Message, LLMProcess
+
 
 
 class ErrorWidget(Gtk.Box):
@@ -174,6 +175,10 @@ class LLMChatApplication(Adw.Application):
         rename_action.connect("activate", self.on_rename_activate)
         self.add_action(rename_action)
 
+        delete_action = Gio.SimpleAction.new("delete", None)
+        delete_action.connect("activate", self.on_delete_activate)
+        self.add_action(delete_action)
+
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
@@ -232,6 +237,24 @@ class LLMChatApplication(Adw.Application):
         window.header.set_title_widget(window.title_entry)
         window.title_entry.grab_focus()
 
+    def on_delete_activate(self, action, param):
+        """Elimina la conversación actual"""
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_active_window(),
+            modal=True,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="¿Está seguro que desea eliminar la conversación?"
+        )
+        def on_delete_response(dialog, response):
+            if response == Gtk.ResponseType.YES and self.chat_history and self.config.get('cid'):
+                self.chat_history.delete_conversation(self.config['cid'])
+                self.quit()
+            dialog.destroy()
+
+        dialog.connect("response", on_delete_response)
+        dialog.present()
+
     def on_about_activate(self, action, param):
         """Muestra el diálogo Acerca de"""
         about = Adw.AboutWindow(
@@ -289,6 +312,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.connect('activate', self._on_save_title)
         self.set_title(title)
 
+        focus_controller = Gtk.EventControllerKey()
+        focus_controller.connect("key-pressed", self._cancel_set_title)
+        self.title_entry.add_controller(focus_controller)
+
         self.set_default_size(600, 700)
 
         # Inicializar la cola de mensajes
@@ -309,9 +336,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Crear menú
         menu = Gio.Menu.new()
         menu.append("Renombrar", "app.rename")
+        menu.append("Eliminar", "app.delete")
         menu.append("Acerca de", "app.about")
         menu_button.set_menu_model(menu)
+
+        # Rename button
+        rename_button = Gtk.Button()
+        rename_button.set_icon_name("document-edit-symbolic")
+        rename_button.connect('clicked', 
+                              lambda x: self.get_application().on_rename_activate(None, None))
+
         self.header.pack_end(menu_button)
+        self.header.pack_end(rename_button)
 
         # Contenedor principal
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -447,16 +483,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Variable para acumular la respuesta
         self.accumulated_response = ""
 
-        # Configurar atajo para cancelación
-        cancel_controller = Gtk.EventControllerKey()
-        cancel_controller.connect('key-pressed', self._on_cancel_pressed)
-        self.add_controller(cancel_controller)
-
-        # Configurar atajo para Escape
-        escape_controller = Gtk.EventControllerKey()
-        escape_controller.connect('key-pressed', self._on_escape_pressed)
-        self.add_controller(escape_controller)
-
         # Iniciar el LLM al arrancar
         self.llm.initialize()
 
@@ -491,6 +517,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.title_widget.set_title(new_title)
         self.set_title(new_title)
+    
+    def _cancel_set_title(self, controller, keyval, keycode, state):
+        """Cancela la edición y restaura el título anterior"""
+        if keyval == Gdk.KEY_Escape:
+            self.header.set_title_widget(self.title_widget)
+            self.title_entry.set_text(self.title_widget.get_title())
 
     def set_enabled(self, enabled):
         """Habilita o deshabilita la entrada de texto"""
@@ -504,7 +536,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.set_size_request(-1, new_height)
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
-
         if keyval == Gdk.KEY_Return:
             # Permitir Shift+Enter para nuevas líneas
             if not (state & Gdk.ModifierType.SHIFT_MASK):
@@ -564,9 +595,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _show_error(self, message):
         """Muestra un mensaje de error en el chat"""
         print(message, file=sys.stderr)
-        if self.current_message_widget:
-            parent = self.current_message_widget.get_parent()
-            parent.remove(self.current_message_widget)
+        if self.current_message_widget and self.current_message_widget in self.messages_box.get_children():
+            self.messages_box.remove(self.current_message_widget)
             self.current_message_widget = None
         if message.startswith("Traceback"):
             message = message.split("\n")[-2]
@@ -582,17 +612,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.append(error_widget)
         self._scroll_to_bottom()
 
-    def _handle_initial_response(self, model_name):
-        """Maneja la respuesta inicial del LLM"""
-        if model_name:
-            self.title_widget.set_subtitle(model_name)
-        else:
-            self._show_error("No se pudo iniciar el chat con el modelo")
-            self.title_widget.set_subtitle("Sin conexión")
-
     def _on_llm_model_name(self, llm_process, model_name):
         """Maneja la señal de nombre del modelo del LLM"""
-        self._handle_initial_response(model_name)
+        self.title_widget.set_subtitle(model_name)
+        self.config['model'] = model_name
 
     def _on_llm_ready(self, llm_process):
         """Maneja la señal de que el LLM está listo para nueva entrada"""
@@ -617,23 +640,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.current_message_widget.update_content(self.accumulated_response)
         self._scroll_to_bottom()
-
-    def _on_cancel_pressed(self, controller, keyval, keycode, state):
-        """Maneja la cancelación con Ctrl+C"""
-        if keyval == Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.llm.is_generating:
-                self.llm.cancel()
-            # Limpiar la respuesta acumulada
-                self.accumulated_response = ""
-            return True
-        return False
-
-    def _on_escape_pressed(self, controller, keyval, keycode, state):
-        """Maneja la tecla Escape"""
-        if keyval == Gdk.KEY_Escape:
-            self.minimize()
-            return True
-        return False
 
     def _scroll_to_bottom(self):
         """Desplaza la vista al último mensaje"""
