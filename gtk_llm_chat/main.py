@@ -651,18 +651,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.accumulated_response += response
 
         self.current_message_widget.update_content(self.accumulated_response)
-        self._scroll_to_bottom()
+        self._scroll_to_bottom(False)
 
-    def _scroll_to_bottom(self):
+    def _scroll_to_bottom(self, force=True):
         """Desplaza la vista al último mensaje"""
         scroll = self.messages_box.get_parent()
         adj = scroll.get_vadjustment()
         def scroll_after():
             adj.set_value(adj.get_upper() - adj.get_page_size())
             return False
-        # Programar el scroll para después de que se actualice el layout
         # Pequeño delay para asegurar que el layout está actualizado
-        if adj.get_value() == adj.get_upper() - adj.get_page_size():
+        if force or adj.get_value() == adj.get_upper() - adj.get_page_size():
             GLib.timeout_add(50, scroll_after)
 
     def display_message(self, content, is_user=True):
