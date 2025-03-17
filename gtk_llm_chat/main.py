@@ -214,7 +214,9 @@ class LLMChatApplication(Adw.Application):
                     self.config['cid'])
                 if conversation:
                     self.config['name'] = conversation['name']
-            window.set_conversation_name(self.config.get('name'))
+            name = self.config.get('name')
+            if name:  
+                window.set_conversation_name(name.strip().removeprefix("user: "))
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])
@@ -259,8 +261,11 @@ class LLMChatApplication(Adw.Application):
         """Muestra el diálogo Acerca de"""
         about = Adw.AboutWindow(
             transient_for=self.get_active_window(),
-            application_name="LLM Chat",
+            application_name="Gtk LLM Chat",
             application_icon="org.fuentelibre.gtk_llm_Chat",
+            website="https://github.com/icarito/gtk_llm_chat",
+            comments="Un frontend para LLM",
+            license_type=Gtk.License.GPL_3_0,
             developer_name="Sebastian Silva",
             version="1.0",
             developers=["Sebastian Silva <sebastian@fuentelibre.org>"],
@@ -335,10 +340,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear menú
         menu = Gio.Menu.new()
+
+        # Crear item "Renombrar"
         menu.append("Renombrar", "app.rename")
+
+        # Crear item "Eliminar" con ícono - TODO Needs workaround GNOME attitude XXX
+        #delete_item = Gio.MenuItem.new("Eliminar", "app.delete")
+        #delete_icon = Gio.ThemedIcon.new_with_default_fallbacks("edit-delete")
+        #delete_item.set_icon(delete_icon)
         menu.append("Eliminar", "app.delete")
+
+        # Crear item "Acerca de"
         menu.append("Acerca de", "app.about")
-        menu_button.set_menu_model(menu)
+
+        # Crear un popover para el menú
+        popover = Gtk.PopoverMenu()
+        menu_button.set_popover(popover)
+        popover.set_menu_model(menu)
+        
 
         # Rename button
         rename_button = Gtk.Button()
@@ -621,13 +640,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja la señal de que el LLM está listo para nueva entrada"""
         self.input_text.grab_focus()  # Enfocar el cuadro de entrada
 
-    def _handle_llm_response(self, response):
-        """Maneja la respuesta del LLM"""
-        if response is None:
-            self._show_error("Error al generar respuesta. Intente nuevamente.")
-        else:
-            self.current_message_widget.update_content(response)
-            self._scroll_to_bottom()
 
     def _on_llm_response(self, llm_process, response):
         """Maneja la señal de respuesta del LLM"""
@@ -643,14 +655,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _scroll_to_bottom(self):
         """Desplaza la vista al último mensaje"""
+        scroll = self.messages_box.get_parent()
+        adj = scroll.get_vadjustment()
         def scroll_after():
-            scroll = self.messages_box.get_parent()
-            adj = scroll.get_vadjustment()
             adj.set_value(adj.get_upper() - adj.get_page_size())
-            return False  # Importante para que no se repita
+            return False
         # Programar el scroll para después de que se actualice el layout
         # Pequeño delay para asegurar que el layout está actualizado
-        GLib.timeout_add(50, scroll_after)
+        if adj.get_value() == adj.get_upper() - adj.get_page_size():
+            GLib.timeout_add(50, scroll_after)
 
     def display_message(self, content, is_user=True):
         """Muestra un mensaje en la ventana de chat"""

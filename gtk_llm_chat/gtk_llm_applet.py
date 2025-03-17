@@ -26,7 +26,7 @@ def add_last_conversations_to_menu(menu):
     chat_history.close()
 
     for conversation in last_conversations:
-        conversation_name = conversation['name'].removeprefix("user: ")
+        conversation_name = conversation['name'].strip().removeprefix("user: ")
         conversation_id = conversation['id']
         menu_item = Gtk.MenuItem(label=conversation_name)
         menu_item.connect("activate",
