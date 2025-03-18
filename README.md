@@ -36,8 +36,14 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 libay
 
 Ejecutar la aplicación:
 ```
+gtk-llm-applet
+```
+
+o para un chat individual:
+```
 gtk-llm-chat
 ```
+
 
 Con argumentos opcionales:
 ```
