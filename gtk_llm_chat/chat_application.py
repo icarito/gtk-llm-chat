@@ -341,10 +341,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _show_error(self, message):
         """Muestra un mensaje de error en el chat"""
         print(message, file=sys.stderr)
-        if (self.current_message_widget and self.current_message_widget
-                in self.messages_box.get_children()):
-            self.messages_box.remove(self.current_message_widget)
-            self.current_message_widget = None
+        # Verificar si el widget actual existe y es hijo del messages_box
+        if self.current_message_widget is not None:
+            is_child = (self.current_message_widget.get_parent() ==
+                        self.messages_box)
+            # Si es hijo, removerlo
+            if is_child:
+                self.messages_box.remove(self.current_message_widget)
+                self.current_message_widget = None
         if message.startswith("Traceback"):
             message = message.split("\n")[-2]
             # Let's see if we find some json in the message
