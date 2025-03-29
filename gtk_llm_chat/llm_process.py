@@ -80,7 +80,7 @@ class LLMProcess(GObject.Object):
 
                 # Agregar opciones del modelo
                 if self.config.get('options'):
-                    for opt in self.config.get('options'):
+                    for opt in self.config.get('options', []):
                         cmd.extend(['-o', opt[0], opt[1]])
 
                 try:

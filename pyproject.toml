@@ -30,6 +30,13 @@ Repository = "https://github.com/icarito/gtk_llm_chat.git"
 gtk-llm-chat = "gtk_llm_chat.main:main"
 gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"
 
+[tool.pyright]
+reportAttributeAccessIssue = false
+ignore = ["**/build/**", "**/dist/**", "**/venv/**"]
+
+[tool.flake8]
+extend-ignore = ["E402"]
+
 [tool.setuptools.packages.find]
 exclude = ["desktop*"]
 

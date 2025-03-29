@@ -72,7 +72,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear item "Eliminar" con ícono - TODO Needs workaround GNOME
         # delete_item = Gio.MenuItem.new("Eliminar", "app.delete")
-        # delete_icon = Gio.ThemedIcon.new_with_default_fallbacks("edit-delete")
+        # delete_icon = Gio.ThemedIcon.new_with_default_fallbacks(
+        #                                                   "edit-delete")
         # delete_item.set_icon(delete_icon)
         menu.append("Eliminar", "app.delete")
 
@@ -348,10 +349,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             message = message.split("\n")[-2]
             # Let's see if we find some json in the message
             try:
-                json_part = re.search(r"{.*}", message).group()
-                error = json.loads(json_part.replace("'", '"')
-                                            .replace('None', 'null'))
-                message = error.get('error').get('message')
+                match = re.search(r"{.*}", message)
+                if match:
+                    json_part = match.group()
+                    error = json.loads(json_part.replace("'", '"')
+                                                .replace('None', 'null'))
+                    message = error.get('error').get('message')
             except json.JSONDecodeError:
                 pass
         error_widget = ErrorWidget(message)
@@ -480,7 +483,8 @@ class LLMChatApplication(Adw.Application):
                     self.config['name'] = conversation['name']
             name = self.config.get('name')
             if name:
-                window.set_conversation_name(name.strip().removeprefix("user: "))
+                window.set_conversation_name(
+                    name.strip().removeprefix("user: "))
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])
