@@ -2,6 +2,8 @@ import sqlite3
 from typing import List, Dict, Optional
 import subprocess
 import json
+from datetime import datetime, timezone
+from ulid import ULID
 
 
 class ChatHistory:
@@ -105,6 +107,66 @@ class ChatHistory:
 
         return conversations
 
+    def add_history_entry(
+        self, conversation_id: str, prompt: str, response_text: str,
+        model_id: str
+    ):
+        """Añade una nueva entrada de prompt/respuesta a la base de datos."""
+        if not conversation_id:
+            print("Error: Se requiere conversation_id para añadir al "
+                  "historial.")
+            return
+
+        cursor = self.conn.cursor()
+        try:
+            response_id = str(ULID()).lower()
+
+            # Usar datetime para el timestamp UTC
+            timestamp_utc = datetime.now(timezone.utc).isoformat()
+
+            cursor.execute("""
+                INSERT INTO responses
+                (id, model, prompt, response, conversation_id, datetime_utc)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                response_id,
+                model_id,
+                prompt,
+                response_text,
+                conversation_id,
+                timestamp_utc
+            ))
+            self.conn.commit()
+            print(f"Entrada añadida a la conversación {conversation_id}")
+        except sqlite3.Error as e:
+            print(f"Error al añadir entrada al historial: {e}")
+            self.conn.rollback()  # Deshacer cambios en caso de error
+
     def close(self):
         """Cierra la conexión a la base de datos."""
         self.conn.close()
+
+    def create_conversation_if_not_exists(self, conversation_id, name: str):
+        """Crea una entrada en la tabla de conversaciones si no existe.
+
+        Args:
+            conversation_id: El ID único de la conversación.
+            name: El nombre inicial para la conversación.
+        """
+        if not conversation_id:
+            print("Error: Se requiere conversation_id para crear la conversación.")
+            return
+
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT OR IGNORE INTO conversations (id, name)
+                VALUES (?, ?)
+            """, (conversation_id, name))
+            self.conn.commit()
+            # Opcional: verificar si se insertó una fila
+            # if cursor.rowcount > 0:
+            #     print(f"Registro de conversación creado para ID: {conversation_id}")
+        except sqlite3.Error as e:
+            print(f"Error al crear registro de conversación: {e}")
+            self.conn.rollback()

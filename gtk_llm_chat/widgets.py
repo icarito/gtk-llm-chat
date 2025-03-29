@@ -4,9 +4,21 @@ import sys
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from markdownview import MarkdownView
+
+
+class Message:
+    """
+    Representa un mensaje
+    """
+
+    def __init__(self, content, sender="user", timestamp=None):
+        self.content = content
+        self.sender = sender
+        self.timestamp = timestamp or datetime.now()
 
 
 class ErrorWidget(Gtk.Box):

@@ -9,8 +9,8 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from llm_process import Message, LLMProcess
-from widgets import MessageWidget, ErrorWidget
+from llm_client import LLMClient
+from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
 
@@ -29,10 +29,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.config = config or {}
 
         # Inicializar LLMProcess con la configuración
-        self.llm = LLMProcess(self.config)
-
-        # Mantener referencia a la clase Message
-        self.Message = Message
+        try:
+            self.llm = LLMClient(self.config)
+        except Exception as e:
+            # TODO: Mostrar error de inicialización en la UI de forma más
+            # elegante
+            print(f"Error fatal al inicializar LLMClient: {e}")
+            # Podríamos cerrar la app o mostrar un diálogo aquí
+            sys.exit(1)
 
         # Configurar la ventana principal
         # Asegurar que title nunca sea None
@@ -58,6 +62,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Crear header bar
         self.header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle.new(title, "Iniciando...")
+
+        # Obtener y mostrar el ID del modelo en el subtítulo
+        model_id = self.llm.get_model_id()
+        if model_id:
+            self.title_widget.set_subtitle(model_id)
+
         self.header.set_title_widget(self.title_widget)
 
         # Botón de menú
@@ -66,18 +76,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear menú
         menu = Gio.Menu.new()
-
-        # Crear item "Renombrar"
         menu.append("Renombrar", "app.rename")
-
-        # Crear item "Eliminar" con ícono - TODO Needs workaround GNOME
-        # delete_item = Gio.MenuItem.new("Eliminar", "app.delete")
-        # delete_icon = Gio.ThemedIcon.new_with_default_fallbacks(
-        #                                                   "edit-delete")
-        # delete_item.set_icon(delete_icon)
         menu.append("Eliminar", "app.delete")
-
-        # Crear item "Acerca de"
         menu.append("Acerca de", "app.about")
 
         # Crear un popover para el menú
@@ -229,24 +229,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Variable para acumular la respuesta
         self.accumulated_response = ""
 
-        # Iniciar el LLM al arrancar
-        self.llm.initialize()
+        # Ya no se necesita inicializar explícitamente LLMClient
 
-        # Conectar la señal de respuesta del LLM
+        # Conectar las nuevas señales de LLMClient
         self.llm.connect('response', self._on_llm_response)
+        self.llm.connect('error', self._on_llm_error)  # Use dedicated method
+        self.llm.connect('finished', self._on_llm_finished)
 
-        # Conectar la señal de nombre del modelo del LLM
-        self.llm.connect('ready', self._on_llm_ready)
-
-        # Conectar la señal de nombre del modelo del LLM
-        self.llm.connect('model-name', self._on_llm_model_name)
-
-        # Conectar los errres
-        self.llm.connect("error", lambda llm, msg: self._show_error(msg))
-
-        # Si el proceso termina, bloqueemos la entrada
-        self.llm.connect("process-terminated", lambda llm,
-                         e: self.set_enabled(False))
+        # Eliminar conexiones a señales antiguas
+        # self.llm.connect('ready', self._on_llm_ready)
+        # self.llm.connect('model-name', self._on_llm_model_name)
+        # self.llm.connect("process-terminated", ...)
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""
@@ -296,7 +289,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _add_message_to_queue(self, content, sender="user"):
         """Agrega un nuevo mensaje a la cola y lo muestra"""
         if content := self._sanitize_input(content):
-            message = self.Message(content, sender)
+            message = Message(content, sender)
             self.message_queue.append(message)
 
             if sender == "user":
@@ -315,30 +308,38 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
-        text = buffer.get_text(buffer.get_start_iter(),
-                               buffer.get_end_iter(), True)
+        text = buffer.get_text(
+            buffer.get_start_iter(), buffer.get_end_iter(), True
+        )
+        sanitized_text = self._sanitize_input(text)
 
-        if self._add_message_to_queue(text):
+        if sanitized_text:
+            # Añadir mensaje a la cola ANTES de limpiar el buffer
+            self._add_message_to_queue(sanitized_text, sender="user")
             buffer.set_text("")
-            # Usar GLib.idle_add para ejecutar la tarea asíncrona
-            GLib.idle_add(self._start_llm_task)
+            # Deshabilitar entrada y empezar tarea LLM
+            self.set_enabled(False)
+            # Pasar el texto sanitizado directamente
+            GLib.idle_add(self._start_llm_task, sanitized_text)
 
-    def _start_llm_task(self):
-        """Inicia la tarea del LLM"""
+    def _start_llm_task(self, prompt_text):
+        """Inicia la tarea del LLM con el prompt dado."""
 
         # Crear widget vacío para la respuesta
         self.accumulated_response = ""  # Reiniciar la respuesta acumulada
+        # Usar la clase Message importada
         self.current_message_widget = MessageWidget(
-            self.Message("", sender="assistant"))
+            Message("", sender="assistant")
+        )
         self.messages_box.append(self.current_message_widget)
 
-        # Solo enviar el último mensaje
+        # Enviar el prompt usando LLMClient
+        self.llm.send_message(prompt_text)
 
-        if self.last_message:
-            self.llm.send_message([self.last_message])
-        return
+        # Devolver False para que idle_add no se repita
+        return GLib.SOURCE_REMOVE
 
-    def _show_error(self, message):
+    def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
         print(message, file=sys.stderr)
         # Verificar si el widget actual existe y es hijo del messages_box
@@ -365,16 +366,66 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.append(error_widget)
         self._scroll_to_bottom()
 
-    def _on_llm_model_name(self, llm_process, model_name):
-        """Maneja la señal de nombre del modelo del LLM"""
-        self.title_widget.set_subtitle(model_name)
-        self.config['model'] = model_name
+    # _on_llm_model_name y _on_llm_ready ya no son necesarios con LLMClient
 
-    def _on_llm_ready(self, llm_process):
-        """Maneja la señal de que el LLM está listo para nueva entrada"""
-        self.input_text.grab_focus()  # Enfocar el cuadro de entrada
+    def _on_llm_finished(self, llm_client, success: bool):
+        """Maneja la señal 'finished' de LLMClient."""
+        print(f"LLM finished. Success: {success}")
+        # Habilitar la entrada de nuevo, independientemente del éxito/error
+        # ya que el proceso ha terminado.
+        # El error ya se mostró si success es False.
+        self.set_enabled(True)
+        # Opcional: Enfocar input si fue exitoso?
+        if success:
+            # Guardar en el historial si la respuesta fue exitosa
+            app = self.get_application()
+            cid = self.config.get('cid')
+            model_id = self.llm.get_model_id()  # Obtener model_id
+            # Si no teníamos un CID (nueva conversación) y el cliente LLM ya tiene uno
+            # (porque la primera respuesta se procesó y guardó), lo guardamos.
+            if not cid and self.llm.get_conversation_id():
+                new_cid = self.llm.get_conversation_id()
+                self.config['cid'] = new_cid
+                print(f"Nueva conversación creada con ID: {new_cid}")
+                # Asegurarse que chat_history esté inicializado si es una nueva conv
+                if not app.chat_history:
+                    from db_operations import ChatHistory
+                    app.chat_history = ChatHistory()
+                # Generar nombre predeterminado y crear registro en 'conversations'
+                default_name = "Nueva Conversación"  # Nombre inicial por defecto
+                if self.last_message:
+                    prompt_words = self.last_message.content.split()
+                    # Usar las primeras 5 palabras como nombre, o menos si son pocas
+                    default_name = " ".join(prompt_words[:5])
+                    if len(prompt_words) > 5:
+                        default_name += "..."  # Indicar que es un resumen
 
-    def _on_llm_response(self, llm_process, response):
+                # Llamar a la nueva función para crear la entrada en conversations
+                # Es importante hacerlo ANTES de add_history_entry
+                app.chat_history\
+                    .create_conversation_if_not_exists(new_cid, default_name)
+
+                # Actualizar título de la ventana con el nombre predeterminado
+                self.set_conversation_name(default_name)
+
+                # Actualizar la variable local cid para el guardado posterior
+                cid = new_cid
+
+            if app.chat_history and cid and self.last_message and model_id:
+                try:
+                    app.chat_history.add_history_entry(
+                        cid,
+                        self.last_message.content,
+                        self.accumulated_response,
+                        model_id  # Pasar model_id
+                    )
+                except Exception as e:
+                    # Manejar posible error al guardar (opcional)
+                    print(f"Error al guardar en historial: {e}")
+
+            self.input_text.grab_focus()
+
+    def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del LLM"""
         # Obtener el contenido actual y agregar el nuevo token
         if not self.current_message_widget:
@@ -400,15 +451,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def display_message(self, content, is_user=True):
         """Muestra un mensaje en la ventana de chat"""
-        message = self.Message(content, "user" if is_user else "assistant")
+        message = Message(content, "user" if is_user else "assistant")
         message_widget = MessageWidget(message)
         self.messages_box.append(message_widget)
         GLib.idle_add(self._scroll_to_bottom)
 
     def _on_close_request(self, window):
         """Maneja el cierre de la ventana de manera elegante"""
-        if self.llm.is_generating:
-            self.llm.cancel()
+        # LLMClient.cancel() ya verifica internamente si está generando
+        self.llm.cancel()
         sys.exit()
         return False  # Permite que la ventana se cierre
 
@@ -492,6 +543,9 @@ class LLMChatApplication(Adw.Application):
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])
+                # Cargar el historial en el LLMClient para mantener contexto
+                if history:
+                    window.llm.load_history(history)
                 for entry in history:
                     window.display_message(
                         entry['prompt'],
@@ -556,8 +610,8 @@ class LLMChatApplication(Adw.Application):
         # Obtener la ventana activa y cerrar el LLM si está corriendo
         window = self.get_active_window()
         if window and hasattr(window, 'llm'):
-            if window.llm.is_generating:
-                window.llm.cancel()
+            # LLMClient.cancel() ya verifica internamente si está generando
+            window.llm.cancel()
 
         # Llamar al método padre
         Adw.Application.do_shutdown(self)
