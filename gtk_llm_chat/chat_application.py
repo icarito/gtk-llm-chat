@@ -524,21 +524,15 @@ class LLMChatApplication(Adw.Application):
 
     def get_application_version(self):
         """
-        Obtiene la versión de la aplicación desde pyproject.toml.
+        Obtiene la versión de la aplicación desde _version.py.
         """
         try:
-            with open('pyproject.toml', 'r') as f:
-                for line in f:
-                    if line.startswith('version = "'):
-                        # Extraer la versión entre comillas
-                        version = line.split('"')[1]
-                        return version
-        except FileNotFoundError:
-            print("Error: pyproject.toml no encontrado")
+            from gtk_llm_chat import _version
+            return _version.__version__
+        except ImportError:
+            print("Error: _version.py no encontrado")
             return "Desconocida"
         return "Desconocida"
-
-        self.set_accels_for_action("app.rename", ["<Alt>R"])
 
     def _setup_icon(self):
         """Configura el ícono de la aplicación"""
@@ -550,6 +544,11 @@ class LLMChatApplication(Adw.Application):
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
         window = LLMChatWindow(application=self, config=self.config)
+
+        # Establecer directorio de búsqueda
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        icon_theme.add_search_path(current_dir)
 
         # Establecer el ícono por nombre (sin extensión .svg)
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")

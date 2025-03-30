@@ -7,7 +7,7 @@ def register_commands(cli):
 
     @cli.command(name="gtk-applet")
     def run_applet():
-        """Runs the applet."""
+        """Runs the applet"""
         from gtk_llm_chat.gtk_llm_applet import main
         main()
 
@@ -41,8 +41,8 @@ def register_commands(cli):
         help="Opciones para el modelo",
     )
     def run_gui(cid, system, model, continue_last, template, param, option):
+        """Runs a GUI for the chatbot"""
         from gtk_llm_chat.chat_application import LLMChatApplication
-        """Runs a GUI for the chatbot."""
         # Crear diccionario de configuración
         config = {
             'cid': cid,

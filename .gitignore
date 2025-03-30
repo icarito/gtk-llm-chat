@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+gtk_llm_chat/_version.py
 
 # Distribution / packaging
 dist/

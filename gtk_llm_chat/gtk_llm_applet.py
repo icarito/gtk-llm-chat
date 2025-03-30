@@ -39,11 +39,11 @@ def add_last_conversations_to_menu(menu):
 
 
 def open_conversation(conversation_id):
-    subprocess.Popen(['gtk-llm-chat', '--cid', conversation_id])
+    subprocess.Popen(['llm', 'gtk-chat', '--cid', conversation_id])
 
 
 def on_new_conversation(widget):
-    subprocess.Popen(['gtk-llm-chat'])
+    subprocess.Popen(['llm', 'gtk-chat'])
 
 
 def create_menu():
