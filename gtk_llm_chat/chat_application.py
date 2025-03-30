@@ -500,7 +500,7 @@ class LLMChatApplication(Adw.Application):
         LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
         try:
             # Intentar establecer solo la categoría de mensajes
-            locale.setlocale(locale.LC_MESSAGES, '') 
+            locale.setlocale(locale.LC_MESSAGES, '')
         except locale.Error as e:
             print(f"Advertencia: No se pudo establecer la configuración regional: {e}")
         gettext.bindtextdomain(APP_NAME, LOCALE_DIR)

@@ -76,7 +76,7 @@ def main():
     LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
     try:
         # Intentar establecer solo la categoría de mensajes
-        locale.setlocale(locale.LC_MESSAGES, '') 
+        locale.setlocale(locale.LC_MESSAGES, '')
     except locale.Error as e:
         print("Advertencia: No se pudo establecer la configuración regional "
               f"para el applet: {e}", file=sys.stderr)

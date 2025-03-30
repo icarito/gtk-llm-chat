@@ -246,7 +246,8 @@ class LLMClient(GObject.Object):
                 print(_("LLMClient: Warning - Assistant response without "
                       "previous user prompt in history."))
 
-        print(_(f"LLMClient: History loaded. Total responses in conversation: {len(current_conversation.responses)}"))
+        print(_("LLMClient: History loaded. Total responses in conversation: "
+                + f"{len(current_conversation.responses)}"))
 
 
 # Registrar el tipo GObject para que las señales funcionen correctamente
