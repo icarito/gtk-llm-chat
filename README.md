@@ -2,6 +2,8 @@
 
 Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs).
 
+![screenshot](./docs/screenshot01.png)
+
 ## Características
 
 - Interfaz gráfica simple y fácil de usar construida con GTK
