@@ -522,6 +522,22 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+    def get_application_version(self):
+        """
+        Obtiene la versión de la aplicación desde pyproject.toml.
+        """
+        try:
+            with open('pyproject.toml', 'r') as f:
+                for line in f:
+                    if line.startswith('version = "'):
+                        # Extraer la versión entre comillas
+                        version = line.split('"')[1]
+                        return version
+        except FileNotFoundError:
+            print("Error: pyproject.toml no encontrado")
+            return "Desconocida"
+        return "Desconocida"
+
         self.set_accels_for_action("app.rename", ["<Alt>R"])
 
     def _setup_icon(self):
@@ -614,7 +630,7 @@ class LLMChatApplication(Adw.Application):
             comments=_("A frontend for LLM"),
             license_type=Gtk.License.GPL_3_0,
             developer_name="Sebastian Silva",
-            version="1.0",
+            version=self.get_application_version(),
             developers=["Sebastian Silva <sebastian@fuentelibre.org>"],
             copyright="© 2024 Sebastian Silva"
         )
