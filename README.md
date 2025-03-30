@@ -15,8 +15,8 @@ Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs).
 ## Instalación
 
 ```
-pipx install llm               # requerido por gtk-llm-chat
-pipx install gtk-llm-chat
+pipx install llm               # required by gtk-llm-chat
+llm install gtk-chat
 ```
 
 ### Requisitos del Sistema
@@ -36,21 +36,21 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 libay
 
 Ejecutar la aplicación:
 ```
-gtk-llm-applet
+llm gtk-applet
 ```
 
 o para un chat individual:
 ```
-gtk-llm-chat
+llm gtk-chat
 ```
 
 
 Con argumentos opcionales:
 ```
-gtk-llm-chat --cid ID_CONVERSACION  # Continuar una conversación específica
-gtk-llm-chat -s "Prompt del sistema"  # Establecer prompt del sistema
-gtk-llm-chat -m nombre_modelo  # Seleccionar modelo específico
-gtk-llm-chat -c  # Continuar última conversación
+llm gtk-chat --cid ID_CONVERSACION  # Continuar una conversación específica
+llm gtk-chat -s "Prompt del sistema"  # Establecer prompt del sistema
+llm gtk-chat -m nombre_modelo  # Seleccionar modelo específico
+llm gtk-chat -c  # Continuar última conversación
 ```
 
 ## Desarrollo
