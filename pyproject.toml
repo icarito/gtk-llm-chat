@@ -27,6 +27,9 @@ Homepage = "https://github.com/icarito/gtk_llm_chat"
 Issues = "https://github.com/icarito/gtk_llm_chat/issues"
 Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
+[project.entry-points.llm]
+gui = "gtk_llm_chat.llm_gui"
+
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
 gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"

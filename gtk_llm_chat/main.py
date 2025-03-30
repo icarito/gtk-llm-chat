@@ -44,12 +44,15 @@ def parse_args(argv):
     return config
 
 
-def main():
+def main(argv=None):
     """
     Aquí inicia todo
     """
+    if argv is None:
+        argv = sys.argv
+    
     # Parsear argumentos ANTES de que GTK los vea
-    argv = [arg for arg in sys.argv if not arg.startswith(
+    argv = [arg for arg in argv if not arg.startswith(
         ('--gtk', '--gdk', '--display'))]
     config = parse_args(argv)
 
