@@ -1,0 +1,100 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR Your Name
+# This file is distributed under the same license as the gtk-llm-chat package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: gtk-llm-chat 0.1\n"
+"Report-Msgid-Bugs-To: your@email.com\n"
+"POT-Creation-Date: 2025-03-29 21:01-0500\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: gtk_llm_chat/gtk_llm_applet.py:23
+msgid ""
+"\n"
+"Closing application..."
+msgstr ""
+
+#: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/chat_application.py:399
+msgid "New Conversation"
+msgstr ""
+
+#: gtk_llm_chat/gtk_llm_applet.py:64
+msgid "Quit"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:48
+msgid "LLM Chat"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:69
+msgid "Initializing..."
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:84
+msgid "Rename"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:85
+msgid "Delete"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:86
+msgid "About"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:149
+msgid "Send"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:405
+msgid "..."
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:592
+msgid "Are you sure you want to delete the conversation?"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:611
+msgid "Gtk LLM Chat"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:614
+msgid "A frontend for LLM"
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:85
+msgid "LLMClient: Ignoring invalid temperature:"
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:123
+msgid "LLMClient: Stream finished (StopIteration)"
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:139
+msgid "LLMClient: Response completed (on_done)."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:170
+msgid "LLMClient: Cancel request received."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:196
+msgid ""
+"LLMClient: Error - Attempting to load history without initialized "
+"conversation or model."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:248
+msgid ""
+"LLMClient: Warning - Assistant response without previous user prompt in "
+"history."
+msgstr ""

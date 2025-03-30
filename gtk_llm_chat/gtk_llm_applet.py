@@ -5,10 +5,14 @@ import os
 import subprocess
 import signal
 import sys
+import locale
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
+import gettext
+
+_ = gettext.gettext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
@@ -16,7 +20,7 @@ from db_operations import ChatHistory
 
 def on_quit(*args):
     """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
-    print("\nCerrando aplicación...")
+    print(_("\nClosing application..."))
     Gtk.main_quit()
 
 
@@ -45,7 +49,7 @@ def on_new_conversation(widget):
 def create_menu():
     menu = Gtk.Menu()
 
-    item = Gtk.MenuItem(label="Nueva conversación")
+    item = Gtk.MenuItem(label=_("New Conversation"))
     item.connect("activate", on_new_conversation)
     menu.append(item)
 
@@ -57,7 +61,7 @@ def create_menu():
     separator = Gtk.SeparatorMenuItem()
     menu.append(separator)
 
-    quit_item = Gtk.MenuItem(label="Salir")
+    quit_item = Gtk.MenuItem(label=_("Quit"))
     quit_item.connect("activate", on_quit)
     menu.append(quit_item)
 
@@ -66,6 +70,20 @@ def create_menu():
 
 
 def main():
+    # Inicializar gettext para el applet
+    APP_NAME = "gtk-llm-chat"  # Usar el mismo domain que la app principal
+    # Usar ruta absoluta para asegurar que se encuentre el directorio 'po'
+    LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
+    try:
+        # Intentar establecer solo la categoría de mensajes
+        locale.setlocale(locale.LC_MESSAGES, '') 
+    except locale.Error as e:
+        print("Advertencia: No se pudo establecer la configuración regional "
+              f"para el applet: {e}", file=sys.stderr)
+    gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
+    gettext.textdomain(APP_NAME)
+    # La variable global _ ya está definida al inicio del archivo
+
     chat_history = ChatHistory()
     icon_path = os.path.join(os.path.dirname(__file__),
                              'hicolor/scalable/apps/',

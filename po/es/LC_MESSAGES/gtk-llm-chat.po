@@ -1,0 +1,127 @@
+# Spanish translations for PACKAGE package.
+# Copyright (C) 2025 THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# Sebastian Silva <sebastian@fuentelibre.org>, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: your@email.com\n"
+"POT-Creation-Date: 2025-03-29 21:01-0500\n"
+"PO-Revision-Date: 2025-03-29 19:14-0500\n"
+"Last-Translator: Sebastian Silva <sebastian@fuentelibre.org>\n"
+"Language-Team: Spanish <es@tp.org.es>\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#
+#: gtk_llm_chat/gtk_llm_applet.py:23
+msgid ""
+"\n"
+"Closing application..."
+msgstr ""
+"\n"
+"Cerrando aplicación..."
+
+#
+#: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/chat_application.py:399
+msgid "New Conversation"
+msgstr "Nueva Conversación"
+
+#: gtk_llm_chat/gtk_llm_applet.py:64
+msgid "Quit"
+msgstr "Salir"
+
+#: gtk_llm_chat/chat_application.py:48
+msgid "LLM Chat"
+msgstr "LLM Chat"
+
+#: gtk_llm_chat/chat_application.py:69
+msgid "Initializing..."
+msgstr "Iniciando..."
+
+#: gtk_llm_chat/chat_application.py:84
+msgid "Rename"
+msgstr "Renombrar"
+
+#: gtk_llm_chat/chat_application.py:85
+msgid "Delete"
+msgstr "Eliminar"
+
+#: gtk_llm_chat/chat_application.py:86
+msgid "About"
+msgstr "Acerca de"
+
+#: gtk_llm_chat/chat_application.py:149
+msgid "Send"
+msgstr "Enviar"
+
+#: gtk_llm_chat/chat_application.py:405
+msgid "..."
+msgstr "..."
+
+#: gtk_llm_chat/chat_application.py:592
+msgid "Are you sure you want to delete the conversation?"
+msgstr "¿Está seguro que desea eliminar la conversación?"
+
+#: gtk_llm_chat/chat_application.py:611
+msgid "Gtk LLM Chat"
+msgstr "Gtk LLM Chat"
+
+#
+#: gtk_llm_chat/chat_application.py:614
+msgid "A frontend for LLM"
+msgstr "Un frontend para LLM"
+
+#: gtk_llm_chat/llm_client.py:85
+#, fuzzy
+msgid "LLMClient: Ignoring invalid temperature:"
+msgstr "LLMClient: Ignorando temperatura inválida"
+
+#: gtk_llm_chat/llm_client.py:123
+#, fuzzy
+msgid "LLMClient: Stream finished (StopIteration)"
+msgstr "LLMClient: Stream finalizado (StopIteration)"
+
+#: gtk_llm_chat/llm_client.py:139
+#, fuzzy
+msgid "LLMClient: Response completed (on_done)."
+msgstr "LLMClient: Respuesta completada (on_done)"
+
+#: gtk_llm_chat/llm_client.py:170
+msgid "LLMClient: Cancel request received."
+msgstr "LLMClient: Solicitud de cancelación recibida."
+
+#: gtk_llm_chat/llm_client.py:196
+#, fuzzy
+msgid ""
+"LLMClient: Error - Attempting to load history without initialized "
+"conversation or model."
+msgstr ""
+"LLMClient: Error - Intento de cargar historial sin conversación o modelo inicializado."
+
+#: gtk_llm_chat/llm_client.py:248
+msgid ""
+"LLMClient: Warning - Assistant response without previous user prompt in "
+"history."
+msgstr ""
+"LLMClient: Advertencia - Respuesta de asistente sin prompt de usuario previo en el historial."
+
+#~ msgid "LLMClient: Solicitud de cancelación recibida."
+#~ msgstr "LLMClient: Solicitud de cancelación recibida"
+
+#~ msgid "historial..."
+#~ msgstr "historial…"
+
+#~ msgid ""
+#~ "LLMClient: Advertencia - Respuesta de asistente sin prompt de usuario "
+#~ "previo en el historial."
+#~ msgstr ""
+#~ "LLMClient: Advertencia - Respuesta de asistente sin prompt de usuario "
+#~ "previo en el historialen el historial."
+
+#~ msgid "LLMClient: Historial cargado. Total respuestas en "
+#~ msgstr "LLMClient: Historial cargado. Total respuestas en la conversación"

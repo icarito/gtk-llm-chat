@@ -1,3 +1,6 @@
+import gettext
+_ = gettext.gettext
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -31,17 +34,17 @@ class LLMClient(GObject.Object):
 
         try:
             model_id = self.config.get('model') or llm.get_default_model()
-            print(model_id)
+            print(_(f"{model_id}"))
             self.model = llm.get_model(model_id)
-            print(f"LLMClient: Usando modelo {self.model.model_id}")
+            print(_(f"LLMClient: Using model {self.model.model_id}"))
             self.conversation = self.model.conversation()
         except llm.UnknownModelError as e:
-            print(f"LLMClient: Error - Modelo desconocido: {e}")
+            print(_(f"LLMClient: Error - Unknown model: {e}"))
             # Emitir error aquí podría ser problemático si la UI no está lista
             # Podríamos necesitar un estado 'error_en_init' o lanzar excepción
             raise e  # Re-lanzar por ahora
         except Exception as e:
-            print(f"LLMClient: Error inesperado en init: {e}")
+            print(_(f"LLMClient: Unexpected error in init: {e}"))
             raise e  # Re-lanzar por ahora
 
     def send_message(self, prompt: str):
@@ -66,7 +69,7 @@ class LLMClient(GObject.Object):
         self._stream_iterator = None
 
         try:
-            print(f"LLMClient: Enviando prompt: {prompt[:50]}...")
+            print(_(f"LLMClient: Sending prompt: {prompt[:50]}..."))
             # Preparar argumentos para prompt
             prompt_args = {}
             if self.config.get('system'):
@@ -77,7 +80,7 @@ class LLMClient(GObject.Object):
                     temp_val = float(self.config['temperature'])
                     prompt_args['temperature'] = temp_val
                 except ValueError:
-                    print("LLMClient: Ignorando temperatura inválida:",
+                    print(_("LLMClient: Ignoring invalid temperature:"),
                           self.config['temperature'])
 
             # TODO: Añadir manejo de otras opciones/parámetros si es necesario
@@ -93,7 +96,7 @@ class LLMClient(GObject.Object):
             self._idle_source_id = GLib.idle_add(self._process_stream)
 
         except Exception as e:
-            print(f"LLMClient: Error al enviar prompt: {e}")
+            print(_(f"LLMClient: Error sending prompt: {e}"))
             self.emit('error', f"Error al enviar prompt: {e}")
             self._is_generating_flag = False
             self.emit('finished', False)  # Indicar finalización fallida
@@ -115,12 +118,12 @@ class LLMClient(GObject.Object):
 
         except StopIteration:
             # El stream terminó normalmente, on_done se encargará
-            print("LLMClient: Stream finalizado (StopIteration)")
+            print(_("LLMClient: Stream finished (StopIteration)"))
             self._idle_source_id = None
             return GLib.SOURCE_REMOVE
 
         except Exception as e:
-            print(f"\nLLMClient: Error durante el streaming: {e}")
+            print(_(f"\nLLMClient: Error during streaming: {e}"))
             self.emit('error', f"Error durante el streaming: {e}")
             self._is_generating_flag = False
             # No emitir 'finished' aquí, dejar que on_done lo haga
@@ -131,7 +134,7 @@ class LLMClient(GObject.Object):
         """
         Callback ejecutado por response.on_done() cuando la respuesta finaliza.
         """
-        print("LLMClient: Respuesta completada (on_done).")
+        print(_("LLMClient: Response completed (on_done)."))
         # Verificar si hubo error durante el stream
         # (aunque _process_stream ya lo emitió)
         # Podríamos verificar response.error si existiera,
@@ -153,16 +156,16 @@ class LLMClient(GObject.Object):
         # Opcional: Imprimir uso de tokens si es útil
         try:
             usage = response.usage()
-            print(f"LLMClient: Uso de tokens: {usage}")
+            print(_(f"LLMClient: Token usage: {usage}"))
         except Exception as e:
-            print(f"LLMClient: No se pudo obtener el uso de tokens: {e}")
+            print(_(f"LLMClient: Could not get token usage: {e}"))
 
     def cancel(self):
         """
         Intenta detener el procesamiento del stream actual.
         Nota: No detiene la generación en el servidor.
         """
-        print("LLMClient: Solicitud de cancelación recibida.")
+        print(_("LLMClient: Cancel request received."))
         if self._is_generating_flag:
             self._is_generating_flag = False
             # El flag detendrá la emisión de 'response' en _process_stream
@@ -188,15 +191,14 @@ class LLMClient(GObject.Object):
         """Carga el historial previo en el objeto conversation."""
         # Asegurarse de que la conversación y el modelo estén inicializados
         if not self.conversation or not self.model:
-            print("LLMClient: Error - Intento de cargar historial sin "
-                  "conversación o modelo inicializado.")
+            print(_("LLMClient: Error - Attempting to load history without "
+                  "initialized conversation or model."))
             return
         # Ayuda para el type checker
         current_model = self.model
         current_conversation = self.conversation
 
-        print(f"LLMClient: Cargando {len(history_entries)} entradas de "
-              f"historial...")
+        print(_(f"LLMClient: Loading {len(history_entries)} history entries..."))
         # Limpiar respuestas existentes si las hubiera
         # (aunque no debería haberlas)
         current_conversation.responses.clear()
@@ -241,11 +243,10 @@ class LLMClient(GObject.Object):
                 current_conversation.responses.append(resp_assistant)
             elif assistant_response and not last_prompt_obj:
                 # Esto no debería ocurrir si el historial está bien formado
-                print("LLMClient: Advertencia - Respuesta de asistente sin "
-                      "prompt de usuario previo en el historial.")
+                print(_("LLMClient: Warning - Assistant response without "
+                      "previous user prompt in history."))
 
-        print(f"LLMClient: Historial cargado. Total respuestas en "
-              f"conversación: {len(current_conversation.responses)}")
+        print(_(f"LLMClient: History loaded. Total responses in conversation: {len(current_conversation.responses)}"))
 
 
 # Registrar el tipo GObject para que las señales funcionen correctamente

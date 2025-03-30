@@ -7,6 +7,10 @@ import sys
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+import locale
+import gettext
+
+_ = gettext.gettext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from llm_client import LLMClient
@@ -40,7 +44,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Configurar la ventana principal
         # Asegurar que title nunca sea None
-        title = self.config.get('template') or "LLM Chat"
+        # Keep "LLM Chat" as it is generally understood
+        title = self.config.get('template') or _("LLM Chat")
         self.title_entry = Gtk.Entry()
         self.title_entry.set_hexpand(True)
         self.title_entry.set_text(title)
@@ -61,7 +66,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear header bar
         self.header = Adw.HeaderBar()
-        self.title_widget = Adw.WindowTitle.new(title, "Iniciando...")
+        self.title_widget = Adw.WindowTitle.new(title, _("Initializing..."))
 
         # Obtener y mostrar el ID del modelo en el subtítulo
         model_id = self.llm.get_model_id()
@@ -76,9 +81,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear menú
         menu = Gio.Menu.new()
-        menu.append("Renombrar", "app.rename")
-        menu.append("Eliminar", "app.delete")
-        menu.append("Acerca de", "app.about")
+        menu.append(_("Rename"), "app.rename")
+        menu.append(_("Delete"), "app.delete")
+        menu.append(_("About"), "app.about")
 
         # Crear un popover para el menú
         popover = Gtk.PopoverMenu()
@@ -141,7 +146,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.add_controller(key_controller)
 
         # Botón enviar
-        self.send_button = Gtk.Button(label="Enviar")
+        self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
 
@@ -389,16 +394,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 print(f"Nueva conversación creada con ID: {new_cid}")
                 # Asegurarse que chat_history esté inicializado si es una nueva conv
                 if not app.chat_history:
-                    from db_operations import ChatHistory
                     app.chat_history = ChatHistory()
                 # Generar nombre predeterminado y crear registro en 'conversations'
-                default_name = "Nueva Conversación"  # Nombre inicial por defecto
+                default_name = _("New Conversation")  # Default initial name
                 if self.last_message:
                     prompt_words = self.last_message.content.split()
                     # Usar las primeras 5 palabras como nombre, o menos si son pocas
                     default_name = " ".join(prompt_words[:5])
                     if len(prompt_words) > 5:
-                        default_name += "..."  # Indicar que es un resumen
+                        default_name += _("...")  # Indicate it's a summary
 
                 # Llamar a la nueva función para crear la entrada en conversations
                 # Es importante hacerlo ANTES de add_history_entry
@@ -489,6 +493,19 @@ class LLMChatApplication(Adw.Application):
         # Llamar al método padre usando do_startup
         Adw.Application.do_startup(self)
 
+        # Inicializar gettext
+        APP_NAME = "gtk-llm-chat"
+        # Usar ruta absoluta para asegurar que se encuentre el directorio 'po'
+        base_dir = os.path.dirname(__file__)
+        LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
+        try:
+            # Intentar establecer solo la categoría de mensajes
+            locale.setlocale(locale.LC_MESSAGES, '') 
+        except locale.Error as e:
+            print(f"Advertencia: No se pudo establecer la configuración regional: {e}")
+        gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
+        gettext.textdomain(APP_NAME)
+
         # Configurar el icono de la aplicación
         self._setup_icon()
 
@@ -572,7 +589,7 @@ class LLMChatApplication(Adw.Application):
             modal=True,
             message_type=Gtk.MessageType.WARNING,
             buttons=Gtk.ButtonsType.YES_NO,
-            text="¿Está seguro que desea eliminar la conversación?"
+            text=_("Are you sure you want to delete the conversation?")
         )
 
         def on_delete_response(dialog, response):
@@ -590,10 +607,11 @@ class LLMChatApplication(Adw.Application):
         """Muestra el diálogo Acerca de"""
         about = Adw.AboutWindow(
             transient_for=self.get_active_window(),
-            application_name="Gtk LLM Chat",
+            # Keep "Gtk LLM Chat" as the application name
+            application_name=_("Gtk LLM Chat"),
             application_icon="org.fuentelibre.gtk_llm_Chat",
             website="https://github.com/icarito/gtk_llm_chat",
-            comments="Un frontend para LLM",
+            comments=_("A frontend for LLM"),
             license_type=Gtk.License.GPL_3_0,
             developer_name="Sebastian Silva",
             version="1.0",
