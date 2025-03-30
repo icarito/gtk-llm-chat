@@ -5,13 +5,13 @@ import click
 @llm.hookimpl
 def register_commands(cli):
 
-    @cli.command(name="applet")
+    @cli.command(name="gtk-applet")
     def run_applet():
         """Runs the applet."""
         from gtk_llm_chat.gtk_llm_applet import main
         main()
 
-    @cli.command(name="gui")
+    @cli.command(name="gtk-chat")
     @click.option("--cid", type=str,
                   help='ID de la conversación a continuar')
     @click.option('-s', '--system', type=str, help='Prompt del sistema')
