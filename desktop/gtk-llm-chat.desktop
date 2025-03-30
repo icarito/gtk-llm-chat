@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=GTK LLM Chat
 Comment=Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs)
-Exec=gtk-llm-chat
+Exec=llm gtk-chat
 Icon=org.fuentelibre.gtk_llm_Chat
 Terminal=false
 Type=Application

@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=GTK LLM Applet
 Comment=Un applet GTK para chatear con modelos de lenguaje (LLMs)
-Exec=gtk-llm-applet
+Exec=llm gtk-applet
 Icon=org.fuentelibre.gtk_llm_Chat
 Terminal=false
 Type=Application
