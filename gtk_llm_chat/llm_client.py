@@ -2,12 +2,12 @@ import gettext
 _ = gettext.gettext
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import GObject, GLib
+gi.require_version('Gtk', '3.0')
+from gi.repository import GObject, Gtk, GLib
 import llm
 
 
+import logging
 class LLMClient(GObject.Object):
     """
     Cliente para interactuar con la API python-llm usando conversaciones
@@ -151,7 +151,7 @@ class LLMClient(GObject.Object):
         # Emitir señal de finalización
         # Usar idle_add para asegurar que se emita desde el hilo principal,
         # aunque on_done probablemente ya lo haga. Por seguridad:
-        GLib.idle_add(self.emit, 'finished', success)
+        self.emit('finished', success)
 
         # Opcional: Imprimir uso de tokens si es útil
         try:
@@ -243,8 +243,11 @@ class LLMClient(GObject.Object):
                 current_conversation.responses.append(resp_assistant)
             elif assistant_response and not last_prompt_obj:
                 # Esto no debería ocurrir si el historial está bien formado
-                print(_("LLMClient: Warning - Assistant response without "
-                      "previous user prompt in history."))
+                logger = logging.getLogger(__name__)
+                logger.error(  # Dividida la línea larga
+                    _("LLMClient: Error - Historial inválido: Respuesta del asistente sin prompt del usuario. Ignorando entrada.")
+                )
+                continue
 
         print(_("LLMClient: History loaded. Total responses in conversation: "
                 + f"{len(current_conversation.responses)}"))

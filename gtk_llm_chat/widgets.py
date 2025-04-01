@@ -1,8 +1,7 @@
 import gi
 import os
 import sys
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 from datetime import datetime
 
@@ -27,28 +26,30 @@ class ErrorWidget(Gtk.Box):
     def __init__(self, message):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        self.add_css_class('error-message')
+        self.get_style_context().add_class('error-message')
         self.set_margin_start(6)
         self.set_margin_end(6)
         self.set_margin_top(3)
         self.set_margin_bottom(3)
 
         # Icono de advertencia
-        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
-        icon.add_css_class('error-icon')
-        self.append(icon)
+        icon = Gtk.Image()
+        icon.set_from_icon_name("dialog-warning", Gtk.IconSize.MENU)
+        icon_style = icon.get_style_context()
+        icon_style.add_class("error-icon")
+        self.add(icon)
 
         # Contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        message_box.add_css_class('error-content')
+        message_box_style = message_box.get_style_context()
+        message_box_style.add_class("error-content")
 
         # Texto del error
         label = Gtk.Label(label=message)
-        label.set_wrap(True)
         label.set_xalign(0)
-        message_box.append(label)
+        message_box.add(label)
 
-        self.append(message_box)
+        self.add(message_box)
 
 
 class MessageWidget(Gtk.Box):
@@ -59,29 +60,34 @@ class MessageWidget(Gtk.Box):
 
         # Configurar el estilo según el remitente
         is_user = message.sender == "user"
-        self.add_css_class('message')
-        self.add_css_class('user-message' if is_user else 'assistant-message')
+        self.get_style_context().add_class('message')
+        self.get_style_context().add_class(
+            'user-message' if is_user else 'assistant-message'
+        )
 
         # Crear un contenedor con margen para centrar el contenido
-        margin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        margin_box = Gtk.HBox()
         margin_box.set_hexpand(True)
 
         # Crear el contenedor del mensaje
-        message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        message_box.add_css_class('message-content')
+        message_box = Gtk.VBox(spacing=3)
+        message_box_style = message_box.get_style_context()
+        message_box_style.add_class("message-content")
         message_box.set_hexpand(True)
 
         # Agregar espaciadores flexibles a los lados
         if is_user:
-            margin_box.append(Gtk.Box(hexpand=True))  # Espaciador izquierdo
-            margin_box.append(message_box)
+            left_spacer = Gtk.Box()
+            left_spacer.set_hexpand(True)
+            margin_box.add(left_spacer)  # Espaciador izquierdo
+            margin_box.add(message_box)
             # Espaciador derecho pequeño
-            margin_box.append(Gtk.Box(hexpand=False))
+            margin_box.add(Gtk.Box(hexpand=False))
         else:
             # Espaciador izquierdo pequeño
-            margin_box.append(Gtk.Box(hexpand=False))
-            margin_box.append(message_box)
-            margin_box.append(Gtk.Box(hexpand=True))  # Espaciador derecho
+            margin_box.add(Gtk.Box(hexpand=False))
+            margin_box.add(message_box)
+            margin_box.add(Gtk.Box(hexpand=True))  # Espaciador derecho
 
         # Quitar el prefijo "user:" si existe
         content = message.content
@@ -90,20 +96,54 @@ class MessageWidget(Gtk.Box):
 
         # Usar MarkdownView para el contenido
         self.content_view = MarkdownView()
+        self.content_view.set_size_request(200, -1)  # Asegurar tamaño mínimo en GTK3
         self.content_view.set_hexpand(True)
         self.content_view.set_markdown(content)
-        message_box.append(self.content_view)
+        message_box.add(self.content_view)
 
         # Agregar timestamp
         time_label = Gtk.Label(
-            label=message.timestamp.strftime("%H:%M"),
-            css_classes=['timestamp']
-        )
+            label=message.timestamp.strftime("%H:%M"))
         time_label.set_halign(Gtk.Align.END)
-        message_box.append(time_label)
+        message_box.add(time_label)
 
-        self.append(margin_box)
+        self.add(margin_box)
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.content_view.set_markdown(new_content)
+
+
+if __name__ == "__main__":
+    import gi
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk
+
+    css_provider = Gtk.CssProvider()
+    css_path = os.path.join(os.path.dirname(__file__), "styles", "gtk-llm.css")
+    css_provider.load_from_path(css_path)
+    screen = Gdk.Screen.get_default()
+    Gtk.StyleContext.add_provider_for_screen(
+        screen,
+        css_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+    win = Gtk.Window(title="Ejemplo de Widgets")
+    win.set_default_size(400, 300)
+
+    box = Gtk.VBox()
+    win.add(box)
+
+    ejemplo_msg_user = Message("Hola, soy el usuario", "user")
+    ejemplo_msg_assistant = Message("Hola, soy el asistente", "assistant")
+
+    box.pack_start(MessageWidget(ejemplo_msg_user), False, False, 0)
+    box.pack_start(MessageWidget(ejemplo_msg_assistant), False, False, 0)
+
+    box.pack_start(ErrorWidget("Este es un mensaje de error"), False, False, 0)
+
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+

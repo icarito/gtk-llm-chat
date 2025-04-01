@@ -1,8 +1,8 @@
 from markdown_it import MarkdownIt
 import re
 import gi
-gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Pango  # noqa: E402
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Pango
 
 
 class MarkdownView(Gtk.TextView):
@@ -273,11 +273,11 @@ if __name__ == "__main__":
 
         markdown_view = MarkdownView()
         scrolled_window = Gtk.ScrolledWindow()
-        scrolled_window.set_child(markdown_view)
-        win.set_child(scrolled_window)
+        scrolled_window.add(markdown_view)
+        win.add(scrolled_window)
 
         markdown_view.render_markdown(markdown_text)
-        win.present()
+        win.show_all()
 
     app.connect('activate', on_activate)
     app.run()

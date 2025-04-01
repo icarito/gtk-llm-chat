@@ -1,0 +1,52 @@
+.message {
+    padding: 8px;
+}
+
+.message-content {
+    padding: 6px;
+    min-width: 400px;
+}
+
+.user-message .message-content {
+    background-color: #3498db;
+    border-radius: 12px 12px 0 12px;
+}
+
+.assistant-message .message-content {
+    background-color: #f0f0f0;
+    border-radius: 12px 12px 12px 0;
+}
+
+.timestamp {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+.error-message {
+    background-color: rgba(255, 0, 0, 0.1);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.error-icon {
+    color: red;
+}
+
+.error-content {
+    padding: 3px;
+}
+
+textview {
+    background: none;
+    color: inherit;
+    padding: 3px;
+}
+
+.user-message textview {
+    color: white;
+}
+
+.user-message textview selection {
+    background-color: rgba(255,255,255,0.3);
+    color: white;
+}
