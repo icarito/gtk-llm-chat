@@ -2,8 +2,7 @@ import gettext
 _ = gettext.gettext
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+gi.require_version('Gtk', '3.0')
 from gi.repository import GObject, GLib
 import llm
 

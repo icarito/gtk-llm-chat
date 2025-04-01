@@ -4,9 +4,8 @@ import os
 import re
 import signal
 import sys
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gio, Gdk, GLib
 import locale
 import gettext
 
@@ -18,7 +17,7 @@ from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
 
-class LLMChatWindow(Adw.ApplicationWindow):
+class LLMChatWindow(Gtk.Window):
     """
     A chat window
     """
@@ -27,7 +26,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
 
         # Conectar señal de cierre de ventana
-        self.connect('close-request', self._on_close_request)
+        self.connect('delete-event', self._on_close_request)
 
         # Asegurar que config no sea None
         self.config = config or {}
@@ -52,9 +51,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.connect('activate', self._on_save_title)
         self.set_title(title)
 
-        focus_controller = Gtk.EventControllerKey()
-        focus_controller.connect("key-pressed", self._cancel_set_title)
-        self.title_entry.add_controller(focus_controller)
+        self.title_entry.connect("key-press-event", self._cancel_set_title)
+        # self.title_entry.add_controller(focus_controller) # GTK4
 
         self.set_default_size(600, 700)
 
@@ -65,19 +63,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.last_message = None
 
         # Crear header bar
-        self.header = Adw.HeaderBar()
-        self.title_widget = Adw.WindowTitle.new(title, _("Initializing..."))
+        self.header = Gtk.Box()
+        self.title_widget = Gtk.Label(label=title)
 
         # Obtener y mostrar el ID del modelo en el subtítulo
         model_id = self.llm.get_model_id()
         if model_id:
-            self.title_widget.set_subtitle(model_id)
+            pass  # Gtk.Label does not have set_subtitle
 
-        self.header.set_title_widget(self.title_widget)
+        self.header.pack_start(self.title_widget, True, True, 0)
 
         # Botón de menú
         menu_button = Gtk.MenuButton()
-        menu_button.set_icon_name("open-menu-symbolic")
+        # menu_button.set_icon_name("open-menu-symbolic") # GTK4
+        icon = Gtk.Image.new_from_icon_name(
+            "open-menu-symbolic", Gtk.IconSize.MENU)
+        menu_button.add(icon)
 
         # Crear menú
         menu = Gio.Menu.new()
@@ -86,23 +87,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
         menu.append(_("About"), "app.about")
 
         # Crear un popover para el menú
-        popover = Gtk.PopoverMenu()
+        popover = Gtk.Menu()
         menu_button.set_popover(popover)
-        popover.set_menu_model(menu)
 
         # Rename button
         rename_button = Gtk.Button()
-        rename_button.set_icon_name("document-edit-symbolic")
+        icon = Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.MENU)
+        rename_button.add(icon)
         rename_button.connect('clicked',
                               lambda x: self.get_application()
                               .on_rename_activate(None, None))
 
-        self.header.pack_end(menu_button)
-        self.header.pack_end(rename_button)
+        self.header.pack_end(menu_button, False, False, 0)
+        self.header.pack_end(rename_button, False, False, 0)
 
         # Contenedor principal
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        main_box.append(self.header)
+        main_box.pack_start(self.header, False, False, 0)
 
         # Contenedor para el chat
         chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -119,7 +120,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_margin_bottom(12)
         self.messages_box.set_margin_start(12)
         self.messages_box.set_margin_end(12)
-        scroll.set_child(self.messages_box)
+        scroll.add(self.messages_box)
 
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -141,9 +142,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         buffer.connect('changed', self._on_text_changed)
 
         # Configurar atajo de teclado Enter
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect('key-pressed', self._on_key_pressed)
-        self.input_text.add_controller(key_controller)
+        self.input_text.connect('key-press-event', self._on_key_pressed)
 
         # Botón enviar
         self.send_button = Gtk.Button(label=_("Send"))
@@ -159,7 +158,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         main_box.append(chat_box)
 
-        self.set_content(main_box)
+        self.add(main_box)
 
         # Agregar CSS provider
         css_provider = Gtk.CssProvider()
@@ -256,16 +255,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         app = self.get_application()
         app.chat_history.set_conversation_title(
             self.config.get('cid'), self.title_entry.get_text())
-        self.header.set_title_widget(self.title_widget)
+        self.header.pack_start(self.title_widget, True, True, 0)
         new_title = self.title_entry.get_text()
 
         self.title_widget.set_title(new_title)
         self.set_title(new_title)
 
-    def _cancel_set_title(self, controller, keyval, keycode, state):
+    def _cancel_set_title(self, widget, event):
         """Cancela la edición y restaura el título anterior"""
-        if keyval == Gdk.KEY_Escape:
-            self.header.set_title_widget(self.title_widget)
+        if event.keyval == Gdk.KEY_Escape:
+            self.header.pack_start(self.title_widget, True, True, 0)
             self.title_entry.set_text(self.title_widget.get_title())
 
     def set_enabled(self, enabled):
@@ -468,7 +467,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return False  # Permite que la ventana se cierre
 
 
-class LLMChatApplication(Adw.Application):
+class LLMChatApplication(Gtk.Application):
     """
     Clase para una instancia de un chat
     """
@@ -491,7 +490,7 @@ class LLMChatApplication(Adw.Application):
 
     def do_startup(self):
         # Llamar al método padre usando do_startup
-        Adw.Application.do_startup(self)
+        Gtk.Application.do_startup(self)
 
         # Inicializar gettext
         APP_NAME = "gtk-llm-chat"
@@ -538,8 +537,8 @@ class LLMChatApplication(Adw.Application):
         """Configura el ícono de la aplicación"""
         # Establecer directorio de búsqueda
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        icon_theme.add_search_path(current_dir)
+        icon_theme = Gtk.IconTheme.get_default()
+        icon_theme.append_search_path(current_dir)
 
     def do_activate(self):
         # Crear una nueva ventana para esta instancia
@@ -548,7 +547,7 @@ class LLMChatApplication(Adw.Application):
         # Establecer directorio de búsqueda
         current_dir = os.path.dirname(os.path.abspath(__file__))
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        icon_theme.add_search_path(current_dir)
+        icon_theme.append_search_path(current_dir)
 
         # Establecer el ícono por nombre (sin extensión .svg)
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
@@ -594,7 +593,7 @@ class LLMChatApplication(Adw.Application):
     def on_rename_activate(self, action, param):
         """Renombra la conversación actual"""
         window = self.get_active_window()
-        window.header.set_title_widget(window.title_entry)
+        window.header.pack_start(window.title_entry, True, True, 0)
         window.title_entry.grab_focus()
 
     def on_delete_activate(self, action, param):
@@ -620,18 +619,16 @@ class LLMChatApplication(Adw.Application):
 
     def on_about_activate(self, action, param):
         """Muestra el diálogo Acerca de"""
-        about = Adw.AboutWindow(
+        about = Gtk.AboutDialog(
             transient_for=self.get_active_window(),
-            # Keep "Gtk LLM Chat" as the application name
-            application_name=_("Gtk LLM Chat"),
-            application_icon="org.fuentelibre.gtk_llm_Chat",
+            program_name=_("Gtk LLM Chat"),
+            logo_icon_name="org.fuentelibre.gtk_llm_Chat",
             website="https://github.com/icarito/gtk_llm_chat",
             comments=_("A frontend for LLM"),
-            license_type=Gtk.License.GPL_3_0,
-            developer_name="Sebastian Silva",
-            version=self.get_application_version(),
-            developers=["Sebastian Silva <sebastian@fuentelibre.org>"],
-            copyright="© 2024 Sebastian Silva"
+            license=Gtk.License.GPL_3_0,
+            authors=["Sebastian Silva <sebastian@fuentelibre.org>"],
+            copyright="© 2024 Sebastian Silva",
+            version=self.get_application_version()
         )
         about.present()
 
@@ -647,4 +644,4 @@ class LLMChatApplication(Adw.Application):
             window.llm.cancel()
 
         # Llamar al método padre
-        Adw.Application.do_shutdown(self)
+        Gtk.Application.do_shutdown(self)

@@ -1,8 +1,7 @@
 import gi
 import os
 import sys
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 from datetime import datetime
 
@@ -36,7 +35,7 @@ class ErrorWidget(Gtk.Box):
         # Icono de advertencia
         icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
         icon.add_css_class('error-icon')
-        self.append(icon)
+        self.pack_start(icon, False, False, 0)
 
         # Contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -48,7 +47,7 @@ class ErrorWidget(Gtk.Box):
         label.set_xalign(0)
         message_box.append(label)
 
-        self.append(message_box)
+        self.pack_start(message_box, True, True, 0)
 
 
 class MessageWidget(Gtk.Box):
@@ -74,7 +73,7 @@ class MessageWidget(Gtk.Box):
         # Agregar espaciadores flexibles a los lados
         if is_user:
             margin_box.append(Gtk.Box(hexpand=True))  # Espaciador izquierdo
-            margin_box.append(message_box)
+            margin_box.pack_start(message_box, True, True, 0)
             # Espaciador derecho pequeño
             margin_box.append(Gtk.Box(hexpand=False))
         else:
@@ -92,7 +91,7 @@ class MessageWidget(Gtk.Box):
         self.content_view = MarkdownView()
         self.content_view.set_hexpand(True)
         self.content_view.set_markdown(content)
-        message_box.append(self.content_view)
+        message_box.pack_start(self.content_view, True, True, 0)
 
         # Agregar timestamp
         time_label = Gtk.Label(
@@ -100,9 +99,9 @@ class MessageWidget(Gtk.Box):
             css_classes=['timestamp']
         )
         time_label.set_halign(Gtk.Align.END)
-        message_box.append(time_label)
+        message_box.pack_start(time_label, False, False, 0)
 
-        self.append(margin_box)
+        self.pack_start(margin_box, True, True, 0)
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
