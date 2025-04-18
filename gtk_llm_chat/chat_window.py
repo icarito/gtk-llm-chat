@@ -36,10 +36,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         try:
             self.llm = LLMClient(self.config)
             self.llm.connect('model-loaded', self._on_model_loaded)
-
-            print(_("LLMClient initialized successfully"))
         except Exception as e:
-            print(_(f"Error fatal al inicializar LLMClient: {e}"))
+            print(_(f"Fatal error starting LLMClient: {e}"))
             sys.exit(1)
 
         # Configurar la ventana principal
@@ -111,6 +109,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_margin_bottom(12)
         self.messages_box.set_margin_start(12)
         self.messages_box.set_margin_end(12)
+        # Desactivar la selección en la lista de mensajes
+        self.messages_box.set_can_focus(False)
         scroll.set_child(self.messages_box)
 
         # Área de entrada
@@ -290,7 +290,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Auto-scroll al último mensaje
             self._scroll_to_bottom()
 
-            print(f"\n\n{message.sender}: {message.content}\n")
             return True
         return False
 
@@ -317,7 +316,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 Message("", sender="assistant")
             )
             self.messages_box.append(self.current_message_widget)
-            self._scroll_to_bottom()
+            self._scroll_to_bottom() # Auto-scroll al enviar el mensaje
             GLib.idle_add(self._start_llm_task, sanitized_text)
 
     def _start_llm_task(self, prompt_text):
@@ -357,7 +356,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_llm_finished(self, llm_client, success: bool):
         """Maneja la señal 'finished' de LLMClient."""
-        print(_(f"LLM finished. Success: {success}"))
         self.set_enabled(True)
         self.accumulated_response = ""
         self.input_text.grab_focus()
