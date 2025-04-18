@@ -10,3 +10,4 @@ gtk_llm_chat/_version.py
 dist/
 build/
 *.egg-info/
+plans/
