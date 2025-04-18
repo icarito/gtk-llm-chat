@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2025-03-29 21:01-0500\n"
+"POT-Creation-Date: 2025-04-18 17:18-0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,13 +17,37 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: gtk_llm_chat/gtk_llm_applet.py:23
+#: gtk_llm_chat/chat_window.py:40
+msgid "LLMClient initialized successfully"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:46 gtk_llm_chat/chat_window.py:67
+msgid "LLM Chat"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:76
+msgid "Rename"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:77
+msgid "Delete"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:78
+msgid "About"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:141
+msgid "Send"
+msgstr ""
+
+#: gtk_llm_chat/gtk_llm_applet.py:23 gtk_llm_chat/chat_application.py:36
 msgid ""
 "\n"
 "Closing application..."
 msgstr ""
 
-#: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/chat_application.py:399
+#: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/llm_client.py:122
 msgid "New Conversation"
 msgstr ""
 
@@ -31,70 +55,76 @@ msgstr ""
 msgid "Quit"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:48
-msgid "LLM Chat"
+#: gtk_llm_chat/db_operations.py:118
+msgid "Error: conversation_id is required to add to history."
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:69
-msgid "Initializing..."
+#: gtk_llm_chat/db_operations.py:158
+msgid "Error: conversation_id is required to create the conversation."
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:84
-msgid "Rename"
+#: gtk_llm_chat/chat_application.py:80
+msgid "Error: _version.py not found"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:85
-msgid "Delete"
-msgstr ""
-
-#: gtk_llm_chat/chat_application.py:86
-msgid "About"
-msgstr ""
-
-#: gtk_llm_chat/chat_application.py:149
-msgid "Send"
-msgstr ""
-
-#: gtk_llm_chat/chat_application.py:405
-msgid "..."
-msgstr ""
-
-#: gtk_llm_chat/chat_application.py:592
+#: gtk_llm_chat/chat_application.py:158
 msgid "Are you sure you want to delete the conversation?"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:611
+#: gtk_llm_chat/chat_application.py:177
 msgid "Gtk LLM Chat"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:614
+#: gtk_llm_chat/chat_application.py:180
 msgid "A frontend for LLM"
 msgstr ""
 
-#: gtk_llm_chat/llm_client.py:85
+#: gtk_llm_chat/llm_client.py:93
 msgid "LLMClient: Ignoring invalid temperature:"
 msgstr ""
 
-#: gtk_llm_chat/llm_client.py:123
-msgid "LLMClient: Stream finished (StopIteration)"
+#: gtk_llm_chat/llm_client.py:97
+msgid "LLMClient: Starting stream processing..."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:100
+msgid "LLMClient: Stream processing cancelled externally."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:106
+msgid "LLMClient: Stream finished normally."
 msgstr ""
 
 #: gtk_llm_chat/llm_client.py:139
-msgid "LLMClient: Response completed (on_done)."
+msgid "LLMClient: Cancel request received."
 msgstr ""
 
-#: gtk_llm_chat/llm_client.py:170
-msgid "LLMClient: Cancel request received."
+#: gtk_llm_chat/llm_client.py:142
+msgid "LLMClient: Terminating active stream thread."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:145
+msgid "LLMClient: No active stream thread to cancel."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:155
+msgid ""
+"LLMClient: Error - Attempting to load history with model initialization "
+"error."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:158
+msgid ""
+"LLMClient: Error - Attempting to load history without initialized "
+"conversation."
 msgstr ""
 
 #: gtk_llm_chat/llm_client.py:196
 msgid ""
-"LLMClient: Error - Attempting to load history without initialized "
-"conversation or model."
-msgstr ""
-
-#: gtk_llm_chat/llm_client.py:248
-msgid ""
 "LLMClient: Warning - Assistant response without previous user prompt in "
 "history."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:199
+msgid "LLMClient: History loaded. Total responses in conversation: "
 msgstr ""

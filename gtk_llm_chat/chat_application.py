@@ -18,9 +18,7 @@ from chat_window import LLMChatWindow # Import the moved class
 
 
 class LLMChatApplication(Adw.Application):
-    """
-    Clase para una instancia de un chat
-    """
+    """Class for a chat instance"""
 
     def __init__(self):
         super().__init__(
@@ -30,35 +28,35 @@ class LLMChatApplication(Adw.Application):
         self.config = {}
         self.chat_history = ChatHistory() # Initialize here
 
-        # Agregar manejador de señales
+        # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
 
     def _handle_sigint(self, signum, frame):
-        """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
-        print("\nCerrando aplicación...")
+        """Handles SIGINT signal to close the application"""
+        print(_("\nClosing application..."))
         self.quit()
 
     def do_startup(self):
-        # Llamar al método padre usando do_startup
+        # Call the parent method using do_startup
         Adw.Application.do_startup(self)
 
-        # Inicializar gettext
+        # Initialize gettext
         APP_NAME = "gtk-llm-chat"
-        # Usar ruta absoluta para asegurar que se encuentre el directorio 'po'
+        # Use absolute path to ensure 'po' directory is found
         base_dir = os.path.dirname(__file__)
         LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
         try:
-            # Intentar establecer solo la categoría de mensajes
+            # Attempt to set only the messages category
             locale.setlocale(locale.LC_MESSAGES, '')
         except locale.Error as e:
-            print(f"Advertencia: No se pudo establecer la configuración regional: {e}")
+            print(f"Warning: Could not set locale: {e}")
         gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
         gettext.textdomain(APP_NAME)
 
-        # Configurar el icono de la aplicación
+        # Configure the application icon
         self._setup_icon()
 
-        # Configurar acciones
+        # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
         rename_action.connect("activate", self.on_rename_activate)
         self.add_action(rename_action)
@@ -73,33 +71,33 @@ class LLMChatApplication(Adw.Application):
 
     def get_application_version(self):
         """
-        Obtiene la versión de la aplicación desde _version.py.
+        Gets the application version from _version.py.
         """
         try:
             from gtk_llm_chat import _version
             return _version.__version__
         except ImportError:
-            print("Error: _version.py no encontrado")
-            return "Desconocida"
-        return "Desconocida"
+            print(_("Error: _version.py not found"))
+            return "Unknown"
+        return "Unknown"
 
     def _setup_icon(self):
-        """Configura el ícono de la aplicación"""
-        # Establecer directorio de búsqueda
+        """Configures the application icon"""
+        # Set search directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         icon_theme.add_search_path(current_dir)
 
     def do_activate(self):
-        # Crear una nueva ventana para esta instancia
+        # Create a new window for this instance
         window = LLMChatWindow(application=self, config=self.config)
 
-        # Establecer directorio de búsqueda para el icono (ya se hace en do_startup)
+        # Set search directory for the icon (already done in do_startup)
         # current_dir = os.path.dirname(os.path.abspath(__file__)) # Redundant
         # icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default()) # Redundant
         # icon_theme.add_search_path(current_dir) # Redundant
 
-        # Establecer el ícono por nombre (sin extensión .svg)
+        # Set the icon by name
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
         # window.input_text.grab_focus() # Focus should be handled within LLMChatWindow if needed after init
@@ -145,13 +143,13 @@ class LLMChatApplication(Adw.Application):
                 return
 
     def on_rename_activate(self, action, param):
-        """Renombra la conversación actual"""
+        """Renames the current conversation"""
         window = self.get_active_window()
         window.header.set_title_widget(window.title_entry)
         window.title_entry.grab_focus()
 
     def on_delete_activate(self, action, param):
-        """Elimina la conversación actual"""
+        """Deletes the current conversation"""
         dialog = Gtk.MessageDialog(
             transient_for=self.get_active_window(),
             modal=True,
@@ -172,7 +170,7 @@ class LLMChatApplication(Adw.Application):
         dialog.present()
 
     def on_about_activate(self, action, param):
-        """Muestra el diálogo 'Acerca de'"""
+        """Shows the 'About' dialog"""
         about_dialog = Adw.AboutWindow(
             transient_for=self.get_active_window(),
             # Keep "Gtk LLM Chat" as the application name

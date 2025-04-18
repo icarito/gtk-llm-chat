@@ -37,9 +37,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.llm = LLMClient(self.config)
             self.llm.connect('model-loaded', self._on_model_loaded)
 
-            print("LLMClient initialized successfully")  # Added logging
+            print(_("LLMClient initialized successfully"))
         except Exception as e:
-            print(f"Error fatal al inicializar LLMClient: {e}")
+            print(_(f"Error fatal al inicializar LLMClient: {e}"))
             sys.exit(1)
 
         # Configurar la ventana principal
@@ -357,7 +357,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_llm_finished(self, llm_client, success: bool):
         """Maneja la señal 'finished' de LLMClient."""
-        print(f"LLM finished. Success: {success}")
+        print(_(f"LLM finished. Success: {success}"))
         self.set_enabled(True)
         self.accumulated_response = ""
         self.input_text.grab_focus()
