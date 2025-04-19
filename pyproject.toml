@@ -32,8 +32,11 @@ tag_regex = "^v([0-9]+\\.[0-9]+\\.[0-9]+)$"
 local_scheme = "no-local-version"
 version_scheme = "python-simplified-semver"
 
-[tool.setuptools.packages]
-find = {include = ["gtk_llm_chat"]}
+[tool.setuptools.packages.find]
+include = ["gtk_llm_chat"]
+
+[tool.setuptools.package-data]
+"gtk_llm_chat" = ["../locale/*/*/gtk-llm-chat.mo"]
 
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
