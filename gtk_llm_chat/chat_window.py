@@ -27,6 +27,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Conectar señal de cierre de ventana
         self.connect('close-request', self._on_close_request)
+        self.connect('show', self._on_window_show) # Connect to the 'show' signal
 
         # Asegurar que config no sea None
         self.config = config or {}
@@ -154,6 +155,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.set_content(main_box)
 
         # Agregar CSS provider
+        self._setup_css()
+
+        # Agregar soporte para cancelación
+        self.current_message_widget = None
+        self.accumulated_response = ""
+
+        # Conectar las nuevas señales de LLMClient
+        self.llm.connect('response', self._on_llm_response)
+        self.llm.connect('error', self._on_llm_error)
+        self.llm.connect('finished', self._on_llm_finished)
+
+        # Add a focus controller to the window
+        focus_controller = Gtk.EventControllerFocus.new()
+        focus_controller.connect("enter", self._on_focus_enter)
+        self.add_controller(focus_controller)
+
+    def _setup_css(self):
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data("""
             .message {
@@ -219,15 +237,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
-        # Agregar soporte para cancelación
-        self.current_message_widget = None
-        self.accumulated_response = ""
-
-        # Conectar las nuevas señales de LLMClient
-        self.llm.connect('response', self._on_llm_response)
-        self.llm.connect('error', self._on_llm_error)
-        self.llm.connect('finished', self._on_llm_finished)
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""
@@ -392,3 +401,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.llm.cancel()
         sys.exit()
         return False
+
+    def _on_window_show(self, window):
+        """Set focus to the input text when the window is shown."""
+        self.input_text.grab_focus()
+
+    def _on_focus_enter(self, controller):
+        """Set focus to the input text when the window gains focus."""
+        self.input_text.grab_focus()
