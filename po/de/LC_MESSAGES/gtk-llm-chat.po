@@ -12,115 +12,118 @@ msgstr ""
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: \n"
+"Language: de\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #: gtk_llm_chat/chat_window.py:66
 msgid "LLM Chat"
-msgstr ""
+msgstr "LLM Chat"
 
 #: gtk_llm_chat/chat_window.py:75
 msgid "Rename"
-msgstr ""
+msgstr "Umbenennen"
 
 #: gtk_llm_chat/chat_window.py:76
 msgid "Delete"
-msgstr ""
+msgstr "Löschen"
 
 #: gtk_llm_chat/chat_window.py:77
 msgid "About"
-msgstr ""
+msgstr "Über"
 
 #: gtk_llm_chat/chat_window.py:142
 msgid "Send"
-msgstr ""
+msgstr "Senden"
 
 #: gtk_llm_chat/gtk_llm_applet.py:23 gtk_llm_chat/chat_application.py:36
 msgid ""
 "\n"
 "Closing application..."
 msgstr ""
+"\n"
+"Anwendung wird geschlossen..."
 
 #: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/llm_client.py:22
 msgid "New Conversation"
-msgstr ""
+msgstr "Neue Konversation"
 
 #: gtk_llm_chat/gtk_llm_applet.py:64
 msgid "Quit"
-msgstr ""
+msgstr "Beenden"
 
 #: gtk_llm_chat/db_operations.py:118
 msgid "Error: conversation_id is required to add to history."
-msgstr ""
+msgstr "Fehler: conversation_id ist erforderlich, um der Historie hinzuzufügen."
 
 #: gtk_llm_chat/db_operations.py:158
 msgid "Error: conversation_id is required to create the conversation."
-msgstr ""
+msgstr "Fehler: conversation_id ist erforderlich, um die Konversation zu erstellen."
 
 #: gtk_llm_chat/chat_application.py:80
 msgid "Error: _version.py not found"
-msgstr ""
+msgstr "Fehler: _version.py nicht gefunden"
 
 #: gtk_llm_chat/chat_application.py:158
 msgid "Are you sure you want to delete the conversation?"
-msgstr ""
+msgstr "Sind Sie sicher, dass Sie die Konversation löschen möchten?"
 
 #: gtk_llm_chat/chat_application.py:177
 msgid "Gtk LLM Chat"
-msgstr ""
+msgstr "Gtk LLM Chat"
 
 #: gtk_llm_chat/chat_application.py:180
 msgid "A frontend for LLM"
-msgstr ""
+msgstr "Ein Frontend für LLM"
 
-#: gtk_llm_chat/llm_client.py:94
+#: gtk_llm_client.py:94
 msgid "LLMClient: Ignoring invalid temperature:"
-msgstr ""
+msgstr "LLMClient: Ignoriere ungültige Temperatur:"
 
 #: gtk_llm_chat/llm_client.py:98
 msgid "LLMClient: Starting stream processing..."
-msgstr ""
+msgstr "LLMClient: Starte Stream-Verarbeitung..."
 
 #: gtk_llm_chat/llm_client.py:101
 msgid "LLMClient: Stream processing cancelled externally."
-msgstr ""
+msgstr "LLMClient: Stream-Verarbeitung wurde extern abgebrochen."
 
 #: gtk_llm_chat/llm_client.py:107
 msgid "LLMClient: Stream finished normally."
-msgstr ""
+msgstr "LLMClient: Stream wurde normal beendet."
 
 #: gtk_llm_chat/llm_client.py:139
 msgid "LLMClient: Cancel request received."
-msgstr ""
+msgstr "LLMClient: Abbruchanfrage empfangen."
 
 #: gtk_llm_chat/llm_client.py:142
 msgid "LLMClient: Terminating active stream thread."
-msgstr ""
+msgstr "LLMClient: Beende aktiven Stream-Thread."
 
 #: gtk_llm_chat/llm_client.py:145
 msgid "LLMClient: No active stream thread to cancel."
-msgstr ""
+msgstr "LLMClient: Kein aktiver Stream-Thread zum Abbrechen."
 
 #: gtk_llm_chat/llm_client.py:155
 msgid ""
 "LLMClient: Error - Attempting to load history with model initialization "
 "error."
-msgstr ""
+msgstr "LLMClient: Fehler - Versuch, den Verlauf mit der Modellinitialisierung zu laden."
 
 #: gtk_llm_chat/llm_client.py:158
 msgid ""
 "LLMClient: Error - Attempting to load history without initialized "
 "conversation."
-msgstr ""
+msgstr "LLMClient: Fehler - Versuch, den Verlauf ohne initialisierte Konversation zu laden."
 
 #: gtk_llm_chat/llm_client.py:196
 msgid ""
 "LLMClient: Warning - Assistant response without previous user prompt in "
 "history."
-msgstr ""
+msgstr "LLMClient: Warnung - Antwort des Assistenten ohne vorherige Benutzeraufforderung im Verlauf."
 
 #: gtk_llm_chat/llm_client.py:199
 msgid "LLMClient: History loaded. Total responses in conversation: "
-msgstr ""
+msgstr "LLMClient: Verlauf geladen. Anzahl der Antworten in der Konversation: "

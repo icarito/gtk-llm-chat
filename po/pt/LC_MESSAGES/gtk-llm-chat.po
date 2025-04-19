@@ -12,115 +12,117 @@ msgstr ""
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: \n"
+"Language: pt\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #: gtk_llm_chat/chat_window.py:66
 msgid "LLM Chat"
-msgstr ""
+msgstr "LLM Chat"
 
 #: gtk_llm_chat/chat_window.py:75
 msgid "Rename"
-msgstr ""
+msgstr "Renomear"
 
 #: gtk_llm_chat/chat_window.py:76
 msgid "Delete"
-msgstr ""
+msgstr "Apagar"
 
 #: gtk_llm_chat/chat_window.py:77
 msgid "About"
-msgstr ""
+msgstr "Sobre"
 
 #: gtk_llm_chat/chat_window.py:142
 msgid "Send"
-msgstr ""
+msgstr "Enviar"
 
 #: gtk_llm_chat/gtk_llm_applet.py:23 gtk_llm_chat/chat_application.py:36
 msgid ""
 "\n"
 "Closing application..."
 msgstr ""
+"\nA fechar a aplicação..."
 
 #: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/llm_client.py:22
 msgid "New Conversation"
-msgstr ""
+msgstr "Nova Conversa"
 
 #: gtk_llm_chat/gtk_llm_applet.py:64
 msgid "Quit"
-msgstr ""
+msgstr "Sair"
 
 #: gtk_llm_chat/db_operations.py:118
 msgid "Error: conversation_id is required to add to history."
-msgstr ""
+msgstr "Erro: o conversation_id é obrigatório para adicionar ao histórico."
 
 #: gtk_llm_chat/db_operations.py:158
 msgid "Error: conversation_id is required to create the conversation."
-msgstr ""
+msgstr "Erro: o conversation_id é obrigatório para criar a conversa."
 
 #: gtk_llm_chat/chat_application.py:80
 msgid "Error: _version.py not found"
-msgstr ""
+msgstr "Erro: _version.py não encontrado"
 
 #: gtk_llm_chat/chat_application.py:158
 msgid "Are you sure you want to delete the conversation?"
-msgstr ""
+msgstr "Tem a certeza que quer apagar a conversa?"
 
 #: gtk_llm_chat/chat_application.py:177
 msgid "Gtk LLM Chat"
-msgstr ""
+msgstr "Gtk LLM Chat"
 
 #: gtk_llm_chat/chat_application.py:180
 msgid "A frontend for LLM"
-msgstr ""
+msgstr "Um frontend para LLM"
 
-#: gtk_llm_chat/llm_client.py:94
+#: gtk_llm_client.py:94
 msgid "LLMClient: Ignoring invalid temperature:"
-msgstr ""
+msgstr "LLMClient: A ignorar temperatura inválida:"
 
-#: gtk_llm_chat/llm_client.py:98
+#: gtk_llm_client.py:98
 msgid "LLMClient: Starting stream processing..."
-msgstr ""
+msgstr "LLMClient: A iniciar o processamento de stream..."
 
-#: gtk_llm_chat/llm_client.py:101
+#: gtk_llm_client.py:101
 msgid "LLMClient: Stream processing cancelled externally."
-msgstr ""
+msgstr "LLMClient: Processamento de stream cancelado externamente."
 
-#: gtk_llm_chat/llm_client.py:107
+#: gtk_llm_client.py:107
 msgid "LLMClient: Stream finished normally."
-msgstr ""
+msgstr "LLMClient: Stream terminado normalmente."
 
-#: gtk_llm_chat/llm_client.py:139
+#: gtk_llm_client.py:139
 msgid "LLMClient: Cancel request received."
-msgstr ""
+msgstr "LLMClient: Pedido de cancelamento recebido."
 
-#: gtk_llm_chat/llm_client.py:142
+#: gtk_llm_client.py:142
 msgid "LLMClient: Terminating active stream thread."
-msgstr ""
+msgstr "LLMClient: A terminar a thread de stream ativa."
 
-#: gtk_llm_chat/llm_client.py:145
+#: gtk_llm_client.py:145
 msgid "LLMClient: No active stream thread to cancel."
-msgstr ""
+msgstr "LLMClient: Nenhuma thread de stream ativa para cancelar."
 
-#: gtk_llm_chat/llm_client.py:155
+#: gtk_llm_client.py:155
 msgid ""
 "LLMClient: Error - Attempting to load history with model initialization "
 "error."
-msgstr ""
+msgstr "LLMClient: Erro - A tentar carregar o histórico com erro de inicialização do modelo."
 
-#: gtk_llm_chat/llm_client.py:158
+#: gtk_llm_client.py:158
 msgid ""
 "LLMClient: Error - Attempting to load history without initialized "
 "conversation."
-msgstr ""
+msgstr "LLMClient: Erro - A tentar carregar o histórico sem conversa inicializada."
 
-#: gtk_llm_chat/llm_client.py:196
+#: gtk_llm_client.py:196
 msgid ""
 "LLMClient: Warning - Assistant response without previous user prompt in "
 "history."
-msgstr ""
+msgstr "LLMClient: Aviso - Resposta do assistente sem pedido anterior do utilizador no histórico."
 
-#: gtk_llm_chat/llm_client.py:199
+#: gtk_llm_client.py:199
 msgid "LLMClient: History loaded. Total responses in conversation: "
-msgstr ""
+msgstr "LLMClient: Histórico carregado. Total de respostas na conversa: "
