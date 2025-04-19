@@ -36,7 +36,7 @@ version_scheme = "python-simplified-semver"
 include = ["gtk_llm_chat"]
 
 [tool.setuptools.package-data]
-"gtk_llm_chat" = ["../locale/*/*/gtk-llm-chat.mo"]
+"gtk_llm_chat" = ["../po/*/*/gtk-llm-chat.mo"]
 
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
