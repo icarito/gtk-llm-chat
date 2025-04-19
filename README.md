@@ -1,63 +1,62 @@
 # GTK LLM Chat
 
-Una interfaz gráfica GTK para chatear con modelos de lenguaje (LLMs).
+A GTK graphical interface for chatting with large language models (LLMs).
 
 ![screenshot](./docs/screenshot01.png)
 
-## Características
+## Features
 
-- Interfaz gráfica simple y fácil de usar construida con GTK
-- Soporte para múltiples conversaciones en ventanas independientes
-- Integración con python-llm para chat con diversos modelos de LLM
-- Interfaz moderna usando libadwaita
-- Soporte para streaming de respuestas en tiempo real
-- Historial de mensajes con desplazamiento automático
-- Atajos de teclado (Enter para enviar, Shift+Enter para nueva línea)
+- Simple and easy-to-use graphical interface built with GTK
+- Support for multiple conversations in independent windows
+- Integration with python-llm for chatting with various LLM models
+- Modern interface using libadwaita
+- Support for real-time streaming responses
+- Message history with automatic scrolling
+- Keyboard shortcuts (Enter to send, Shift+Enter for new line)
 
-## Instalación
+## Installation
 
 ```
 pipx install llm               # required by gtk-llm-chat
 llm install gtk-chat
 ```
 
-### Requisitos del Sistema
+### System Requirements
 
 - [llm](https://llm.datasette.io/en/stable/)
-- Python 3.8 o superior
+- Python 3.8 or higher
 - GTK 4.0
 - libadwaita
 - libayatana-appindicator
 
-En sistemas basados en Debian/Ubuntu:
+On Debian/Ubuntu-based systems:
 ```
 sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 libayatana-appindicator3-1
 ```
 
-## Uso
+## Usage
 
-Ejecutar la aplicación:
+Run the application:
 ```
 llm gtk-applet
 ```
 
-o para un chat individual:
+or for an individual chat:
 ```
 llm gtk-chat
 ```
 
-
-Con argumentos opcionales:
+With optional arguments:
 ```
-llm gtk-chat --cid ID_CONVERSACION  # Continuar una conversación específica
-llm gtk-chat -s "Prompt del sistema"  # Establecer prompt del sistema
-llm gtk-chat -m nombre_modelo  # Seleccionar modelo específico
-llm gtk-chat -c  # Continuar última conversación
+llm gtk-chat --cid CONVERSATION_ID  # Continue a specific conversation
+llm gtk-chat -s "System prompt"  # Set system prompt
+llm gtk-chat -m model_name  # Select specific model
+llm gtk-chat -c  # Continue last conversation
 ```
 
-## Desarrollo
+## Development
 
-Para configurar el entorno de desarrollo:
+To set up the development environment:
 ```
 git clone https://github.com/icarito/gtk-llm-chat.git
 cd gtk-llm-chat
@@ -66,6 +65,6 @@ source venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## Licencia
+## License
 
-GPLv3 License - Ver archivo LICENSE para más detalles.
+GPLv3 License - See LICENSE file for more details.

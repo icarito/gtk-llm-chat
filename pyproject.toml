@@ -1,36 +1,43 @@
-[build-system]
-requires = ["setuptools", "wheel", "Cython<3.0", "toml"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "gtk-llm-chat"
-version = "1.9.1"
 description = "A GTK graphical interface for chatting with large language models (LLMs)"
 readme = "README.md"
 authors = [{ name = "Sebastian Silva", email = "sebastian@fuentelibre.org" }]
-license = { file = "LICENSE" }
+license = "GPL-3.0-or-later"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
 ]
 keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
     "pygobject",
     "requests",
+    "markdown"
 ]
 requires-python = ">=3.8"
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/icarito/gtk_llm_chat"
 Issues = "https://github.com/icarito/gtk_llm_chat/issues"
 Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
+[build-system]
+requires = ["setuptools", "wheel", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools_scm]
 version_file = "gtk_llm_chat/_version.py"
+tag_regex = "^v([0-9]+\\.[0-9]+\\.[0-9]+)$"
+local_scheme = "no-local-version"
+version_scheme = "python-simplified-semver"
 
-[tool.setuptools.packages.find]
-exclude = ["desktop*"]
+[tool.setuptools.packages]
+find = {include = ["gtk_llm_chat"]}
 
-[tool.setuptools.data-files]
-"share/applications" = ["desktop/gtk-llm-chat.desktop", "desktop/gtk-llm-applet.desktop"]
+[project.scripts]
+gtk-llm-chat = "gtk_llm_chat.main:main"
+gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"
+
+[project.entry-points."llm"]
+gui = "gtk_llm_chat.llm_gui"
