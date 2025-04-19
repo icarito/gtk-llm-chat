@@ -138,7 +138,7 @@ class ChatHistory:
                 timestamp_utc
             ))
             self.conn.commit()
-            print(_(f"Entry added to conversation {conversation_id}"))
+            #print(_(f"Entry added to conversation {conversation_id}"))
         except sqlite3.Error as e:
             print(_(f"Error adding entry to history: {e}"))
             self.conn.rollback()  # Undo changes in case of error
