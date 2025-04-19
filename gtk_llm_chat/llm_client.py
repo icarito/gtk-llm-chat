@@ -19,6 +19,7 @@ import gettext
 
 _ = gettext.gettext
 
+DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
 DEBUG = False  # Global debug flag
 
 def debug_print(*args, **kwargs):
@@ -119,8 +120,7 @@ class LLMClient(GObject.Object):
                     new_cid = self.get_conversation_id()
                     self.config['cid'] = new_cid
                     debug_print(f"Nueva conversación creada con ID: {new_cid}")
-                    default_name = _("New Conversation")
-                    chat_history.create_conversation_if_not_exists(new_cid, default_name)
+                    chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME())
                     cid = new_cid
                 if cid and model_id:
                     try:

@@ -12,7 +12,7 @@ _ = gettext.gettext
 
 # Asegúrate de que el directorio actual esté en sys.path si es necesario
 # sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from llm_client import LLMClient
+from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
@@ -42,7 +42,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             sys.exit(1)
 
         # Configurar la ventana principal
-        title = self.config.get('template') or _("LLM Chat")
+        title = self.config.get('template') or DEFAULT_CONVERSATION_NAME()
         self.title_entry = Gtk.Entry()
         self.title_entry.set_hexpand(True)
         self.title_entry.set_text(title)
