@@ -72,7 +72,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear menú
         menu = Gio.Menu.new()
-        menu.append(_("Rename"), "app.rename")
         menu.append(_("Delete"), "app.delete")
         menu.append(_("About"), "app.about")
 
