@@ -11,7 +11,7 @@ gi.require_version('Adw', '1')
 from gi.repository import GObject, GLib
 import llm
 import threading
-import time
+import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory  # Import ChatHistory
 
@@ -20,7 +20,8 @@ import gettext
 _ = gettext.gettext
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
-DEBUG = False  # Global debug flag
+DEBUG = False
+
 
 def debug_print(*args, **kwargs):
     if DEBUG:
@@ -42,13 +43,11 @@ class LLMClient(GObject.Object):
         self._is_generating_flag = False
         self._stream_thread = None
         self._init_error = None
-        # self.chat_history = None # chat_history is not used within LLMClient directly
+        self.chat_history = chat_history or ChatHistory()
 
         # Load model initially using the internal method in a separate thread
         self._load_model_thread = threading.Thread(target=self._load_model_internal, daemon=True)
         self._load_model_thread.start()
-
-    # The _load_model method is removed and replaced by _load_model_internal below
 
     def send_message(self, prompt: str):
         if self._is_generating_flag:
@@ -56,7 +55,8 @@ class LLMClient(GObject.Object):
             return
 
         if self._init_error or not self.model:
-            GLib.idle_add(self.emit, 'error', f"Error al inicializar el modelo: {self._init_error or 'Modelo no disponible'}")
+            GLib.idle_add(self.emit, 'error',
+                          f"Error al inicializar el modelo: {self._init_error or 'Modelo no disponible'}")
             return
 
         self._is_generating_flag = True
@@ -68,18 +68,17 @@ class LLMClient(GObject.Object):
         """Sets or changes the LLM model."""
         if self.model and self.model.model_id == model_id:
             debug_print(f"LLMClient: Model {model_id} is already loaded.")
-            return # Avoid reloading the same model
+            return  # Avoid reloading the same model
 
         debug_print(f"LLMClient: Request to set model to: {model_id}")
         # Ensure previous loading is done if any
         if hasattr(self, '_load_model_thread') and self._load_model_thread.is_alive():
-            self._load_model_thread.join() # Wait for initial load if it's still running
+            self._load_model_thread.join()  # Wait for initial load if it's still running
 
         # Load the new model using the internal method
         # This is done synchronously for simplicity in this context,
         # as changing the model during history load should block until ready.
         self._load_model_internal(model_id)
-
 
     def _load_model_internal(self, model_id=None):
         """Internal method to load a model. Can be called from init or set_model."""
@@ -90,13 +89,13 @@ class LLMClient(GObject.Object):
                 model_id = self.config.get('model') or llm.get_default_model()
 
             debug_print(f"LLMClient: Attempting to load model: {model_id}")
-            new_model = llm.get_model(model_id) # Load the potentially new model
-            self.model = new_model # Assign the new model
+            new_model = llm.get_model(model_id)  # Load the potentially new model
+            self.model = new_model  # Assign the new model
             debug_print(f"LLMClient: Using model {self.model.model_id}")
             # Create a new conversation object tied to the new model
             # Any existing conversation context is lost when changing models.
             self.conversation = self.model.conversation()
-            self._init_error = None # Clear previous errors if successful
+            self._init_error = None  # Clear previous errors if successful
             GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
         except llm.UnknownModelError as e:
             debug_print(f"LLMClient: Error - Unknown model: {e}")
@@ -109,14 +108,11 @@ class LLMClient(GObject.Object):
             # Don't overwrite self.model if loading fails
             GLib.idle_add(self.emit, 'error', f"Error inesperado al cargar modelo: {e}")
 
-
     def _process_stream(self, prompt: str):
         success = False
         full_response = ""
-        chat_history = None # Initialize to None
+        chat_history = self.chat_history
         try:
-            # Create ChatHistory instance explicitly
-            chat_history = ChatHistory()
             debug_print(f"LLMClient: Sending prompt: {prompt[:50]}...")
             prompt_args = {}
             if self.config.get('system'):
@@ -128,7 +124,34 @@ class LLMClient(GObject.Object):
                 except ValueError:
                     debug_print(_("LLMClient: Ignoring invalid temperature:"), self.config['temperature'])
 
-            response = self.conversation.prompt(prompt, **prompt_args)
+            # --- NEW FRAGMENT HANDLING ---
+            fragments = []
+            system_fragments = []
+
+            if self.config.get('fragments'):
+                try:
+                    fragments = [chat_history.resolve_fragment(f) for f in self.config['fragments']]
+                except ValueError as e:
+                    GLib.idle_add(self.emit, 'error', str(e))
+                    return  # Abort processing
+
+            if self.config.get('system_fragments'):
+                try:
+                    system_fragments = [chat_history.resolve_fragment(sf) for sf in self.config['system_fragments']]
+                except ValueError as e:
+                    GLib.idle_add(self.emit, 'error', str(e))
+                    return  # Abort processing
+
+            try:
+                response = self.conversation.prompt(
+                    prompt,
+                    fragments=fragments,
+                    system_fragments=system_fragments,
+                    **prompt_args
+                )
+            except Exception as e:
+                GLib.idle_add(self.emit, 'error', f"Error al procesar el prompt con fragmentos: {e}")
+                return
 
             debug_print(_("LLMClient: Starting stream processing..."))
             for chunk in response:
@@ -145,31 +168,33 @@ class LLMClient(GObject.Object):
             debug_print(_(f"LLMClient: Error during streaming: {e}"))
             GLib.idle_add(self.emit, 'error', f"Error durante el streaming: {str(e)}")
         finally:
-            debug_print(_(f"LLMClient: Cleaning up stream task (success={success})."))
-            self._is_generating_flag = False
-            self._stream_thread = None
-            if success:
-                cid = self.config.get('cid')
-                model_id = self.get_model_id()
-                if not cid and self.get_conversation_id():
-                    new_cid = self.get_conversation_id()
-                    self.config['cid'] = new_cid
-                    debug_print(f"Nueva conversación creada con ID: {new_cid}")
-                    chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME())
-                    cid = new_cid
-                if cid and model_id:
-                    try:
-                        chat_history.add_history_entry(
-                            cid,
-                            prompt,
-                            full_response,
-                            model_id
-                        )
-                    except Exception as e:
-                        print(_(f"Error al guardar en historial: {e}"))
-            # Explicitly close the connection in the finally block
-            if chat_history:
-                chat_history.close()
+            try:
+                debug_print(_(f"LLMClient: Cleaning up stream task (success={success})."))
+                self._is_generating_flag = False
+                self._stream_thread = None
+                if success:
+                    cid = self.config.get('cid')
+                    model_id = self.get_model_id()
+                    if not cid and self.get_conversation_id():
+                        new_cid = self.get_conversation_id()
+                        self.config['cid'] = new_cid
+                        debug_print(f"Nueva conversación creada con ID: {new_cid}")
+                        chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME())
+                        cid = new_cid
+                    if cid and model_id:
+                        try:
+                            chat_history.add_history_entry(
+                                cid,
+                                prompt,
+                                full_response,
+                                model_id,
+                                fragments=self.config.get('fragments'),
+                                system_fragments=self.config.get('system_fragments')
+                            )
+                        except Exception as e:
+                            debug_print(_(f"Error al guardar en historial: {e}"))
+            finally:
+                chat_history.close_connection()
             GLib.idle_add(self.emit, 'finished', success)
 
     def cancel(self):
@@ -194,46 +219,86 @@ class LLMClient(GObject.Object):
         if not self.conversation:
             debug_print(_("LLMClient: Error - Attempting to load history without initialized conversation."))
             return
+        chat_history = self.chat_history
+        try:
+            current_model = self.model
+            current_conversation = self.conversation
 
-        current_model = self.model
-        current_conversation = self.conversation
+            debug_print(_(f"LLMClient: Loading {len(history_entries)} history entries..."))
+            last_prompt_obj = None
 
-        debug_print(_(f"LLMClient: Loading {len(history_entries)} history entries..."))
-        current_conversation.responses.clear()
+            for entry in history_entries:
+                user_prompt = entry.get('prompt')
+                assistant_response = entry.get('response')
 
-        last_prompt_obj = None
+                # Fetch fragments for this history entry
+                fragments = []
+                system_fragments = []
+                try:
+                    # Assuming 'entry' has 'id' corresponding to response_id in db
+                    response_id = entry.get('id')
+                    if response_id:
+                        # Fetch fragments from the database
+                        fragments = chat_history.get_fragments_for_response(response_id, 'prompt_fragments')
+                        system_fragments = chat_history.get_fragments_for_response(response_id, 'system_fragments')
 
-        for entry in history_entries:
-            user_prompt = entry.get('prompt')
-            assistant_response = entry.get('response')
+                        resolved_fragments = []
+                        resolved_system_fragments = []
 
-            if user_prompt:
-                last_prompt_obj = llm.Prompt(user_prompt, current_model)
-                resp_user = llm.Response(
-                    last_prompt_obj, current_model, stream=False,
-                    conversation=current_conversation
-                )
-                resp_user._prompt_json = {'prompt': user_prompt}
-                resp_user._done = True
-                resp_user._chunks = []
-                current_conversation.responses.append(resp_user)
+                        for fragment in fragments:
+                            try:
+                                resolved_fragments.append(chat_history.resolve_fragment(fragment))
+                            except ValueError as e:
+                                debug_print(_(f"LLMClient: Error resolving fragment: {e}"))
 
-            if assistant_response and last_prompt_obj:
-                resp_assistant = llm.Response(
-                    last_prompt_obj, current_model, stream=False,
-                    conversation=current_conversation
-                )
-                resp_assistant._prompt_json = {
-                    'prompt': last_prompt_obj.prompt
-                }
-                resp_assistant._done = True
-                resp_assistant._chunks = [assistant_response]
-                current_conversation.responses.append(resp_assistant)
-            elif assistant_response and not last_prompt_obj:
-                debug_print(_("LLMClient: Warning - Assistant response without "
-                      "previous user prompt in history."))
+                        for fragment in system_fragments:
+                            try:
+                                resolved_system_fragments.append(chat_history.resolve_fragment(fragment))
+                            except ValueError as e:
+                                debug_print(_(f"LLMClient: Error resolving system fragment: {e}"))
 
-        debug_print(_("LLMClient: History loaded. Total responses in conversation: "
-                + f"{len(current_conversation.responses)}"))
+                    else:
+                        debug_print(_("LLMClient: Warning - No response ID found for history entry."))
+
+                except Exception as e:
+                    debug_print(_(f"LLMClient: Error fetching fragments for history entry: {e}"))
+                    # Handle the error gracefully, e.g., by logging it or displaying a message
+
+                if user_prompt:
+                    last_prompt_obj = llm.Prompt(
+                        user_prompt,
+                        current_model,
+                        fragments=resolved_fragments,
+                        system_fragments=resolved_system_fragments
+                    )
+                    resp_user = llm.Response(
+                        last_prompt_obj, current_model, stream=False,
+                        conversation=current_conversation
+                    )
+                    resp_user._prompt_json = {'prompt': user_prompt}
+                    resp_user._done = True
+                    resp_user._chunks = []
+                    current_conversation.responses.append(resp_user)
+
+                if assistant_response and last_prompt_obj:
+                    resp_assistant = llm.Response(
+                        last_prompt_obj, current_model, stream=False,
+                        conversation=current_conversation
+                    )
+                    resp_assistant._prompt_json = {
+                        'prompt': last_prompt_obj.prompt
+                    }
+                    resp_assistant._done = True
+                    resp_assistant._chunks = [assistant_response]
+                    current_conversation.responses.append(resp_assistant)
+                elif assistant_response and not last_prompt_obj:
+                    debug_print(_("LLMClient: Warning - Assistant response without "
+                                  "previous user prompt in history."))
+
+            debug_print(_("LLMClient: History loaded. Total responses in conversation: "
+                          + f"{len(current_conversation.responses)}"))
+        finally:
+            chat_history.close_connection()
+
 
 GObject.type_register(LLMClient)

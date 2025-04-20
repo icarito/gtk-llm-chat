@@ -12,7 +12,13 @@ _ = gettext.gettext
 
 from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
-from db_operations import ChatHistory
+
+DEBUG = False
+
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 
 class LLMChatWindow(Adw.ApplicationWindow):
@@ -33,7 +39,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if chat_history:
             self.chat_history = chat_history
         else:
-            print("Warning: chat_history not provided to LLMChatWindow, creating new instance.")
+            debug_print("Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
         # Inicializar LLMClient con la configuración
@@ -161,14 +167,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Initialize LLMClient *after* basic UI setup
         try:
-            self.llm = LLMClient(self.config)
+            self.llm = LLMClient(self.config, self.chat_history)
             # Connect signals *here*
             self.llm.connect('model-loaded', self._on_model_loaded) # Ensure this is connected
             self.llm.connect('response', self._on_llm_response)
             self.llm.connect('error', self._on_llm_error)
             self.llm.connect('finished', self._on_llm_finished)
         except Exception as e:
-            print(_(f"Fatal error starting LLMClient: {e}"))
+            debug_print(_(f"Fatal error starting LLMClient: {e}"))
             # Display error in UI instead of exiting?
             error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
             self.messages_box.append(error_widget)
@@ -347,7 +353,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
-        print(message, file=sys.stderr)
+        debug_print(message, file=sys.stderr)
         # Verificar si el widget actual existe y es hijo del messages_box
         if self.current_message_widget is not None:
             is_child = (self.current_message_widget.get_parent() ==

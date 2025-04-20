@@ -16,6 +16,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
 from chat_window import LLMChatWindow
 
+DEBUG = False
+
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
@@ -26,14 +32,14 @@ class LLMChatApplication(Adw.Application):
             flags=Gio.ApplicationFlags.NON_UNIQUE
         )
         self.config = {}
-        self.chat_history = ChatHistory() # Initialize here
+        # self.chat_history = ChatHistory() # Initialize here
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
 
     def _handle_sigint(self, signum, frame):
         """Handles SIGINT signal to close the application"""
-        print(_("\nClosing application..."))
+        debug_print(_("\nClosing application..."))
         self.quit()
 
     def do_startup(self):
@@ -49,7 +55,7 @@ class LLMChatApplication(Adw.Application):
             # Attempt to set only the messages category
             locale.setlocale(locale.LC_MESSAGES, '')
         except locale.Error as e:
-            print(f"Warning: Could not set locale: {e}")
+            debug_print(f"Warning: Could not set locale: {e}")
         gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
         gettext.textdomain(APP_NAME)
 
@@ -77,7 +83,7 @@ class LLMChatApplication(Adw.Application):
             from gtk_llm_chat import _version
             return _version.__version__
         except ImportError:
-            print(_("Error: _version.py not found"))
+            debug_print(_("Error: _version.py not found"))
             return "Unknown"
         return "Unknown"
 
@@ -89,6 +95,8 @@ class LLMChatApplication(Adw.Application):
         icon_theme.add_search_path(current_dir)
 
     def do_activate(self):
+        # Initialize ChatHistory here
+        self.chat_history = ChatHistory()
         # Create a new window for this instance, passing the existing chat_history
         window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
 
@@ -119,39 +127,33 @@ class LLMChatApplication(Adw.Application):
             if name:
                 window.set_conversation_name(
                     name.strip().removeprefix("user: "))
-            try:
-                history = self.chat_history.get_conversation_history(
-                    self.config['cid'])
+            
+            history = self.chat_history.get_conversation_history(
+                self.config['cid'])
 
-                # Determine the model_id from the first history entry
-                model_id = None
-                if history:
-                    first_entry = history[0]
-                    model_id = first_entry.get('model')
+            # Determine the model_id from the first history entry
+            model_id = None
+            if history:
+                first_entry = history[0]
+                model_id = first_entry.get('model')
 
-                # Set the model in LLMClient *before* loading history
-                if model_id:
-                    print(f"Setting model in LLMClient to: {model_id}") # Debug print
-                    window.llm.set_model(model_id) # Set the correct model
-                    # Subtitle is now updated via the 'model-loaded' signal in LLMChatWindow
-                    # window.title_widget.set_subtitle(model_id) # REMOVED
-                else:
-                     # If no model in history, the LLMClient will load the default,
-                     # and the 'model-loaded' signal will update the subtitle accordingly.
-                     print("Warning: No model found in the first history entry.")
+            # Set the model in LLMClient *before* loading history
+            if model_id:
+                debug_print(f"Setting model in LLMClient to: {model_id}")  # Debug debug_print
+                window.llm.set_model(model_id)  # Set the correct model
+                # Subtitle is now updated via the 'model-loaded' signal in LLMChatWindow
+                # window.title_widget.set_subtitle(model_id) # REMOVED
+            else:
+                # If no model in history, the LLMClient will load the default,
+                # and the 'model-loaded' signal will update the subtitle accordingly.
+                debug_print("Warning: No model found in the first history entry.")
 
-
-                # Load the history into the (now correctly configured) LLMClient
-                if history:
-                    window.llm.load_history(history)
+            # Load the history into the (now correctly configured) LLMClient
+            if history:
+                window.llm.load_history(history)
 
                 # Display messages in the UI
                 for entry in history:
-                    # Subtitle is already set if model_id was found
-                    # if not window.title_widget.get_subtitle():
-                    #     model_id_entry = entry.get('model') # Redundant check?
-                    #     if model_id_entry:
-                    #         window.title_widget.set_subtitle(model_id_entry)
                     window.display_message(
                         entry['prompt'],
                         is_user=True
@@ -160,9 +162,6 @@ class LLMChatApplication(Adw.Application):
                         entry['response'],
                         is_user=False
                     )
-            except ValueError as e:
-                print(f"Error: {e}")
-                return
 
     def on_rename_activate(self, action, param):
         """Renames the current conversation"""
