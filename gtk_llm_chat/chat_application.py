@@ -12,9 +12,9 @@ import gettext
 
 _ = gettext.gettext
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__))) # No longer needed if imports are relative
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
-from chat_window import LLMChatWindow # Import the moved class
+from chat_window import LLMChatWindow
 
 
 class LLMChatApplication(Adw.Application):
@@ -89,8 +89,8 @@ class LLMChatApplication(Adw.Application):
         icon_theme.add_search_path(current_dir)
 
     def do_activate(self):
-        # Create a new window for this instance
-        window = LLMChatWindow(application=self, config=self.config)
+        # Create a new window for this instance, passing the existing chat_history
+        window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
 
         # Set search directory for the icon (already done in do_startup)
         # current_dir = os.path.dirname(os.path.abspath(__file__)) # Redundant

@@ -10,8 +10,6 @@ import gettext
 
 _ = gettext.gettext
 
-# Asegúrate de que el directorio actual esté en sys.path si es necesario
-# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
@@ -22,7 +20,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     A chat window
     """
 
-    def __init__(self, config=None, **kwargs):
+    def __init__(self, config=None, chat_history=None, **kwargs):
         super().__init__(**kwargs)
 
         # Conectar señal de cierre de ventana
@@ -31,7 +29,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Asegurar que config no sea None
         self.config = config or {}
-        self.chat_history = ChatHistory()
+        # Use the passed chat_history or create one if not provided (fallback)
+        if chat_history:
+            self.chat_history = chat_history
+        else:
+            print("Warning: chat_history not provided to LLMChatWindow, creating new instance.")
+            self.chat_history = ChatHistory()
 
         # Inicializar LLMClient con la configuración
         try:
