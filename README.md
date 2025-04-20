@@ -29,10 +29,6 @@ llm install gtk-chat
 - libadwaita
 - libayatana-appindicator
 
-On Debian/Ubuntu-based systems:
-```
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 libayatana-appindicator3-1
-```
 
 ## Usage
 
