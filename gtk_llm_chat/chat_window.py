@@ -37,12 +37,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.chat_history = ChatHistory()
 
         # Inicializar LLMClient con la configuración
-        try:
-            self.llm = LLMClient(self.config)
-            self.llm.connect('model-loaded', self._on_model_loaded)
-        except Exception as e:
-            print(_(f"Fatal error starting LLMClient: {e}"))
-            sys.exit(1)
+        # self.llm will be initialized later, after UI setup potentially
+        self.llm = None
 
         # Configurar la ventana principal
         title = self.config.get('template') or DEFAULT_CONVERSATION_NAME()
@@ -50,7 +46,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.set_hexpand(True)
         self.title_entry.set_text(title)
         self.title_entry.connect('activate', self._on_save_title)
-        self.set_title(title)
 
         focus_controller = Gtk.EventControllerKey()
         focus_controller.connect("key-pressed", self._cancel_set_title)
@@ -68,6 +63,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle.new(title, _("LLM Chat"))
         self.header.set_title_widget(self.title_widget)
+        self.set_title(title) # Set window title based on initial title
 
         # Botón de menú
         menu_button = Gtk.MenuButton()
@@ -163,10 +159,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.current_message_widget = None
         self.accumulated_response = ""
 
-        # Conectar las nuevas señales de LLMClient
-        self.llm.connect('response', self._on_llm_response)
-        self.llm.connect('error', self._on_llm_error)
-        self.llm.connect('finished', self._on_llm_finished)
+        # Initialize LLMClient *after* basic UI setup
+        try:
+            self.llm = LLMClient(self.config)
+            # Connect signals *here*
+            self.llm.connect('model-loaded', self._on_model_loaded) # Ensure this is connected
+            self.llm.connect('response', self._on_llm_response)
+            self.llm.connect('error', self._on_llm_error)
+            self.llm.connect('finished', self._on_llm_finished)
+        except Exception as e:
+            print(_(f"Fatal error starting LLMClient: {e}"))
+            # Display error in UI instead of exiting?
+            error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
+            self.messages_box.append(error_widget)
+            self.set_enabled(False) # Disable input if LLM fails critically
+            # Optionally: sys.exit(1) if it should still be fatal
 
         # Add a focus controller to the window
         focus_controller = Gtk.EventControllerFocus.new()

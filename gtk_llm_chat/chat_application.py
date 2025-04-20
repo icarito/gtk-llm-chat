@@ -122,14 +122,36 @@ class LLMChatApplication(Adw.Application):
             try:
                 history = self.chat_history.get_conversation_history(
                     self.config['cid'])
-                # Cargar el historial en el LLMClient para mantener contexto
+
+                # Determine the model_id from the first history entry
+                model_id = None
+                if history:
+                    first_entry = history[0]
+                    model_id = first_entry.get('model')
+
+                # Set the model in LLMClient *before* loading history
+                if model_id:
+                    print(f"Setting model in LLMClient to: {model_id}") # Debug print
+                    window.llm.set_model(model_id) # Set the correct model
+                    # Subtitle is now updated via the 'model-loaded' signal in LLMChatWindow
+                    # window.title_widget.set_subtitle(model_id) # REMOVED
+                else:
+                     # If no model in history, the LLMClient will load the default,
+                     # and the 'model-loaded' signal will update the subtitle accordingly.
+                     print("Warning: No model found in the first history entry.")
+
+
+                # Load the history into the (now correctly configured) LLMClient
                 if history:
                     window.llm.load_history(history)
+
+                # Display messages in the UI
                 for entry in history:
-                    if not window.title_widget.get_subtitle():
-                        model_id = entry.get('model')
-                        if model_id:
-                            window.title_widget.set_subtitle(model_id)
+                    # Subtitle is already set if model_id was found
+                    # if not window.title_widget.get_subtitle():
+                    #     model_id_entry = entry.get('model') # Redundant check?
+                    #     if model_id_entry:
+                    #         window.title_widget.set_subtitle(model_id_entry)
                     window.display_message(
                         entry['prompt'],
                         is_user=True

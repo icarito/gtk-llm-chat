@@ -42,26 +42,13 @@ class LLMClient(GObject.Object):
         self._is_generating_flag = False
         self._stream_thread = None
         self._init_error = None
-        self.chat_history = None
+        # self.chat_history = None # chat_history is not used within LLMClient directly
 
-        threading.Thread(target=self._load_model, daemon=True).start()
+        # Load model initially using the internal method in a separate thread
+        self._load_model_thread = threading.Thread(target=self._load_model_internal, daemon=True)
+        self._load_model_thread.start()
 
-    def _load_model(self):
-        try:
-            model_id = self.config.get('model') or llm.get_default_model()
-            debug_print(_(f"LLMClient: Attempting to load model: {model_id}"))
-            self.model = llm.get_model(model_id)
-            debug_print(_(f"LLMClient: Using model {self.model.model_id}"))
-            self.conversation = self.model.conversation()
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
-        except llm.UnknownModelError as e:
-            debug_print(_(f"LLMClient: Error - Unknown model: {e}"))
-            self._init_error = str(e)
-            GLib.idle_add(self.emit, 'error', f"Modelo desconocido: {e}")
-        except Exception as e:
-            debug_print(_(f"LLMClient: Unexpected error in init: {e}"))
-            self._init_error = str(e)
-            GLib.idle_add(self.emit, 'error', f"Error inesperado al inicializar: {e}")
+    # The _load_model method is removed and replaced by _load_model_internal below
 
     def send_message(self, prompt: str):
         if self._is_generating_flag:
@@ -77,12 +64,60 @@ class LLMClient(GObject.Object):
         self._stream_thread = threading.Thread(target=self._process_stream, args=(prompt,), daemon=True)
         self._stream_thread.start()
 
+    def set_model(self, model_id: str):
+        """Sets or changes the LLM model."""
+        if self.model and self.model.model_id == model_id:
+            debug_print(f"LLMClient: Model {model_id} is already loaded.")
+            return # Avoid reloading the same model
+
+        debug_print(f"LLMClient: Request to set model to: {model_id}")
+        # Ensure previous loading is done if any
+        if hasattr(self, '_load_model_thread') and self._load_model_thread.is_alive():
+            self._load_model_thread.join() # Wait for initial load if it's still running
+
+        # Load the new model using the internal method
+        # This is done synchronously for simplicity in this context,
+        # as changing the model during history load should block until ready.
+        self._load_model_internal(model_id)
+
+
+    def _load_model_internal(self, model_id=None):
+        """Internal method to load a model. Can be called from init or set_model."""
+        try:
+            # Determine the model_id to load
+            if model_id is None:
+                # Use config or default if no specific model_id is provided (initial load)
+                model_id = self.config.get('model') or llm.get_default_model()
+
+            debug_print(f"LLMClient: Attempting to load model: {model_id}")
+            new_model = llm.get_model(model_id) # Load the potentially new model
+            self.model = new_model # Assign the new model
+            debug_print(f"LLMClient: Using model {self.model.model_id}")
+            # Create a new conversation object tied to the new model
+            # Any existing conversation context is lost when changing models.
+            self.conversation = self.model.conversation()
+            self._init_error = None # Clear previous errors if successful
+            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
+        except llm.UnknownModelError as e:
+            debug_print(f"LLMClient: Error - Unknown model: {e}")
+            self._init_error = str(e)
+            # Don't overwrite self.model if loading fails, keep the old one if any
+            GLib.idle_add(self.emit, 'error', f"Modelo desconocido: {e}")
+        except Exception as e:
+            debug_print(f"LLMClient: Unexpected error loading model: {e}")
+            self._init_error = str(e)
+            # Don't overwrite self.model if loading fails
+            GLib.idle_add(self.emit, 'error', f"Error inesperado al cargar modelo: {e}")
+
+
     def _process_stream(self, prompt: str):
         success = False
         full_response = ""
-        chat_history = ChatHistory()
+        chat_history = None # Initialize to None
         try:
-            debug_print(_(f"LLMClient: Sending prompt: {prompt[:50]}..."))
+            # Create ChatHistory instance explicitly
+            chat_history = ChatHistory()
+            debug_print(f"LLMClient: Sending prompt: {prompt[:50]}...")
             prompt_args = {}
             if self.config.get('system'):
                 prompt_args['system'] = self.config['system']
@@ -132,7 +167,9 @@ class LLMClient(GObject.Object):
                         )
                     except Exception as e:
                         print(_(f"Error al guardar en historial: {e}"))
-            chat_history.close()
+            # Explicitly close the connection in the finally block
+            if chat_history:
+                chat_history.close()
             GLib.idle_add(self.emit, 'finished', success)
 
     def cancel(self):
