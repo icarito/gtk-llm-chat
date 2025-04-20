@@ -24,18 +24,19 @@ def on_quit(*args):
     Gtk.main_quit()
 
 
-def add_last_conversations_to_menu(menu):
-    chat_history = ChatHistory()
-    last_conversations = chat_history.get_conversations(limit=10, offset=0)
-    chat_history.close()
-
-    for conversation in last_conversations:
-        conversation_name = conversation['name'].strip().removeprefix("user: ")
-        conversation_id = conversation['id']
-        menu_item = Gtk.MenuItem(label=conversation_name)
-        menu_item.connect("activate",
-                          lambda w, id=conversation_id: open_conversation(id))
-        menu.append(menu_item)
+def add_last_conversations_to_menu(menu, chat_history):
+    """Adds the last conversations to the menu."""
+    try:
+        conversations = chat_history.get_conversations(limit=10, offset=0)
+        for conversation in conversations:
+            conversation_name = conversation['name'].strip().removeprefix("user: ")
+            conversation_id = conversation['id']
+            menu_item = Gtk.MenuItem(label=conversation_name)
+            menu_item.connect("activate",
+                              lambda w, id=conversation_id: open_conversation(id))
+            menu.append(menu_item)
+    finally:
+        chat_history.close_connection()
 
 
 def open_conversation(conversation_id):
@@ -46,7 +47,8 @@ def on_new_conversation(widget):
     subprocess.Popen(['llm', 'gtk-chat'])
 
 
-def create_menu():
+def create_menu(chat_history):
+    """Creates the menu."""
     menu = Gtk.Menu()
 
     item = Gtk.MenuItem(label=_("New Conversation"))
@@ -56,7 +58,7 @@ def create_menu():
     separator = Gtk.SeparatorMenuItem()
     menu.append(separator)
 
-    add_last_conversations_to_menu(menu)
+    add_last_conversations_to_menu(menu, chat_history)
 
     separator = Gtk.SeparatorMenuItem()
     menu.append(separator)
@@ -95,17 +97,17 @@ def main():
     )
     indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
 
-    def on_db_changed(file_monitor, nada, file, event_type, indicator, *args):
+    def on_db_changed(file_monitor, nada, file, event_type, indicator, chat_history, *args):
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
-            indicator.set_menu(create_menu())
+            indicator.set_menu(create_menu(chat_history))
 
     if hasattr(chat_history, 'db_path'):
         file = Gio.File.new_for_path(chat_history.db_path)
         file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
         file_monitor.connect("changed", lambda *args: on_db_changed(*args,
-                                                                    indicator))
+                                                                    indicator, chat_history))
 
-    indicator.set_menu(create_menu())
+    indicator.set_menu(create_menu(chat_history))
 
     # Agregar manejador de señales
     signal.signal(signal.SIGINT, on_quit)
