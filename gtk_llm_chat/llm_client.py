@@ -5,6 +5,7 @@ import re
 import signal
 import sys
 import unittest
+from typing import Optional
 from unittest.mock import patch, MagicMock
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -35,7 +36,7 @@ class LLMClient(GObject.Object):
         'model-loaded': (GObject.SignalFlags.RUN_LAST, None, (str,)),
     }
 
-    def __init__(self, config=None, chat_history=None):
+    def __init__(self, config=None, chat_history=None, fragments_path: Optional[str] = None):
         GObject.Object.__init__(self)
         self.config = config or {}
         self.model = None
@@ -43,7 +44,7 @@ class LLMClient(GObject.Object):
         self._is_generating_flag = False
         self._stream_thread = None
         self._init_error = None
-        self.chat_history = chat_history or ChatHistory()
+        self.chat_history = chat_history or ChatHistory(fragments_path=fragments_path)
 
         # Load model initially using the internal method in a separate thread
         self._load_model_thread = threading.Thread(target=self._load_model_internal, daemon=True)

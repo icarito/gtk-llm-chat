@@ -8,7 +8,8 @@ import gettext
 import os
 import urllib.request
 import urllib.error
-import threading  # Import the threading module
+import threading
+import hashlib
 
 _ = gettext.gettext
 
@@ -21,7 +22,7 @@ class ChatHistory:
             self.db_path = result.stdout.strip()
         else:
             self.db_path = db_path
-        self._thread_local = threading.local()  # Thread-local storage
+        self._thread_local = threading.local()
 
     def get_connection(self):
         """Gets a connection for the current thread."""
@@ -42,8 +43,6 @@ class ChatHistory:
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
         cursor.execute("""
             SELECT r.*, c.name as conversation_name
             FROM responses r
@@ -119,8 +118,6 @@ class ChatHistory:
     ):
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
         try:
             response_id = str(ULID()).lower()
 
@@ -148,13 +145,11 @@ class ChatHistory:
 
         except sqlite3.Error as e:
             print(_(f"Error adding entry to history: {e}"))
-            conn.rollback()  # Undo changes in case of error
+            conn.rollback()
 
     def create_conversation_if_not_exists(self, conversation_id, name: str):
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
         try:
             cursor.execute("""
                 INSERT OR IGNORE INTO conversations (id, name)
@@ -168,36 +163,35 @@ class ChatHistory:
     def _add_fragments(self, response_id: str, fragments: List[str], table_name: str):
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
-        for order, fragment_content in enumerate(fragments):
-            fragment_id = self._get_or_create_fragment(fragment_content)
-            cursor.execute(f"""
-                INSERT INTO {table_name} (response_id, fragment_id, "order")
-                VALUES (?, ?, ?)
-            """, (response_id, fragment_id, order))
+        for order, fragment_specifier in enumerate(fragments):
+            try:
+                fragment_content = self.resolve_fragment(fragment_specifier)
+                fragment_id = self._get_or_create_fragment(fragment_content)
+                cursor.execute(f"""
+                    INSERT INTO {table_name} (response_id, fragment_id, "order")
+                    VALUES (?, ?, ?)
+                """, (response_id, fragment_id, order))
+            except ValueError as e:
+                print(f"Error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
 
     def _get_or_create_fragment(self, fragment_content: str) -> str:
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
-        cursor.execute("SELECT id FROM fragments WHERE content = ?", (fragment_content,))
+        content_hash = hashlib.sha256(fragment_content.encode('utf-8')).hexdigest()
+        cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
         row = cursor.fetchone()
         if row:
             return row['id']
         else:
             fragment_id = str(ULID()).lower()
-            cursor.execute("INSERT INTO fragments (id, content) VALUES (?, ?)", (fragment_id, fragment_content))
+            cursor.execute("INSERT INTO fragments (id, content, hash) VALUES (?, ?, ?)", (fragment_id, fragment_content, content_hash))
             conn.commit()
             return fragment_id
 
     def get_fragments_for_response(self, response_id: str, table_name: str) -> List[str]:
         conn = self.get_connection()
         cursor = conn.cursor()
-        # ... (rest of your code, using 'cursor' and 'conn')
-        # ...
         query = f"""
             SELECT fragments.content
             FROM {table_name}
@@ -208,14 +202,12 @@ class ChatHistory:
         cursor.execute(query, (response_id,))
         return [row['content'] for row in cursor.fetchall()]
 
-
-
     def resolve_fragment(self, specifier: str) -> str:
         """
         Resolves a fragment specifier to its content.
 
         Args:
-            specifier: The fragment specifier (URL, file path, or raw content).
+            specifier: The fragment specifier (URL, file path, alias, or raw content).
 
         Returns:
             The content of the fragment.
@@ -223,39 +215,68 @@ class ChatHistory:
         Raises:
             ValueError: If the specifier is invalid or the fragment cannot be resolved.
         """
-        specifier = specifier.strip()  # Remove leading/trailing whitespace
+        specifier = specifier.strip()
 
         if not specifier:
             raise ValueError("Empty fragment specifier")
 
-        try:
-            if specifier.startswith(('http://', 'https://')):
-                # Handle URL
-                try:
-                    with urllib.request.urlopen(specifier, timeout=10) as response:
-                        if response.status == 200:
-                            charset = response.headers.get_content_charset() or 'utf-8'
-                            return response.read().decode(charset)
-                        else:
-                            raise ValueError(f"Failed to fetch URL '{specifier}': HTTP status {response.status}")
-                except urllib.error.URLError as e:
-                    raise ValueError(f"Failed to fetch URL '{specifier}': {e}") from e
-            elif os.path.exists(specifier):
-                # Handle file path
-                try:
-                    with open(specifier, 'r', encoding='utf-8') as f:
-                        return f.read()
-                except UnicodeDecodeError as e:
-                    raise ValueError(f"Failed to decode file '{specifier}' as UTF-8: {e}") from e
-                except PermissionError as e:
-                    raise ValueError(f"Permission error accessing file '{specifier}': {e}") from e
-            else:
-                # Assume it's raw content
-                return specifier
-        except ValueError as e:
-            print(f"ChatHistory: Error resolving fragment '{specifier}': {e}")
-            raise
-        except Exception as e:
-            print(f"ChatHistory: Unexpected error resolving fragment '{specifier}': {e}")
-            raise ValueError(f"Unexpected error resolving fragment '{specifier}': {e}") from e
+        conn = self.get_connection()
+        cursor = conn.cursor()
 
+        # Check if it's a hash
+        if len(specifier) == 64 and all(c in '0123456789abcdef' for c in specifier):
+            cursor.execute("SELECT content FROM fragments WHERE hash = ?", (specifier,))
+            hash_row = cursor.fetchone()
+            if hash_row:
+                return hash_row['content']
+            else:
+                # Check if it's a fragment id
+                pass
+        else:
+            # Check if it's an alias
+            cursor.execute("SELECT fragment_id FROM fragment_aliases WHERE alias = ?", (specifier,))
+            alias_row = cursor.fetchone()
+            if alias_row:
+                fragment_id = alias_row['fragment_id']
+                cursor.execute("SELECT content FROM fragments WHERE id = ?", (fragment_id,))
+                fragment_row = cursor.fetchone()
+                if fragment_row:
+                    return fragment_row['content']
+                else:
+                    raise ValueError(f"Fragment alias '{specifier}' points to a non-existent fragment.")
+
+            try:
+                if specifier.startswith(('http://', 'https://')):
+                    # Handle URL
+                    try:
+                        with urllib.request.urlopen(specifier, timeout=10) as response:
+                            if response.status == 200:
+                                charset = response.headers.get_content_charset() or 'utf-8'
+                                return response.read().decode(charset)
+                            else:
+                                raise ValueError(f"Failed to fetch URL '{specifier}': HTTP status {response.status}")
+                    except urllib.error.URLError as e:
+                        raise ValueError(f"Failed to fetch URL '{specifier}': {e}") from e
+                elif os.path.exists(specifier):
+                    # Handle file path
+                    try:
+                        with open(specifier, 'r', encoding='utf-8') as f:
+                            return f.read()
+                    except UnicodeDecodeError as e:
+                        raise ValueError(f"Failed to decode file '{specifier}' as UTF-8: {e}") from e
+                    except PermissionError as e:
+                        raise ValueError(f"Permission error accessing file '{specifier}': {e}") from e
+                else:
+                    # Check if it's a fragment id
+                    cursor.execute("SELECT content FROM fragments WHERE id = ?", (specifier,))
+                    id_row = cursor.fetchone()
+                    if id_row:
+                        return id_row['content']
+                    else:
+                        return specifier
+            except ValueError as e:
+                print(f"ChatHistory: Error resolving fragment '{specifier}': {e}")
+                raise
+            except Exception as e:
+                print(f"ChatHistory: Unexpected error resolving fragment '{specifier}': {e}")
+                raise ValueError(f"Unexpected error resolving fragment '{specifier}': {e}") from e

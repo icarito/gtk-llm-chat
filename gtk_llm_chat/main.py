@@ -26,6 +26,9 @@ def parse_args(argv):
     parser.add_argument('-o', '--option', nargs=2, action='append',
                         metavar=('KEY', 'VALUE'),
                         help='Opciones para el modelo')
+    parser.add_argument('-f', '--fragment', action='append',
+                        metavar='FRAGMENT',
+                        help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
 
     # Parsear solo nuestros argumentos
     args = parser.parse_args(argv[1:])
@@ -38,7 +41,8 @@ def parse_args(argv):
         'continue_last': args.continue_last,
         'template': args.template,
         'params': args.param,
-        'options': args.option
+        'options': args.option,
+        'fragments': args.fragment, # Add fragments to the config
     }
 
     return config

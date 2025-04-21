@@ -12,6 +12,7 @@ _ = gettext.gettext
 
 from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
+from db_operations import ChatHistory
 
 DEBUG = False
 
@@ -31,7 +32,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Conectar señal de cierre de ventana
         self.connect('close-request', self._on_close_request)
-        self.connect('show', self._on_window_show) # Connect to the 'show' signal
+        self.connect('show', self._on_window_show)  # Connect to the 'show' signal
 
         # Asegurar que config no sea None
         self.config = config or {}
@@ -39,7 +40,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if chat_history:
             self.chat_history = chat_history
         else:
-            debug_print("Warning: chat_history not provided to LLMChatWindow, creating new instance.")
+            debug_print(
+                "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
         # Inicializar LLMClient con la configuración
@@ -57,6 +59,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller.connect("key-pressed", self._cancel_set_title)
         self.title_entry.add_controller(focus_controller)
 
+        # Add a key controller for Ctrl+W
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_ctrl_w_pressed)
+        self.add_controller(key_controller)
+
         self.set_default_size(400, 600)
 
         # Inicializar la cola de mensajes
@@ -69,7 +76,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle.new(title, _("LLM Chat"))
         self.header.set_title_widget(self.title_widget)
-        self.set_title(title) # Set window title based on initial title
+        self.set_title(title)  # Set window title based on initial title
 
         # Botón de menú
         menu_button = Gtk.MenuButton()
@@ -169,7 +176,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         try:
             self.llm = LLMClient(self.config, self.chat_history)
             # Connect signals *here*
-            self.llm.connect('model-loaded', self._on_model_loaded) # Ensure this is connected
+            self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
             self.llm.connect('response', self._on_llm_response)
             self.llm.connect('error', self._on_llm_error)
             self.llm.connect('finished', self._on_llm_finished)
@@ -178,7 +185,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Display error in UI instead of exiting?
             error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
             self.messages_box.append(error_widget)
-            self.set_enabled(False) # Disable input if LLM fails critically
+            self.set_enabled(False)  # Disable input if LLM fails critically
             # Optionally: sys.exit(1) if it should still be fatal
 
         # Add a focus controller to the window
@@ -275,6 +282,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.header.set_title_widget(self.title_widget)
             self.title_entry.set_text(self.title_widget.get_title())
 
+    def _on_ctrl_w_pressed(self, controller, keyval, keycode, state):
+        """Handles Ctrl+W to remove the conversation."""
+        if keyval == Gdk.KEY_w and state & Gdk.ModifierType.CONTROL_MASK:
+            app = self.get_application()
+            app.on_delete_activate(None, None)
+            return True
+        return False
+
     def set_enabled(self, enabled):
         """Habilita o deshabilita la entrada de texto"""
         self.input_text.set_sensitive(enabled)
@@ -340,7 +355,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 Message("", sender="assistant")
             )
             self.messages_box.append(self.current_message_widget)
-            self._scroll_to_bottom() # Auto-scroll al enviar el mensaje
+            self._scroll_to_bottom()  # Auto-scroll al enviar el mensaje
             GLib.idle_add(self._start_llm_task, sanitized_text)
 
     def _start_llm_task(self, prompt_text):
@@ -390,7 +405,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
 
         self.accumulated_response += response
-        GLib.idle_add(self.current_message_widget.update_content, self.accumulated_response)
+        GLib.idle_add(self.current_message_widget.update_content,
+                      self.accumulated_response)
         self._scroll_to_bottom(False)
 
     def _scroll_to_bottom(self, force=True):

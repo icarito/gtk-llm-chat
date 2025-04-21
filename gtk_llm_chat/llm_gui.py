@@ -40,7 +40,15 @@ def register_commands(cli):
         metavar='KEY VALUE',
         help="Opciones para el modelo",
     )
-    def run_gui(cid, system, model, continue_last, template, param, option):
+    @click.option(
+        "-f",
+        "--fragment",
+        multiple=True,
+        type=str,
+        metavar='FRAGMENT',
+        help="Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt",
+    )
+    def run_gui(cid, system, model, continue_last, template, param, option, fragment):
         """Runs a GUI for the chatbot"""
         from gtk_llm_chat.chat_application import LLMChatApplication
         # Crear diccionario de configuración
@@ -51,7 +59,8 @@ def register_commands(cli):
             'continue_last': continue_last,
             'template': template,
             'params': param,
-            'options': option
+            'options': option,
+            'fragments': fragment, # Add fragments to the config
         }
 
         # Crear y ejecutar la aplicación
