@@ -10,9 +10,12 @@ import urllib.request
 import urllib.error
 import threading
 import hashlib
+import logging
 
 _ = gettext.gettext
 
+def debug_print(*args, **kwargs):
+    logging.debug(*args, **kwargs)
 
 class ChatHistory:
     def __init__(self, db_path: Optional[str] = None):
@@ -78,14 +81,24 @@ class ChatHistory:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def set_conversation_title(self, conversation_id: str, title: str):
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE conversations SET name = ? WHERE id = ?",
-            (title, conversation_id)
-        )
-        conn.commit()
+    def set_conversation_title(self, conversation_id, title):
+        """Actualiza el título de una conversación en la base de datos"""
+        if not isinstance(title, str):
+            raise ValueError("El título debe ser una cadena de texto")
+
+        sanitized_title = title.strip()
+        if not sanitized_title:
+            raise ValueError("El título no puede estar vacío")
+
+        query = "UPDATE conversations SET title = ? WHERE id = ?"
+        try:
+            self.cursor.execute(query, (sanitized_title, conversation_id))
+            self.connection.commit()
+        except Exception as e:
+            debug_print(
+                f"Error al actualizar el título: {e}"
+            )
+            raise
 
     def delete_conversation(self, conversation_id: str):
         conn = self.get_connection()

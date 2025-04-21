@@ -268,8 +268,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_save_title(self, widget):
         app = self.get_application()
-        app.chat_history.set_conversation_title(
-            self.config.get('cid'), self.title_entry.get_text())
+        conversation_id = self.config.get('cid')
+        if conversation_id:
+            app.chat_history.set_conversation_title(
+            conversation_id, self.title_entry.get_text())
+        else:
+            debug_print("Conversation ID is not available yet. Title update deferred.")
+            # Schedule the title update for the next prompt
+            def update_title_on_next_prompt(llm_client, response):
+                conversation_id = self.config.get('cid')
+                if conversation_id:
+                    app.chat_history.set_conversation_title(
+                    conversation_id, self.title_entry.get_text())
+                    self.llm.disconnect_by_func(update_title_on_next_prompt)
+
+            self.llm.connect('response', update_title_on_next_prompt)
         self.header.set_title_widget(self.title_widget)
         new_title = self.title_entry.get_text()
 
