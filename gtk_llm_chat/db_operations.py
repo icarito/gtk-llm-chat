@@ -175,7 +175,7 @@ class ChatHistory:
                 print(f"Error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
 
-    def _get_or_create_fragment(self, fragment_content: str) -> str:
+    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> str:
         conn = self.get_connection()
         cursor = conn.cursor()
         content_hash = hashlib.sha256(fragment_content.encode('utf-8')).hexdigest()
@@ -184,10 +184,9 @@ class ChatHistory:
         if row:
             return row['id']
         else:
-            fragment_id = str(ULID()).lower()
-            cursor.execute("INSERT INTO fragments (id, content, hash) VALUES (?, ?, ?)", (fragment_id, fragment_content, content_hash))
+            cursor.execute("INSERT INTO fragments (content, hash, source) VALUES (?, ?, ?)", (fragment_content, content_hash, source))
             conn.commit()
-            return fragment_id
+            return hash
 
     def get_fragments_for_response(self, response_id: str, table_name: str) -> List[str]:
         conn = self.get_connection()
@@ -261,7 +260,9 @@ class ChatHistory:
                     # Handle file path
                     try:
                         with open(specifier, 'r', encoding='utf-8') as f:
-                            return f.read()
+                            content = f.read()
+                            self._get_or_create_fragment(content, specifier)
+                            return content
                     except UnicodeDecodeError as e:
                         raise ValueError(f"Failed to decode file '{specifier}' as UTF-8: {e}") from e
                     except PermissionError as e:

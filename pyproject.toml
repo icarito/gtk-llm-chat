@@ -11,8 +11,8 @@ classifiers = [
 keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
     "pygobject",
-    "requests",
-    "markdown"
+    "llm",
+    "markdown-it-py"
 ]
 requires-python = ">=3.8"
 dynamic = ["version"]
