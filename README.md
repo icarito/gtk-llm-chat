@@ -1,10 +1,10 @@
 # GTK LLM Chat
 
-A GTK graphical interface for chatting with large language models (LLMs).
+A GTK graphical interface for chatting with Large Language Models (LLMs).
 
 ![screenshot](./docs/screenshot01.png)
 
-## Features
+## Key Features
 
 - Simple and easy-to-use graphical interface built with GTK
 - Support for multiple conversations in independent windows
@@ -12,7 +12,19 @@ A GTK graphical interface for chatting with large language models (LLMs).
 - Modern interface using libadwaita
 - Support for real-time streaming responses
 - Message history with automatic scrolling
+- Markdown rendering of the responses
 - Keyboard shortcuts (Enter to send, Shift+Enter for new line)
+- **Support for fragments:** Include external content (files, URLs, or text snippets) in your prompts.
+- **Conversation Management:** Rename and delete conversations.
+- **Applet Mode:** Run a system tray applet for quick access to recent conversations.
+- **Model Selection:** Choose from different LLM models.
+- **System Prompt:** Set a custom system prompt for each conversation.
+- **Error Handling:** Clear error messages displayed in the chat.
+- **Dynamic Input:** The input area dynamically adjusts its height.
+- **Keyboard Shortcuts:**
+    - `Enter`: Send message.
+    - `Shift+Enter`: New line in the input.
+    - `Ctrl+W`: Delete the current conversation.
 
 ## Installation
 
@@ -28,7 +40,6 @@ llm install gtk-chat
 - GTK 4.0
 - libadwaita
 - libayatana-appindicator
-
 
 ## Usage
 
