@@ -1,8 +1,0 @@
- [Desktop Entry]
- Name=GTK LLM Applet
- Comment=A GTK applet to chat with language models (LLMs)
- Exec=llm gtk-applet
- Icon=org.fuentelibre.gtk_llm_Chat
-Terminal=false
-Type=Application
-Categories=GNOME;GTK;Utility;
