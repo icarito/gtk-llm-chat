@@ -46,11 +46,14 @@ class LLMClient(GObject.Object):
         self._init_error = None
         self.chat_history = chat_history or ChatHistory(fragments_path=fragments_path)
 
-        # Load model initially using the internal method in a separate thread
-        self._load_model_thread = threading.Thread(target=self._load_model_internal, daemon=True)
-        self._load_model_thread.start()
+    def _ensure_model_loaded(self):
+        """Ensures the model is loaded, loading it if necessary."""
+        if self.model is None and self._init_error is None:
+            debug_print("LLMClient: Ensuring model is loaded (was deferred).")
+            self._load_model_internal() # Load default or configured model
 
     def send_message(self, prompt: str):
+        self._ensure_model_loaded() # Ensure model is loaded before sending
         if self._is_generating_flag:
             GLib.idle_add(self.emit, 'error', "Ya se está generando una respuesta.")
             return
@@ -67,18 +70,14 @@ class LLMClient(GObject.Object):
 
     def set_model(self, model_id: str):
         """Sets or changes the LLM model."""
+        # If model is already loaded and it's the same, do nothing
         if self.model and self.model.model_id == model_id:
             debug_print(f"LLMClient: Model {model_id} is already loaded.")
-            return  # Avoid reloading the same model
+            return
 
         debug_print(f"LLMClient: Request to set model to: {model_id}")
-        # Ensure previous loading is done if any
-        if hasattr(self, '_load_model_thread') and self._load_model_thread.is_alive():
-            self._load_model_thread.join()  # Wait for initial load if it's still running
-
         # Load the new model using the internal method
-        # This is done synchronously for simplicity in this context,
-        # as changing the model during history load should block until ready.
+        # This will overwrite any existing model or load if none exists
         self._load_model_internal(model_id)
 
     def _load_model_internal(self, model_id=None):
@@ -208,12 +207,15 @@ class LLMClient(GObject.Object):
             debug_print(_("LLMClient: No active stream thread to cancel."))
 
     def get_model_id(self):
+        self._ensure_model_loaded()
         return self.model.model_id if self.model else None
 
     def get_conversation_id(self):
+        self._ensure_model_loaded()
         return self.conversation.id if self.conversation else None
 
     def load_history(self, history_entries):
+        self._ensure_model_loaded()
         if self._init_error or not self.model:
             debug_print(_("LLMClient: Error - Attempting to load history with model initialization error."))
             return

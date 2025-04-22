@@ -11,6 +11,7 @@ import urllib.error
 import threading
 import hashlib
 import logging
+import llm
 
 _ = gettext.gettext
 
@@ -20,11 +21,10 @@ def debug_print(*args, **kwargs):
 class ChatHistory:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            result = subprocess.run(
-                ['llm', 'logs', 'path'], capture_output=True, text=True)
-            self.db_path = result.stdout.strip()
-        else:
-            self.db_path = db_path
+            # Use llm.user_dir() to get the directory
+            user_dir = llm.user_dir()
+            db_path = os.path.join(user_dir, "logs.db")
+        self.db_path = db_path
         self._thread_local = threading.local()
 
     def get_connection(self):

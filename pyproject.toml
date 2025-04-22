@@ -32,6 +32,10 @@ tag_regex = "^v([0-9]+\\.[0-9]+\\.[0-9]+)$"
 local_scheme = "no-local-version"
 version_scheme = "python-simplified-semver"
 
+[tool.flake8]
+extend-ignore = ["E402"]
+max-line-length = 95
+
 [tool.setuptools.packages.find]
 include = ["gtk_llm_chat"]
 

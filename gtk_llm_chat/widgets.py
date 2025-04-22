@@ -7,7 +7,6 @@ from gi.repository import Gtk
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from markdownview import MarkdownView
 
 
 class Message:
@@ -56,6 +55,9 @@ class MessageWidget(Gtk.Box):
 
     def __init__(self, message):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+
+        # Import MarkdownView here
+        from markdownview import MarkdownView
 
         # Configurar el estilo según el remitente
         is_user = message.sender == "user"
