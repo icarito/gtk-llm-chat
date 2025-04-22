@@ -4,6 +4,8 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 
 ![screenshot](./docs/screenshot01.png)
 
+<a href="https://www.buymeacoffee.com/icarito" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a> if you find this project useful.
+
 ## Key Features
 
 - Simple and easy-to-use graphical interface built with GTK
@@ -13,7 +15,6 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 - Support for real-time streaming responses
 - Message history with automatic scrolling
 - Markdown rendering of the responses
-- Keyboard shortcuts (Enter to send, Shift+Enter for new line)
 - **Support for fragments:** Include external content (files, URLs, or text snippets) in your prompts.
 - **Conversation Management:** Rename and delete conversations.
 - **Applet Mode:** Run a system tray applet for quick access to recent conversations.
@@ -31,6 +32,17 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 ```
 pipx install llm               # required by gtk-llm-chat
 llm install gtk-llm-chat
+```
+
+You may want to manually copy the .desktop files to `~/.local/share/applications/` to make them available in your application menu.
+
+### Dependencies
+
+These are collected here for reference only, let me know if the list needs adjusting.
+
+```
+ # fedora: # sudo dnf install cairo-devel object-introspection-devel gtk4-devel pkgconf-pkg-config gcc redhat-rpm-config
+ # debian: # sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0
 ```
 
 ### System Requirements

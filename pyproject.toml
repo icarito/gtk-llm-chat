@@ -40,7 +40,10 @@ max-line-length = 95
 include = ["gtk_llm_chat"]
 
 [tool.setuptools.package-data]
-"gtk_llm_chat" = ["../po/*/*/gtk-llm-chat.mo"]
+"gtk_llm_chat" = [
+    "../po/*/*/gtk-llm-chat.mo",
+    "../desktop/*.desktop",
+]
 
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
