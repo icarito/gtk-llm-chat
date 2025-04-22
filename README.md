@@ -30,7 +30,7 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 
 ```
 pipx install llm               # required by gtk-llm-chat
-llm install gtk-chat
+llm install gtk-llm-chat
 ```
 
 ### System Requirements
