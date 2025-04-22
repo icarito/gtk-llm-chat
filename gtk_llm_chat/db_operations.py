@@ -81,24 +81,22 @@ class ChatHistory:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def set_conversation_title(self, conversation_id, title):
-        """Actualiza el título de una conversación en la base de datos"""
-        if not isinstance(title, str):
-            raise ValueError("El título debe ser una cadena de texto")
+    def _sanitize_title(self, title: str) -> str:
+        """Sanitizes the conversation title."""
+        # Basic sanitization: remove leading/trailing whitespace
+        return title.strip()
 
-        sanitized_title = title.strip()
-        if not sanitized_title:
-            raise ValueError("El título no puede estar vacío")
-
-        query = "UPDATE conversations SET title = ? WHERE id = ?"
+    def set_conversation_title(self, conversation_id: str, title: str):
+        """Sets the title (name) for a specific conversation."""
+        sanitized_title = self._sanitize_title(title)
+        query = "UPDATE conversations SET name = ? WHERE id = ?"  # Use 'name' column
+        conn = self.get_connection()
+        cursor = conn.cursor()
         try:
-            self.cursor.execute(query, (sanitized_title, conversation_id))
-            self.connection.commit()
-        except Exception as e:
-            debug_print(
-                f"Error al actualizar el título: {e}"
-            )
-            raise
+            cursor.execute(query, (sanitized_title, conversation_id))
+            conn.commit()
+        finally:
+            cursor.close()
 
     def delete_conversation(self, conversation_id: str):
         conn = self.get_connection()
