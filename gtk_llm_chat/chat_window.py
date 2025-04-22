@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import time
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
@@ -36,6 +37,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Asegurar que config no sea None
         self.config = config or {}
+        # Store benchmark flag and start time from config
+        self.benchmark_startup = self.config.get('benchmark_startup', False)
+        self.start_time = self.config.get('start_time')
+
         # Use the passed chat_history or create one if not provided (fallback)
         if chat_history:
             self.chat_history = chat_history
@@ -448,6 +453,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_window_show(self, window):
         """Set focus to the input text when the window is shown."""
+        # Handle benchmark startup
+        if self.benchmark_startup and self.start_time:
+            end_time = time.time()
+            elapsed_time = end_time - self.start_time
+            print(f"Startup time: {elapsed_time:.4f} seconds")
+            # Use GLib.idle_add to exit after the current event loop iteration
+            GLib.idle_add(self.get_application().quit)
+            return # Don't grab focus if we are exiting
+
         self.input_text.grab_focus()
 
     def _on_focus_enter(self, controller):

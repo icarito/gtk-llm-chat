@@ -1,5 +1,6 @@
 import llm
 import click
+import time
 
 
 @llm.hookimpl
@@ -48,8 +49,16 @@ def register_commands(cli):
         metavar='FRAGMENT',
         help="Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt",
     )
-    def run_gui(cid, system, model, continue_last, template, param, option, fragment):
+    @click.option(
+            "--benchmark-startup",
+        is_flag=True,
+        help="Mide el tiempo hasta que la ventana se muestra y sale.",
+    )
+    def run_gui(cid, system, model, continue_last, template, param, option, fragment, benchmark_startup):
         """Runs a GUI for the chatbot"""
+        # Record start time if benchmarking
+        start_time = time.time() if benchmark_startup else None
+
         from gtk_llm_chat.chat_application import LLMChatApplication
         # Crear diccionario de configuración
         config = {
@@ -61,6 +70,8 @@ def register_commands(cli):
             'params': param,
             'options': option,
             'fragments': fragment, # Add fragments to the config
+            'benchmark_startup': benchmark_startup, # Add benchmark flag
+            'start_time': start_time, # Pass start time if benchmarking
         }
 
         # Crear y ejecutar la aplicación

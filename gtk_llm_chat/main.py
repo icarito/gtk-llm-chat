@@ -4,6 +4,12 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import os
 import sys
+import time
+
+# Record start time if benchmarking
+benchmark_startup = '--benchmark-startup' in sys.argv
+start_time = time.time() if benchmark_startup else None
+
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from chat_application import LLMChatApplication
@@ -29,6 +35,9 @@ def parse_args(argv):
     parser.add_argument('-f', '--fragment', action='append',
                         metavar='FRAGMENT',
                         help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
+    parser.add_argument('--benchmark-startup', action='store_true',
+                        help='Mide el tiempo hasta que la ventana se muestra y sale.')
+
 
     # Parsear solo nuestros argumentos
     args = parser.parse_args(argv[1:])
@@ -43,6 +52,8 @@ def parse_args(argv):
         'params': args.param,
         'options': args.option,
         'fragments': args.fragment, # Add fragments to the config
+        'benchmark_startup': args.benchmark_startup, # Add benchmark flag
+        'start_time': start_time, # Pass start time if benchmarking
     }
 
     return config
