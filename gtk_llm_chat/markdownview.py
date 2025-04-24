@@ -250,21 +250,28 @@ class MarkdownView(Gtk.TextView):
             else:
                 print("Unknown markdown token:", token.type, flush=True)
 
+
     def insert_text(self, text):
-        iter = self.buffer.get_end_iter()
-        length = len(text)
-        if self.current_tags:
-            self.buffer.insert_with_tags(iter, text, *self.current_tags)
-        else:
-            self.buffer.insert(iter, text, -1)
+        buf = self.buffer
+        buf.create_mark("insert_start", buf.get_end_iter(), left_gravity=True)
+        buf.insert(buf.get_end_iter(), text)
+        start = buf.get_iter_at_mark(buf.get_mark("insert_start"))
+        end = start.copy()
+        end.forward_chars(len(text))
+        for tag in self.current_tags:
+            buf.apply_tag(tag, start, end)
+        buf.delete_mark(buf.get_mark("insert_start"))
 
     def insert_thinking(self, text):
-        """
-        Inserta texto de pensamiento con el formato especial
-        """
-        iter = self.buffer.get_end_iter()
-        self.buffer.insert_with_tags(iter, text, self.thinking_tag)
-        self.insert_text("\n")
+        buf = self.buffer
+        buf.create_mark("think_start", buf.get_end_iter(), left_gravity=True)
+        buf.insert(buf.get_end_iter(), text)
+        start = buf.get_iter_at_mark(buf.get_mark("think_start"))
+        end = start.copy()
+        end.forward_chars(len(text))
+        buf.apply_tag(self.thinking_tag, start, end)
+        buf.delete_mark(buf.get_mark("think_start"))
+        buf.insert(buf.get_end_iter(), "\n")
 
     def apply_tag(self, tag):
         if tag not in self.current_tags:
