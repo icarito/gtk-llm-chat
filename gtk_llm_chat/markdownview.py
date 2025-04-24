@@ -256,14 +256,14 @@ class MarkdownView(Gtk.TextView):
         if self.current_tags:
             self.buffer.insert_with_tags(iter, text, *self.current_tags)
         else:
-            self.buffer.insert(iter, text, length)
+            self.buffer.insert(iter, text, -1)
 
     def insert_thinking(self, text):
         """
         Inserta texto de pensamiento con el formato especial
         """
         iter = self.buffer.get_end_iter()
-        self.buffer.insert(iter, text, len(text), self.thinking_tag) # Corrected line
+        self.buffer.insert_with_tags(iter, text, self.thinking_tag)
         self.insert_text("\n")
 
     def apply_tag(self, tag):
