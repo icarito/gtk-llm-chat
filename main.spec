@@ -37,6 +37,7 @@ a = Analysis(
         'gtk_llm_chat.llm_client',
         'gtk_llm_chat._version',
         'locale',
+	'altgraph',
     ]
 )
 pyz = PYZ(a.pure)
