@@ -9,7 +9,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=2,  # Optimized bytecode
+    optimize=2,
     datas=[
         ('po', 'po'),
     ],
@@ -37,7 +37,6 @@ a = Analysis(
         'gtk_llm_chat.llm_client',
         'gtk_llm_chat._version',
         'locale',
-	'altgraph',
     ]
 )
 pyz = PYZ(a.pure)
@@ -47,12 +46,12 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='main',
-    debug=False,
+    name='gtk-llm-chat',
+    debug=True,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -66,5 +65,5 @@ coll = COLLECT(
     strip=False,
     upx=True,  # Use UPX here too
     upx_exclude=[],
-    name='main'
+    name='gtk-llm-chat'
 )

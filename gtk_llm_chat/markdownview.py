@@ -130,7 +130,7 @@ class MarkdownView(Gtk.TextView):
         return fragments
 
     def render_markdown(self, text):
-        self.buffer.set_text("", -1)
+        self.buffer.set_text("", 0)
         fragments = self.process_thinking_tags(text)
 
         for fragment_text, is_thinking in fragments:
