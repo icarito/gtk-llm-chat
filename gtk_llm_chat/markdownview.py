@@ -254,7 +254,7 @@ class MarkdownView(Gtk.TextView):
     def insert_text(self, text):
         buf = self.buffer
         buf.create_mark("insert_start", buf.get_end_iter(), left_gravity=True)
-        buf.insert(buf.get_end_iter(), text)
+        buf.insert(buf.get_end_iter(), text, -1)
         start = buf.get_iter_at_mark(buf.get_mark("insert_start"))
         end = start.copy()
         end.forward_chars(len(text))
@@ -265,13 +265,13 @@ class MarkdownView(Gtk.TextView):
     def insert_thinking(self, text):
         buf = self.buffer
         buf.create_mark("think_start", buf.get_end_iter(), left_gravity=True)
-        buf.insert(buf.get_end_iter(), text)
+        buf.insert(buf.get_end_iter(), text, -1)
         start = buf.get_iter_at_mark(buf.get_mark("think_start"))
         end = start.copy()
         end.forward_chars(len(text))
         buf.apply_tag(self.thinking_tag, start, end)
         buf.delete_mark(buf.get_mark("think_start"))
-        buf.insert(buf.get_end_iter(), "\n")
+        buf.insert(buf.get_end_iter(), "\n", -1)
 
     def apply_tag(self, tag):
         if tag not in self.current_tags:

@@ -200,7 +200,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data("""
+        data = """
             .message {
                 padding: 8px;
             }
@@ -257,7 +257,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 background-color: rgba(255,255,255,0.3);
                 color: white;
             }
-        """.encode())
+        """
+        css_provider.load_from_data(data, len(data))
 
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -364,7 +365,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if sanitized_text:
             # Añadir mensaje a la cola ANTES de limpiar el buffer
             self._add_message_to_queue(sanitized_text, sender="user")
-            buffer.set_text("")
+            buffer.set_text("", 0)
             # Deshabilitar entrada y empezar tarea LLM
             self.set_enabled(False)
             # NEW: Crear el widget de respuesta aquí
