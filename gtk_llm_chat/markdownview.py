@@ -14,54 +14,82 @@ class MarkdownView(Gtk.TextView):
         self.buffer = self.get_buffer()
         self.md = MarkdownIt().enable('strikethrough')
 
-        self.bold_tag = self.buffer.create_tag(
-            "bold", weight=Pango.Weight.BOLD)
+        # Get the TextTagTable from the buffer
+        self.tag_table = self.buffer.get_tag_table()  # Corrected line
 
-        self.italic_tag = self.buffer.create_tag(
-            "italic", style=Pango.Style.ITALIC)
+        # Create TextTags and add them to the table
+        self.bold_tag = Gtk.TextTag(name="bold")
+        self.bold_tag.set_property("weight", Pango.Weight.BOLD)
+        self.tag_table.add(self.bold_tag)
 
-        self.strike_tag = self.buffer.create_tag(
-            "strike", strikethrough=True)
+        self.italic_tag = Gtk.TextTag(name="italic")
+        self.italic_tag.set_property("style", Pango.Style.ITALIC)
+        self.tag_table.add(self.italic_tag)
 
-        self.hr_tag = self.buffer.create_tag(
-            "hr_line",
-            foreground="#666666",  # Color de la línea
-            scale=0.3,  # Grosor controlado por escala
-            rise=-500,  # Baja la línea respecto al texto
-            justification=Gtk.Justification.CENTER  # Centrado horizontal
-        )
+        self.strike_tag = Gtk.TextTag(name="strike")
+        self.strike_tag.set_property("strikethrough", True)
+        self.tag_table.add(self.strike_tag)
+
+        self.hr_tag = Gtk.TextTag(name="hr_line")
+        self.hr_tag.set_property("foreground", "#666666")
+        self.hr_tag.set_property("scale", 0.3)
+        self.hr_tag.set_property("rise", -500)
+        self.hr_tag.set_property("justification", Gtk.Justification.CENTER)
+        self.tag_table.add(self.hr_tag)
 
         self.heading_tags = {
-            '1': self.buffer.create_tag("h1", weight=Pango.Weight.BOLD,
-                                        size=24 * Pango.SCALE),
-            '2': self.buffer.create_tag("h2", weight=Pango.Weight.BOLD,
-                                        size=20 * Pango.SCALE),
-            '3': self.buffer.create_tag("h3", weight=Pango.Weight.BOLD,
-                                        size=16 * Pango.SCALE),
-            '4': self.buffer.create_tag("h4", weight=Pango.Weight.BOLD,
-                                        size=12 * Pango.SCALE),
-            '5': self.buffer.create_tag("h5", weight=Pango.Weight.BOLD,
-                                        size=10 * Pango.SCALE),
+            '1': Gtk.TextTag(name="h1"),
+            '2': Gtk.TextTag(name="h2"),
+            '3': Gtk.TextTag(name="h3"),
+            '4': Gtk.TextTag(name="h4"),
+            '5': Gtk.TextTag(name="h5"),
         }
-        self.code_tag = self.buffer.create_tag(
-            "code", family="monospace", background="gray")
-        self.code_inline_tag = self.buffer.create_tag(
-            "code_inline", family="monospace", background="#444444")
-        self.thinking_tag = self.buffer.create_tag(
-            "thinking", style=Pango.Style.ITALIC, scale=0.8,
-            left_margin=20, right_margin=20
-        )
-        self.blockquote_tag = self.buffer.create_tag(
-            "blockquote",
-            left_margin=30,
-            style=Pango.Style.ITALIC,
-            background="gray"
-        )
+        self.heading_tags['1'].set_property("weight", Pango.Weight.BOLD)
+        self.heading_tags['1'].set_property("size", 24 * Pango.SCALE)
+        self.heading_tags['2'].set_property("weight", Pango.Weight.BOLD)
+        self.heading_tags['2'].set_property("size", 20 * Pango.SCALE)
+        self.heading_tags['3'].set_property("weight", Pango.Weight.BOLD)
+        self.heading_tags['3'].set_property("size", 16 * Pango.SCALE)
+        self.heading_tags['4'].set_property("weight", Pango.Weight.BOLD)
+        self.heading_tags['4'].set_property("size", 12 * Pango.SCALE)
+        self.heading_tags['5'].set_property("weight", Pango.Weight.BOLD)
+        self.heading_tags['5'].set_property("size", 10 * Pango.SCALE)
+        for tag in self.heading_tags.values():
+            self.tag_table.add(tag)
+
+        self.code_tag = Gtk.TextTag(name="code")
+        self.code_tag.set_property("family", "monospace")
+        self.code_tag.set_property("background", "gray")
+        self.tag_table.add(self.code_tag)
+
+        self.code_inline_tag = Gtk.TextTag(name="code_inline")
+        self.code_inline_tag.set_property("family", "monospace")
+        self.code_inline_tag.set_property("background", "#444444")
+        self.tag_table.add(self.code_inline_tag)
+
+        self.thinking_tag = Gtk.TextTag(name="thinking")
+        self.thinking_tag.set_property("style", Pango.Style.ITALIC)
+        self.thinking_tag.set_property("scale", 0.8)
+        self.thinking_tag.set_property("left-margin", 20)
+        self.thinking_tag.set_property("right-margin", 20)
+        self.tag_table.add(self.thinking_tag)
+
+        self.blockquote_tag = Gtk.TextTag(name="blockquote")
+        self.blockquote_tag.set_property("left-margin", 30)
+        self.blockquote_tag.set_property("style", Pango.Style.ITALIC)
+        self.blockquote_tag.set_property("background", "gray")
+        self.tag_table.add(self.blockquote_tag)
+
         self.list_tags = {
-            1: self.buffer.create_tag("list_1", left_margin=30),
-            2: self.buffer.create_tag("list_2", left_margin=50),
-            3: self.buffer.create_tag("list_3", left_margin=70),
+            1: Gtk.TextTag(name="list_1"),
+            2: Gtk.TextTag(name="list_2"),
+            3: Gtk.TextTag(name="list_3"),
         }
+        self.list_tags[1].set_property("left-margin", 30)
+        self.list_tags[2].set_property("left-margin", 50)
+        self.list_tags[3].set_property("left-margin", 70)
+        for tag in self.list_tags.values():
+            self.tag_table.add(tag)
 
         self.in_list_item = False
         self.in_ordered_list = False
@@ -102,7 +130,7 @@ class MarkdownView(Gtk.TextView):
         return fragments
 
     def render_markdown(self, text):
-        self.buffer.set_text("", -1)
+        self.buffer.set_text("", 0)
         fragments = self.process_thinking_tags(text)
 
         for fragment_text, is_thinking in fragments:
@@ -222,29 +250,41 @@ class MarkdownView(Gtk.TextView):
             else:
                 print("Unknown markdown token:", token.type, flush=True)
 
+
     def insert_text(self, text):
-        iter = self.buffer.get_end_iter()
-        tags = self.current_tags.copy()
-        if tags:
-            self.buffer.insert_with_tags(iter, text, *tags)
-        else:
-            self.buffer.insert(iter, text)
+        buf = self.buffer
+        buf.create_mark("insert_start", buf.get_end_iter(), left_gravity=True)
+        buf.insert(buf.get_end_iter(), text, -1)
+        start = buf.get_iter_at_mark(buf.get_mark("insert_start"))
+        end = start.copy()
+        end.forward_chars(len(text))
+        for tag in self.current_tags:
+            buf.apply_tag(tag, start, end)
+        buf.delete_mark(buf.get_mark("insert_start"))
 
     def insert_thinking(self, text):
-        """
-        Inserta texto de pensamiento con el formato especial
-        """
-        iter = self.buffer.get_end_iter()
-        self.buffer.insert_with_tags(iter, text, self.thinking_tag)
-        self.insert_text("\n")
+        buf = self.buffer
+        buf.create_mark("think_start", buf.get_end_iter(), left_gravity=True)
+        buf.insert(buf.get_end_iter(), text, -1)
+        start = buf.get_iter_at_mark(buf.get_mark("think_start"))
+        end = start.copy()
+        end.forward_chars(len(text))
+        buf.apply_tag(self.thinking_tag, start, end)
+        buf.delete_mark(buf.get_mark("think_start"))
+        buf.insert(buf.get_end_iter(), "\n", -1)
 
     def apply_tag(self, tag):
         if tag not in self.current_tags:
             self.current_tags.append(tag)
+        start, end = self.buffer.get_bounds()
+        if not start.equal(end):
+            self.buffer.apply_tag(tag, end, self.buffer.get_end_iter())
 
     def remove_tag(self, tag):
         if tag in self.current_tags:
             self.current_tags.remove(tag)
+        start, end = self.buffer.get_bounds()
+        self.buffer.remove_tag(tag, end, self.buffer.get_end_iter())
 
 
 if __name__ == "__main__":

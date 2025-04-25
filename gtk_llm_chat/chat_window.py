@@ -15,7 +15,7 @@ from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
-DEBUG = False
+DEBUG = False 
 
 
 def debug_print(*args, **kwargs):
@@ -70,9 +70,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.add_controller(key_controller)
 
         self.set_default_size(400, 600)
-
-        # Inicializar la cola de mensajes
-        self.message_queue = []
 
         # Mantener referencia al último mensaje enviado
         self.last_message = None
@@ -200,7 +197,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data("""
+        data = """
             .message {
                 padding: 8px;
             }
@@ -257,7 +254,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 background-color: rgba(255,255,255,0.3);
                 color: white;
             }
-        """.encode())
+        """
+        css_provider.load_from_data(data, len(data))
 
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -282,17 +280,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Schedule the title update for the next prompt
             def update_title_on_next_prompt(llm_client, response):
                 conversation_id = self.config.get('cid')
+                print("Conversation ID:", conversation_id)
                 if conversation_id:
                     app.chat_history.set_conversation_title(
                     conversation_id, self.title_entry.get_text())
                     self.llm.disconnect_by_func(update_title_on_next_prompt)
-
             self.llm.connect('response', update_title_on_next_prompt)
         self.header.set_title_widget(self.title_widget)
         new_title = self.title_entry.get_text()
 
         self.title_widget.set_title(new_title)
         self.set_title(new_title)
+
 
     def _cancel_set_title(self, controller, keyval, keycode, state):
         """Cancela la edición y restaura el título anterior"""
@@ -327,54 +326,77 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return True
         return False
 
-    def _sanitize_input(self, text):
-        """Sanitiza el texto de entrada"""
-        return text.strip()
+    def display_message(self, content, sender="user"):
+        """
+        Displays a message in the chat window.
 
-    def _add_message_to_queue(self, content, sender="user"):
-        """Agrega un nuevo mensaje a la cola y lo muestra"""
-        if content := self._sanitize_input(content):
-            message = Message(content, sender)
-            self.message_queue.append(message)
+        Args:
+            content (str): The text content of the message.
+            sender (str): The sender of the message ("user" or "assistant").
+        """
+        message = Message(content, sender)
 
-            if sender == "user":
-                self.last_message = message
+        if sender == "user":
+            self.last_message = message
+            # Clear the input buffer after sending a user message
+            buffer = self.input_text.get_buffer()
+            buffer.set_text("", 0)
 
-            # Crear y mostrar el widget del mensaje
-            message_widget = MessageWidget(message)
-            self.messages_box.append(message_widget)
+        # Create the message widget
+        message_widget = MessageWidget(message)
 
-            # Auto-scroll al último mensaje
-            self._scroll_to_bottom()
+        # Connect to the 'map' signal to scroll *after* the widget is shown
+        def scroll_on_map(widget, *args):
+            # Use timeout_add to ensure scrolling happens after a short delay
+            def do_scroll():
+                self._scroll_to_bottom(True) # Force scroll
+                return GLib.SOURCE_REMOVE # Run only once
+            GLib.timeout_add(50, do_scroll) # Delay of 50ms
+            # Return False because we are using connect_after
+            return False
 
-            return True
-        return False
+        # Use connect_after for potentially better timing
+        signal_id = message_widget.connect_after('map', scroll_on_map)
+
+        # Add the widget to the box
+        self.messages_box.append(message_widget)
+
+        return message_widget
 
     def _on_model_loaded(self, llm_client, model_name):
         """Updates the window subtitle with the model name."""
         self.title_widget.set_subtitle(model_name)
+        # Save the model name to the chat history
+        cid = self.config.get('cid') or llm_client.get_conversation_id()
+        if cid:
+            if not self.config.get('cid'):
+                self.config['cid'] = cid
+                debug_print(f"Conversation ID set in config: {cid}")
+            try:
+                self.chat_history.create_conversation_if_not_exists(
+                    cid,
+                    DEFAULT_CONVERSATION_NAME(),
+                    model_name
+                )
+            except Exception as e:
+                debug_print(f"Error creando la conversación en BD: {e}")
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
         text = buffer.get_text(
             buffer.get_start_iter(), buffer.get_end_iter(), True
         )
-        sanitized_text = self._sanitize_input(text)
 
-        if sanitized_text:
-            # Añadir mensaje a la cola ANTES de limpiar el buffer
-            self._add_message_to_queue(sanitized_text, sender="user")
-            buffer.set_text("")
+        if text:
+            # Display user message
+            self.display_message(text, sender="user")
             # Deshabilitar entrada y empezar tarea LLM
             self.set_enabled(False)
             # NEW: Crear el widget de respuesta aquí
-            self.accumulated_response = ""
-            self.current_message_widget = MessageWidget(
-                Message("", sender="assistant")
-            )
-            self.messages_box.append(self.current_message_widget)
-            self._scroll_to_bottom()  # Auto-scroll al enviar el mensaje
-            GLib.idle_add(self._start_llm_task, sanitized_text)
+            self.current_message_widget = self.display_message("", sender="assistant")
+            # Call _on_llm_response with an empty string to update the widget
+            self._on_llm_response(self.llm, "")
+            GLib.idle_add(self._start_llm_task, text)
 
     def _start_llm_task(self, prompt_text):
         """Inicia la tarea del LLM con el prompt dado."""
@@ -417,33 +439,49 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.accumulated_response = ""
         self.input_text.grab_focus()
 
+        # Actualizar el conversation_id en la configuración si no existe
+        if success and not self.config.get('cid'):
+            conversation_id = self.llm.get_conversation_id()
+            if conversation_id:
+                self.config['cid'] = conversation_id
+                debug_print(f"Conversation ID updated in config: {conversation_id}")
+
     def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del LLM"""
         if not self.current_message_widget:
             return
 
+        # Actualizar el conversation_id en la configuración al recibir la primera respuesta
+        if not self.config.get('cid'):
+            conversation_id = self.llm.get_conversation_id()
+            if conversation_id:
+                self.config['cid'] = conversation_id
+                debug_print(f"Conversation ID updated early in config: {conversation_id}")
+
         self.accumulated_response += response
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
-        self._scroll_to_bottom(False)
+        GLib.idle_add(self._scroll_to_bottom, False)
 
     def _scroll_to_bottom(self, force=True):
-        """Desplaza la vista al último mensaje"""
         scroll = self.messages_box.get_parent()
         adj = scroll.get_vadjustment()
+        upper = adj.get_upper()
+        page_size = adj.get_page_size()
+        value = adj.get_value()
 
-        def scroll_after():
-            adj.set_value(adj.get_upper() - adj.get_page_size())
-            return False
-        if force or adj.get_value() == adj.get_upper() - adj.get_page_size():
+        bottom_distance = upper - (value + page_size)
+        threshold = page_size * 0.1  # 10% del viewport
+
+        if force:
+            adj.set_value(upper - page_size)
+            return
+
+        if bottom_distance < threshold:
+            def scroll_after():
+                adj.set_value(upper - page_size)
+                return False
             GLib.timeout_add(50, scroll_after)
-
-    def display_message(self, content, is_user=True):
-        """Muestra un mensaje en la ventana de chat"""
-        message = Message(content, sender="user" if is_user else "assistant")
-        message_widget = MessageWidget(message)
-        self.messages_box.append(message_widget)
-        GLib.idle_add(self._scroll_to_bottom)
 
     def _on_close_request(self, window):
         """Maneja el cierre de la ventana de manera elegante"""
@@ -460,7 +498,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             print(f"Startup time: {elapsed_time:.4f} seconds")
             # Use GLib.idle_add to exit after the current event loop iteration
             GLib.idle_add(self.get_application().quit)
-            return # Don't grab focus if we are exiting
+            return  # Don't grab focus if we are exiting
 
         self.input_text.grab_focus()
 
