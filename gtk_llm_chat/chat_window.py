@@ -326,10 +326,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return True
         return False
 
-    def _sanitize_input(self, text):
-        """Sanitiza el texto de entrada"""
-        return text.strip()
-
     def display_message(self, content, sender="user"):
         """
         Displays a message in the chat window.
@@ -351,7 +347,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.append(message_widget)
 
         # Auto-scroll to the last message
-        self._scroll_to_bottom(True)
+        GLib.idle_add(self._scroll_to_bottom, True)
         return message_widget
 
     def _on_model_loaded(self, llm_client, model_name):
@@ -363,18 +359,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         text = buffer.get_text(
             buffer.get_start_iter(), buffer.get_end_iter(), True
         )
-        sanitized_text = self._sanitize_input(text)
 
-        if sanitized_text:
+        if text:
             # Display user message
-            self.display_message(sanitized_text, sender="user")
+            self.display_message(text, sender="user")
             # Deshabilitar entrada y empezar tarea LLM
             self.set_enabled(False)
             # NEW: Crear el widget de respuesta aquí
             self.current_message_widget = self.display_message("", sender="assistant")
             # Call _on_llm_response with an empty string to update the widget
             self._on_llm_response(self.llm, "")
-            GLib.idle_add(self._start_llm_task, sanitized_text)
+            GLib.idle_add(self._start_llm_task, text)
 
     def _start_llm_task(self, prompt_text):
         """Inicia la tarea del LLM con el prompt dado."""
