@@ -15,7 +15,7 @@ from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
-DEBUG = True
+DEBUG = False 
 
 
 def debug_print(*args, **kwargs):
