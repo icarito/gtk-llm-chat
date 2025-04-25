@@ -158,14 +158,14 @@ class ChatHistory:
             print(_(f"Error adding entry to history: {e}"))
             conn.rollback()
 
-    def create_conversation_if_not_exists(self, conversation_id, name: str):
+    def create_conversation_if_not_exists(self, conversation_id, name: str, model: Optional[str] = None):
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT OR IGNORE INTO conversations (id, name)
-                VALUES (?, ?)
-            """, (conversation_id, name))
+                INSERT OR IGNORE INTO conversations (id, name, model)
+                VALUES (?, ?, ?)
+            """, (conversation_id, name, model))
             conn.commit()
         except sqlite3.Error as e:
             print(_(f"Error creating conversation record: {e}"))

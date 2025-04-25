@@ -179,7 +179,7 @@ class LLMClient(GObject.Object):
                         new_cid = self.get_conversation_id()
                         self.config['cid'] = new_cid
                         debug_print(f"Nueva conversación creada con ID: {new_cid}")
-                        chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME())
+                        chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME(), model_id)
                         cid = new_cid
                     if cid and model_id:
                         try:

@@ -15,7 +15,7 @@ from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 
-DEBUG = False
+DEBUG = True
 
 
 def debug_print(*args, **kwargs):
@@ -173,7 +173,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Agregar soporte para cancelación
         self.current_message_widget = None
         self.accumulated_response = ""
-        self.title_updated = False
 
         # Initialize LLMClient *after* basic UI setup
         try:
@@ -270,28 +269,29 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.set_text(title)
         self.set_title(title)
 
-    def _update_title(self):
+    def _on_save_title(self, widget):
         app = self.get_application()
         conversation_id = self.config.get('cid')
         if conversation_id:
             app.chat_history.set_conversation_title(
-                conversation_id, self.title_entry.get_text())
-            self.title_updated = True
-            self.header.set_title_widget(self.title_widget)
-            new_title = self.title_entry.get_text()
-            self.title_widget.set_title(new_title)
-            self.set_title(new_title)
-
-    def _on_save_title(self, widget):
-        if not self.title_updated:
+            conversation_id, self.title_entry.get_text())
+        else:
+            debug_print("Conversation ID is not available yet. Title update deferred.")
             # Schedule the title update for the next prompt
             def update_title_on_next_prompt(llm_client, response):
-                self._update_title()
-                self.llm.disconnect_by_func(update_title_on_next_prompt)
-
+                conversation_id = self.config.get('cid')
+                print("Conversation ID:", conversation_id)
+                if conversation_id:
+                    app.chat_history.set_conversation_title(
+                    conversation_id, self.title_entry.get_text())
+                    self.llm.disconnect_by_func(update_title_on_next_prompt)
             self.llm.connect('response', update_title_on_next_prompt)
-        else:
-            self._update_title()
+        self.header.set_title_widget(self.title_widget)
+        new_title = self.title_entry.get_text()
+
+        self.title_widget.set_title(new_title)
+        self.set_title(new_title)
+
 
     def _cancel_set_title(self, controller, keyval, keycode, state):
         """Cancela la edición y restaura el título anterior"""
@@ -367,17 +367,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Updates the window subtitle with the model name."""
         self.title_widget.set_subtitle(model_name)
         # Save the model name to the chat history
-        app = self.get_application()
-        conversation_id = self.config.get('cid')
-        if conversation_id and app.chat_history:
-            # Assuming a method set_conversation_model exists in ChatHistory
+        cid = self.config.get('cid') or llm_client.get_conversation_id()
+        if cid:
+            if not self.config.get('cid'):
+                self.config['cid'] = cid
+                debug_print(f"Conversation ID set in config: {cid}")
             try:
-                app.chat_history.set_conversation_model(conversation_id, model_name)
-                debug_print(f"Saved model '{model_name}' for conversation {conversation_id}")
-            except AttributeError:
-                debug_print("Warning: chat_history does not have set_conversation_model method.")
+                self.chat_history.create_conversation_if_not_exists(
+                    cid,
+                    DEFAULT_CONVERSATION_NAME(),
+                    model_name
+                )
             except Exception as e:
-                debug_print(f"Error saving model to history: {e}")
+                debug_print(f"Error creando la conversación en BD: {e}")
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
@@ -437,10 +439,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.accumulated_response = ""
         self.input_text.grab_focus()
 
+        # Actualizar el conversation_id en la configuración si no existe
+        if success and not self.config.get('cid'):
+            conversation_id = self.llm.get_conversation_id()
+            if conversation_id:
+                self.config['cid'] = conversation_id
+                debug_print(f"Conversation ID updated in config: {conversation_id}")
+
     def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del LLM"""
         if not self.current_message_widget:
             return
+
+        # Actualizar el conversation_id en la configuración al recibir la primera respuesta
+        if not self.config.get('cid'):
+            conversation_id = self.llm.get_conversation_id()
+            if conversation_id:
+                self.config['cid'] = conversation_id
+                debug_print(f"Conversation ID updated early in config: {conversation_id}")
 
         self.accumulated_response += response
         GLib.idle_add(self.current_message_widget.update_content,
