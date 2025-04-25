@@ -156,11 +156,11 @@ class LLMChatApplication(Adw.Application):
                 for entry in history:
                     window.display_message(
                         entry['prompt'],
-                        is_user=True
+                        sender='user',
                     )
                     window.display_message(
                         entry['response'],
-                        is_user=False
+                        sender='assistant',
                     )
 
     def on_rename_activate(self, action, param):
