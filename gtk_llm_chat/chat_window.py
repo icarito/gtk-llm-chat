@@ -342,12 +342,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
             buffer = self.input_text.get_buffer()
             buffer.set_text("", 0)
 
-        # Create and display the message widget
+        # Create the message widget
         message_widget = MessageWidget(message)
+
+        # Connect to the 'map' signal to scroll *after* the widget is shown
+        def scroll_on_map(widget, *args):
+            # Use timeout_add to ensure scrolling happens after a short delay
+            def do_scroll():
+                self._scroll_to_bottom(True) # Force scroll
+                return GLib.SOURCE_REMOVE # Run only once
+            GLib.timeout_add(50, do_scroll) # Delay of 50ms
+            # Return False because we are using connect_after
+            return False
+
+        # Use connect_after for potentially better timing
+        signal_id = message_widget.connect_after('map', scroll_on_map)
+
+        # Add the widget to the box
         self.messages_box.append(message_widget)
 
-        # Auto-scroll to the last message
-        GLib.idle_add(self._scroll_to_bottom, True)
         return message_widget
 
     def _on_model_loaded(self, llm_client, model_name):
