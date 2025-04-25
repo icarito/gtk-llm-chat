@@ -366,6 +366,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_model_loaded(self, llm_client, model_name):
         """Updates the window subtitle with the model name."""
         self.title_widget.set_subtitle(model_name)
+        # Save the model name to the chat history
+        app = self.get_application()
+        conversation_id = self.config.get('cid')
+        if conversation_id and app.chat_history:
+            # Assuming a method set_conversation_model exists in ChatHistory
+            try:
+                app.chat_history.set_conversation_model(conversation_id, model_name)
+                debug_print(f"Saved model '{model_name}' for conversation {conversation_id}")
+            except AttributeError:
+                debug_print("Warning: chat_history does not have set_conversation_model method.")
+            except Exception as e:
+                debug_print(f"Error saving model to history: {e}")
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
