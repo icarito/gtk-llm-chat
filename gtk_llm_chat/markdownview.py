@@ -277,7 +277,8 @@ class MarkdownView(Gtk.TextView):
         if tag not in self.current_tags:
             self.current_tags.append(tag)
         start, end = self.buffer.get_bounds()
-        self.buffer.apply_tag(tag, end, self.buffer.get_end_iter())
+        if not start.equal(end):
+            self.buffer.apply_tag(tag, end, self.buffer.get_end_iter())
 
     def remove_tag(self, tag):
         if tag in self.current_tags:
