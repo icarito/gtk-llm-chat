@@ -6,6 +6,7 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 
 <a href="https://www.buymeacoffee.com/icarito" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a> if you find this project useful.
 
+
 ## Key Features
 
 - Simple and easy-to-use graphical interface built with GTK
