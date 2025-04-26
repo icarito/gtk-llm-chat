@@ -1,3 +1,8 @@
 PyGObject>=3.42.0
 markdown-it-py
 llm
+llm-groq; sys_platform == "win32"
+llm-gemini; sys_platform == "win32"
+llm-perplexity; sys_platform == "win32"
+llm-openrouter; sys_platform == "win32"
+llm-deepseek; sys_platform == "win32"
