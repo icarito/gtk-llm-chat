@@ -26,6 +26,8 @@ jobs:
       - name: Install dependencies
         run: |
           ./windows/bootstrap.sh
+      - name: Fetch all history for all tags and branches
+        run: git fetch --prune --unshallow
       - name: Set up environment
         run: |
           cp .env.ci .env

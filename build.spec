@@ -68,7 +68,7 @@ if system() == "Windows":
             [],
             exclude_binaries=True,
             name='gtk-llm-chat',
-            icon='windows/org.example.HelloWorldGTK.ico',
+            icon='windows/org.fuentelibre.gtk_llm_Chat.ico',
             debug=False,
             bootloader_ignore_signals=False,
             strip=False,
