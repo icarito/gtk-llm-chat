@@ -30,6 +30,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def __init__(self, config=None, chat_history=None, **kwargs):
         super().__init__(**kwargs)
+        self.insert_action_group('app', self.get_application())
 
         # Conectar señal de cierre de ventana
         self.connect('close-request', self._on_close_request)
@@ -90,9 +91,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         menu.append(_("About"), "app.about")
 
         # Crear un popover para el menú
-        popover = Gtk.PopoverMenu()
-        menu_button.set_popover(popover)
-        popover.set_menu_model(menu)
+        #popover = Gtk.PopoverMenu()
+        #menu_button.set_popover(popover)
+        #popover.set_menu_model(menu)
+        menu_button.set_menu_model(menu)
 
         # Rename button
         rename_button = Gtk.Button()

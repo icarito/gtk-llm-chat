@@ -56,6 +56,8 @@ class LLMChatApplication(Adw.Application):
             locale.setlocale(locale.LC_MESSAGES, '')
         except locale.Error as e:
             debug_print(f"Warning: Could not set locale: {e}")
+        except Exception as e:
+            debug_print(f"Unknown error with locale: {e}")
         gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
         gettext.textdomain(APP_NAME)
 
