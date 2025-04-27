@@ -73,7 +73,7 @@ class Build:
         :rtype: argparse.ArgumentParser
         """
         parser = ArgumentParser(
-            prog="build.py",
+            prog="build-ci.py",
             description="Builder"
         )
         parser.add_argument(
