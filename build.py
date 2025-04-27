@@ -10,6 +10,8 @@ from subprocess import CalledProcessError, PIPE, Popen
 from sys import exit, stdout
 from typing import Any, Dict, Iterator
 from venv import create
+from setuptools_scm import get_version
+
 
 # Python executable path
 if python_compiler()[:3] == "MSC":
@@ -161,6 +163,13 @@ class Build:
         :return: Return code
         :rtype: int
         """
+        version = get_version()
+        self.logger.info(f"Using version from git tag: {version}")
+        env_ci_path = join(self.srcdir, ".env.ci")
+        self.logger.info(f"Writing version to {env_ci_path}")
+        with open(env_ci_path, "w") as f:
+            f.write(f"VERSION={version}\n")
+
         self.logger.info("Running pydeploy")
         self._run_command(
             f"{self.py} -m pydeployment -y -o {self.args.OUTDIR} build.spec",

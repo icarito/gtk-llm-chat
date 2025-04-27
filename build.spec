@@ -42,6 +42,9 @@ a = Analysis(
         'llm.default_plugins',
         'llm.default_plugins.openai_models',
         'llm_groq',
+        'llm_gemini',
+        'llm_openrouter',
+        'llm_perplexity',
         'sqlite3',
         'ulid',
         'markdown_it',
@@ -57,7 +60,7 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-if system() == "Linux":
+if system() == "Windows":
     if not options.binary:
         exe = EXE(
             pyz,
@@ -65,114 +68,7 @@ if system() == "Linux":
             [],
             exclude_binaries=True,
             name='gtk-llm-chat',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
-        coll = COLLECT(
-            exe,
-            a.binaries,
-            a.datas,
-            strip=False,
-            upx=True,
-            upx_exclude=[],
-            name='gtk-llm-chat',
-        )
-    else:
-        exe = EXE(
-            pyz,
-            a.scripts,
-            a.binaries,
-            a.datas,
-            [],
-            name='gtk-llm-chat',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            upx_exclude=[],
-            runtime_tmpdir=None,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
-elif system() == "Darwin":
-    if not options.binary:
-        exe = EXE(
-            pyz,
-            a.scripts,
-            [],
-            exclude_binaries=True,
-            name='gtk-llm-chat',
-            icon='macos/org.example.HelloWorldGTK.icns',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
-        coll = COLLECT(
-            exe,
-            a.binaries,
-            a.datas,
-            strip=False,
-            upx=True,
-            upx_exclude=[],
-            name='gtk-llm-chat',
-        )
-        app = BUNDLE(
-            coll,
-            name='Hello World.app',
-            icon='macos/org.example.HelloWorldGTK.icns',
-            bundle_identifier=None,
-            version=None,
-        )
-    else:
-        exe = EXE(
-            pyz,
-            a.scripts,
-            a.binaries,
-            a.datas,
-            [],
-            name='gtk-llm-chat',
-            icon='macos/org.example.HelloWorldGTK.icns',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            upx_exclude=[],
-            runtime_tmpdir=None,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
-elif system() == "Windows":
-    if not options.binary:
-        exe = EXE(
-            pyz,
-            a.scripts,
-            [],
-            exclude_binaries=True,
-            name='gtk-llm-chat',
-            icon='windows/org.example.HelloWorldGTK.ico',
+            icon='windows/org.fuentelibre.gtk_llm_Chat.ico',
             debug=False,
             bootloader_ignore_signals=False,
             strip=False,

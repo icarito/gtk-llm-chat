@@ -23,7 +23,7 @@ Issues = "https://github.com/icarito/gtk_llm_chat/issues"
 Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
 [build-system]
-requires = ["setuptools", "wheel", "setuptools_scm"]
+requires = ["setuptools>=61.0", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]

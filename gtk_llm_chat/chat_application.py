@@ -10,6 +10,22 @@ from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import locale
 import gettext
 
+# Initialize gettext early
+APP_NAME = "gtk-llm-chat"
+# Use absolute path to ensure 'po' directory is found
+base_dir = os.path.dirname(__file__)
+LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
+try:
+    # Attempt to set only the messages category
+    locale.setlocale(locale.LC_MESSAGES, '')
+except locale.Error as e:
+    print(f"Warning: Could not set locale: {e}") # Use print directly as _ might not be ready
+except Exception as e:
+    print(f"Unknown error with locale: {e}")
+gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
+gettext.textdomain(APP_NAME)
+
+# Assign gettext function globally
 _ = gettext.gettext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -45,19 +61,6 @@ class LLMChatApplication(Adw.Application):
     def do_startup(self):
         # Call the parent method using do_startup
         Adw.Application.do_startup(self)
-
-        # Initialize gettext
-        APP_NAME = "gtk-llm-chat"
-        # Use absolute path to ensure 'po' directory is found
-        base_dir = os.path.dirname(__file__)
-        LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
-        try:
-            # Attempt to set only the messages category
-            locale.setlocale(locale.LC_MESSAGES, '')
-        except locale.Error as e:
-            debug_print(f"Warning: Could not set locale: {e}")
-        gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
-        gettext.textdomain(APP_NAME)
 
         # Configure the application icon
         self._setup_icon()
