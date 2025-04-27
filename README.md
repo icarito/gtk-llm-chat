@@ -37,6 +37,16 @@ llm install gtk-llm-chat
 
 You may want to manually copy the .desktop files to `~/.local/share/applications/` to make them available in your application menu.
 
+### Experimental Windows Version (NEW!)
+
+Windows users can try our experimental version of the GTK LLM Chat app. This version is built using the [MSYS2](https://www.msys2.org/) environment and includes a precompiled GTK4 package.
+
+While it is fully functional, there is no mechanism provided thru the GUI for adding plugins or API keys - and no system tray applet support either.
+
+A welcome assistant is planned for the future, but for now, you can manually add your API keys to your `keys.json` file.
+
+You will find the Windows version under "Releases" in the GitHub repository.
+
 ### Dependencies
 
 These are collected here for reference only, let me know if the list needs adjusting.

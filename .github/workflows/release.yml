@@ -40,31 +40,31 @@ jobs:
           name: windows-dist
           path: dist/
 
-#  github-release:
-#    name: GitHub Release
-#    needs: [build-windows]
-#    runs-on: ubuntu-latest
-#    permissions:
-#      contents: write
-#      id-token: write
-#    steps:
-#      - name: Download Windows dist
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: windows-dist
-#          path: dist/
-#      - name: Create GitHub Release
-#        env:
-#          GITHUB_TOKEN: ${{ github.token }}
-#        run: >-
-#          gh release create
-#          '${{ github.ref_name }}'
-#          --repo '${{ github.repository }}'
-#          --generate-notes
-#      - name: Upload dists to GitHub Release
-#        env:
-#          GITHUB_TOKEN: ${{ github.token }}
-#        run: >-
-#          gh release upload
-#          '${{ github.ref_name }}' dist/**
-#          --repo '${{ github.repository }}'
+  github-release:
+    name: GitHub Release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download Windows dist
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create
+          '${{ github.ref_name }}'
+          --repo '${{ github.repository }}'
+          --generate-notes
+      - name: Upload dists to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload
+          '${{ github.ref_name }}' dist/**
+          --repo '${{ github.repository }}'
