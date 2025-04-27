@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterator
 from venv import create
 from setuptools_scm import get_version
 
+
 # Python executable path
 if python_compiler()[:3] == "MSC":
     PYEXE = join("Scripts", "python")
