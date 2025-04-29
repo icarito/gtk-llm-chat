@@ -30,7 +30,6 @@ _ = gettext.gettext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
-from chat_window import LLMChatWindow
 
 DEBUG = False
 
@@ -98,6 +97,7 @@ class LLMChatApplication(Adw.Application):
         icon_theme.add_search_path(current_dir)
 
     def do_activate(self):
+        from chat_window import LLMChatWindow
         # Initialize ChatHistory here
         self.chat_history = ChatHistory()
         # Create a new window for this instance, passing the existing chat_history

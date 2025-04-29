@@ -1,5 +1,6 @@
 PyGObject>=3.42.0
 markdown-it-py
+python-ulid
 llm
 llm-groq; sys_platform == "win32"
 llm-gemini; sys_platform == "win32"

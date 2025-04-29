@@ -12,7 +12,8 @@ keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
     "pygobject",
     "llm",
-    "markdown-it-py"
+    "markdown-it-py",
+    "python-ulid"
 ]
 requires-python = ">=3.8"
 dynamic = ["version"]

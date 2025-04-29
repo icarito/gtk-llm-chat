@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.fuentelibre.gtk-llm-chat</id>
+  
+  <name>Gtk LLM Chat</name>
+  <summary>A front end for chatting with llm</summary>
+  
+  <metadata_license>CC-BY-4.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  
+  <description>
+    <p>
+	    Gtk LLM Chat is an easy to use frontend for using the llm python ecosystem and chatting with AI models.
+    </p>
+  </description>
+  
+  <launchable type="desktop-id">org.fuentelibre.gtk-llm-Chat.desktop</launchable>
+  <launchable type="desktop-id">org.fuentelibre.gtk-llm-Applet.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://github.com/icarito/gtk-llm-chat/blob/main/docs/screenshot01.png?raw=true</image>
+      <caption>Gtk-LLM-Chat's main window</caption>
+    </screenshot>
+  </screenshots>
+  <developer id="fuentelibre.org">
+    <name>Sebastian Silva</name>
+  </developer>
+  <releases>
+    <release version="2.2.2" date="2025-04-27" />
+  </releases>
+  <url type="homepage">https://github.com/icarito/gtk-llm-chat</url>
+  <url type="bugtracker">https://github.com/icarito/gtk-llm-chat/issues</url>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-info">mild</content_attribute>
+  </content_rating>
+</component>
