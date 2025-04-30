@@ -15,10 +15,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.12'
       - name: Install dependencies
         run: |
           sudo apt update
+          sudo apt-mark hold firefox* linux-headers* linux-image* grub*
           sudo apt upgrade
           sudo apt install desktop-file-utils
           sudo ./linux/bootstrap.sh
@@ -36,7 +37,7 @@ jobs:
 
   build-windows:
     name: Build for Windows
-    runs-on: windows-latest
+    runs-on: windows-2022
     defaults:
       run:
         shell: msys2 {0}

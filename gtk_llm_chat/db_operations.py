@@ -111,11 +111,14 @@ class ChatHistory:
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM conversations
-            ORDER BY id DESC
-            LIMIT ? OFFSET ?
-        """, (limit, offset))
+        try:
+            cursor.execute("""
+                SELECT * FROM conversations
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+        except sqlite3.OperationalError:
+            return []
 
         conversations = []
         for row in cursor.fetchall():

@@ -16,9 +16,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory  # Import ChatHistory
 
-import gettext
-
-_ = gettext.gettext
+from chat_application import _
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
 DEBUG = False

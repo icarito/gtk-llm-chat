@@ -11,20 +11,11 @@ from PIL import Image
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-APP_NAME = "gtk-llm-chat"
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
 
-# Localización\ nAPP_NAME = "gtk-llm-chat"
-LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
-try:
-    locale.setlocale(locale.LC_MESSAGES, '')
-except locale.Error as e:
-    print(f"Warning: could not set locale: {e}", file=sys.stderr)
 
-gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
-gettext.textdomain(APP_NAME)
 _ = gettext.gettext
 
 
@@ -32,6 +23,15 @@ def open_conversation(conversation_id=None):
     args = ['llm', 'gtk-chat']
     if conversation_id:
         args += ['--cid', str(conversation_id)]
+    if getattr(sys, 'frozen', False):
+        base = os.path.abspath(os.path.dirname(sys.argv[0]))
+        executable = "gtk-llm-chat"
+        if sys.platform == "win32":
+            executable += ".exe"
+        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
+            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
+            executable = 'AppRun'
+        args = [os.path.join(base, executable)] + args[2:]
     subprocess.Popen(args)
 
 
@@ -71,10 +71,17 @@ def create_menu(icon):
 
 
 def load_icon():
-    # Asegúrate de tener un PNG; si solo tienes SVG, conviértelo previamente.
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.join(
+                sys._MEIPASS)
+    else:
+        base_path = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    ".."))
     icon_path = os.path.join(
-        os.path.dirname(__file__),
-        'hicolor/scalable/apps/',
+        base_path,
+        'windows',
         'org.fuentelibre.gtk_llm_Chat.png'
     )
     return Image.open(icon_path)
@@ -95,8 +102,19 @@ class DBChangeHandler(FileSystemEventHandler):
         if os.path.abspath(event.src_path) == self.db_path:
             self.icon.menu = create_menu(self.icon)
 
-
 def run_systray():
+    APP_NAME = "gtk-llm-chat"
+    LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
+
+    lang = locale.getdefaultlocale()[0]  # Ej: 'es_ES'
+    if lang:
+        gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
+        gettext.textdomain(APP_NAME)
+        lang_trans = gettext.translation(APP_NAME, LOCALE_DIR, languages=[lang], fallback=True)
+        lang_trans.install()
+        global _
+        _ = lang_trans.gettext
+
     # Creamos el icon sin menú, luego lo asignamos para poder pasar el icon mismo
     icon = Icon("LLMChatApplet", load_icon(), _("LLM Conversations"))
     icon.menu = create_menu(icon)

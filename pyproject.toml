@@ -12,6 +12,8 @@ keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
     "pygobject",
     "llm",
+    "llm-gemini",
+    "llm-groq",
     "markdown-it-py",
     "python-ulid"
 ]
@@ -24,12 +26,12 @@ Issues = "https://github.com/icarito/gtk_llm_chat/issues"
 Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm"]
+requires = ["build", "setuptools>=61.0", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 version_file = "gtk_llm_chat/_version.py"
-tag_regex = "^v([0-9]+\\.[0-9]+\\.[0-9]+)$"
+tag_regex = "^v([0-9]+\\.[0-9]+\\.[0-9]+)"
 local_scheme = "no-local-version"
 version_scheme = "python-simplified-semver"
 

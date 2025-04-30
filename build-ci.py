@@ -144,7 +144,7 @@ class Build:
         )
         self.logger.debug(f"Installing pip dependency: pydeployment")
         self._run_command(
-            f"{self.py} -m pip install pydeployment",
+            f"{self.py} -m pip install pydeployment build",
             self.logger.info
         )
         requirements = join(self.srcdir, "requirements.txt")
@@ -162,6 +162,11 @@ class Build:
         :return: Return code
         :rtype: int
         """
+        self.logger.info("Running python build")
+        self._run_command(
+            f"{self.py} -m build",
+            self.logger.info
+        )
         self.logger.info("Running pydeploy")
         self._run_command(
             f"{self.py} -m pydeployment -y -o {self.args.OUTDIR} build.spec",

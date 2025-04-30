@@ -11,9 +11,9 @@ def register_commands(cli):
         """Runs the applet"""
         try:
             from gtk_llm_chat.gtk_llm_applet import main
-            main()
         except Exception as e:
             from gtk_llm_chat.tk_llm_applet import main
+        finally:
             main()
 
     @cli.command(name="gtk-chat")
