@@ -15,17 +15,6 @@ from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 from chat_application import _
 
-# Define APP_NAME and LOCALE_DIR here as well
-APP_NAME = "gtk-llm-chat"
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    # Running in a PyInstaller bundle
-    base_dir = sys._MEIPASS
-    LOCALE_DIR = os.path.join(base_dir, 'po')
-else:
-    # Running in a normal Python environment
-    # Adjust path relative to this file's location
-    base_dir = os.path.dirname(__file__)
-    LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
 
 DEBUG = False
 
@@ -42,16 +31,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def __init__(self, config=None, chat_history=None, **kwargs):
         super().__init__(**kwargs)
-
-        # Re-initialize gettext context for this window instance
-        try:
-            locale.setlocale(locale.LC_MESSAGES, '')  # Ensure locale is set
-        except Exception as e:
-            debug_print(f"Warning: Could not set locale: {e}")  # Use print directly as _ might not be ready
-        gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
-        gettext.textdomain(APP_NAME)
-        self._ = gettext.gettext  # Assign to instance variable
-
         self.insert_action_group('app', self.get_application())
 
         # Conectar señal de cierre de ventana
@@ -99,7 +78,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear header bar
         self.header = Adw.HeaderBar()
-        self.title_widget = Adw.WindowTitle.new(title, self._("LLM Chat"))
+        self.title_widget = Adw.WindowTitle.new(title, _("LLM Chat"))
         self.header.set_title_widget(self.title_widget)
         self.set_title(title)  # Set window title based on initial title
 
@@ -109,8 +88,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear menú
         menu = Gio.Menu.new()
-        menu.append(self._("Delete"), "app.delete")
-        menu.append(self._("About"), "app.about")
+        menu.append(_("Delete"), "app.delete")
+        menu.append(_("About"), "app.about")
 
         # Crear un popover para el menú
         #popover = Gtk.PopoverMenu()
@@ -176,7 +155,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.add_controller(key_controller)
 
         # Botón enviar
-        self.send_button = Gtk.Button(label=self._("Send"))
+        self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
 

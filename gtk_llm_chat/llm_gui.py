@@ -9,8 +9,12 @@ def register_commands(cli):
     @cli.command(name="gtk-applet")
     def run_applet():
         """Runs the applet"""
-        from gtk_llm_chat.gtk_llm_applet import main
-        main()
+        try:
+            from gtk_llm_chat.gtk_llm_applet import main
+        except Exception as e:
+            from gtk_llm_chat.tk_llm_applet import main
+        finally:
+            main()
 
     @cli.command(name="gtk-chat")
     @click.option("--cid", type=str,

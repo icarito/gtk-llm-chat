@@ -12,7 +12,6 @@ start_time = time.time() if benchmark_startup else None
 
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from chat_application import LLMChatApplication
 
 
 def parse_args(argv):
@@ -37,6 +36,8 @@ def parse_args(argv):
                         help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
     parser.add_argument('--benchmark-startup', action='store_true',
                         help='Mide el tiempo hasta que la ventana se muestra y sale.')
+    parser.add_argument('--applet', action='store_true',
+                        help='Start applet')
 
 
     # Parsear solo nuestros argumentos
@@ -51,9 +52,10 @@ def parse_args(argv):
         'template': args.template,
         'params': args.param,
         'options': args.option,
-        'fragments': args.fragment, # Add fragments to the config
-        'benchmark_startup': args.benchmark_startup, # Add benchmark flag
-        'start_time': start_time, # Pass start time if benchmarking
+        'fragments': args.fragment,
+        'benchmark_startup': args.benchmark_startup,
+        'start_time': start_time,
+        'applet': args.applet
     }
 
     return config
@@ -76,7 +78,13 @@ def main(argv=None):
         ('--gtk', '--gdk', '--display'))]
     gtk_args.insert(0, sys.argv[0])  # Agregar el nombre del programa
 
+    if config['applet']:
+        from gtk_llm_applet import main
+        main()
+        sys.exit(0)
+
     # Crear y ejecutar la aplicación
+    from chat_application import LLMChatApplication
     app = LLMChatApplication()
     app.config = config
     return app.run(gtk_args)

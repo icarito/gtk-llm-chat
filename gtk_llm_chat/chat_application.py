@@ -1,43 +1,28 @@
-import gi
 import json
 import os
 import re
 import signal
 import sys
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+
+from gi import require_versions
+require_versions({"Gtk": "4.0", "Adw": "1"})
+
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import locale
 import gettext
 
-# Initialize gettext early
-APP_NAME = "gtk-llm-chat"
-# Use absolute path to ensure 'po' directory is found
-base_dir = os.path.dirname(__file__)
-LOCALE_DIR = os.path.abspath(os.path.join(base_dir, '..', 'po'))
-try:
-    # Attempt to set only the messages category
-    locale.setlocale(locale.LC_MESSAGES, '')
-except locale.Error as e:
-    print(f"Warning: Could not set locale: {e}") # Use print directly as _ might not be ready
-except Exception as e:
-    print(f"Unknown error with locale: {e}")
-gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
-gettext.textdomain(APP_NAME)
-
-# Assign gettext function globally
-_ = gettext.gettext
-
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
-from chat_window import LLMChatWindow
 
-DEBUG = False
+_ = gettext.gettext
+
+DEBUG = True
 
 
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
+
 
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
@@ -47,11 +32,18 @@ class LLMChatApplication(Adw.Application):
             application_id="org.fuentelibre.gtk_llm_Chat",
             flags=Gio.ApplicationFlags.NON_UNIQUE
         )
+
         self.config = {}
-        # self.chat_history = ChatHistory() # Initialize here
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
+
+        # Windows-specific adjustments
+        if sys.platform == "win32":
+            settings = Gtk.Settings.get_default()
+            if settings:
+                settings.set_property('gtk-font-name', 'Segoe UI')
+
 
     def _handle_sigint(self, signum, frame):
         """Handles SIGINT signal to close the application"""
@@ -61,6 +53,24 @@ class LLMChatApplication(Adw.Application):
     def do_startup(self):
         # Call the parent method using do_startup
         Adw.Application.do_startup(self)
+
+        APP_NAME = "gtk-llm-chat"
+        if getattr(sys, 'frozen', False):
+            base_path = os.path.join(
+                    sys._MEIPASS)
+        else:
+            base_path = os.path.join(os.path.dirname(__file__), "..")
+
+        LOCALE_DIR = os.path.abspath(os.path.join(base_path, 'po'))
+
+        lang = locale.getdefaultlocale()[0]  # Ej: 'es_ES'
+        if lang:
+            gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
+            gettext.textdomain(APP_NAME)
+            lang_trans = gettext.translation(APP_NAME, LOCALE_DIR, languages=[lang], fallback=True)
+            lang_trans.install()
+            global _
+            _ = lang_trans.gettext
 
         # Configure the application icon
         self._setup_icon()
@@ -93,25 +103,22 @@ class LLMChatApplication(Adw.Application):
     def _setup_icon(self):
         """Configures the application icon"""
         # Set search directory
-        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, 'frozen', False) and sys.platform == "win32":
+            base_path = os.path.join(sys._MEIPASS, 'gtk_llm_chat')
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        icon_theme.add_search_path(current_dir)
+        icon_theme.add_search_path(base_path)
 
     def do_activate(self):
-        # Initialize ChatHistory here
+        from chat_window import LLMChatWindow
         self.chat_history = ChatHistory()
-        # Create a new window for this instance, passing the existing chat_history
         window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
-
-        # Set search directory for the icon (already done in do_startup)
-        # current_dir = os.path.dirname(os.path.abspath(__file__)) # Redundant
-        # icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default()) # Redundant
-        # icon_theme.add_search_path(current_dir) # Redundant
-
-        # Set the icon by name
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
-        # window.input_text.grab_focus() # Focus should be handled within LLMChatWindow if needed after init
+
+        # Focus should be handled within LLMChatWindow if needed after init
+        window.input_text.grab_focus()
 
         if self.config and (self.config.get('cid')
                             or self.config.get('continue_last')):

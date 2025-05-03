@@ -6,19 +6,40 @@ on:
       - '*'
 
 jobs:
+  build-linux:
+    name: Build for Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt-mark hold firefox* linux-headers* linux-image* grub*
+          sudo apt upgrade
+          sudo apt install desktop-file-utils
+          sudo ./linux/bootstrap.sh
+      - name: Set up environment
+        run: |
+          cp .env.ci .env
+      - name: Build package
+        run: |
+          python3 build-ci.py
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist
+          path: dist/
+
   build-windows:
     name: Build for Windows
-    runs-on: windows-latest
+    runs-on: windows-2022
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -42,7 +63,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [build-windows]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -5,14 +5,48 @@ import os
 import subprocess
 import signal
 import sys
-import locale
-import gi
-gi.require_version('Gtk', '3.0')
-gi.require_version('AyatanaAppIndicator3', '0.1')
-from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
+try:
+    import gi
+    gi.require_version('Gtk', '3.0')
+    gi.require_version('AyatanaAppIndicator3', '0.1')
+    from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
+except Exception as e:
+    from gtk_llm_chat.tk_llm_applet import main
+    main()
+    sys.exit(0)
+
 import gettext
+import locale
 
 _ = gettext.gettext
+
+
+# Inicializar gettext
+APP_NAME = "gtk-llm-chat"
+
+if getattr(sys, 'frozen', False):
+    base_path = os.path.join(sys._MEIPASS, 'gtk_llm_chat')
+else:
+    base_path = os.path.dirname(__file__)
+
+LOCALE_DIR = os.path.abspath(os.path.join(base_path, '..', 'po'))
+
+try:
+    locale.setlocale(locale.LC_ALL, '')  # Config regional del sistema
+    lang, _enc = locale.getlocale()
+except Exception as e:
+    print(f"Advertencia: No se pudo establecer la configuración regional: {e}", file=sys.stderr)
+    lang = 'en_US'
+
+try:
+    translation = gettext.translation(APP_NAME, localedir=LOCALE_DIR, languages=[lang], fallback=True)
+    translation.install()
+    _ = translation.gettext  # Sobrescribe la función global _
+except Exception as e:
+    print(f"Error cargando traducciones: {e}", file=sys.stderr)
+    _ = gettext.gettext  # fallback simple
+
+
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
@@ -39,12 +73,24 @@ def add_last_conversations_to_menu(menu, chat_history):
         chat_history.close_connection()
 
 
-def open_conversation(conversation_id):
-    subprocess.Popen(['llm', 'gtk-chat', '--cid', conversation_id])
+def open_conversation(conversation_id=None):
+    args = ['llm', 'gtk-chat']
+    if conversation_id:
+        args += ['--cid', str(conversation_id)]
+    if getattr(sys, 'frozen', False):
+        base = os.path.abspath(os.path.dirname(sys.argv[0]))
+        executable = "gtk-llm-chat"
+        if sys.platform == "win32":
+            executable += ".exe"
+        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
+            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
+            executable = 'AppRun'
+        args = [os.path.join(base, executable)] + args[2:]
+    subprocess.Popen(args)
 
 
 def on_new_conversation(widget):
-    subprocess.Popen(['llm', 'gtk-chat'])
+    open_conversation()
 
 
 def create_menu(chat_history):
@@ -70,26 +116,9 @@ def create_menu(chat_history):
     menu.show_all()
     return menu
 
-
 def main():
-    # Inicializar gettext para el applet
-    APP_NAME = "gtk-llm-chat"  # Usar el mismo domain que la app principal
-    # Usar ruta absoluta para asegurar que se encuentre el directorio 'po'
-    LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
-    try:
-        # Intentar establecer solo la categoría de mensajes
-        locale.setlocale(locale.LC_MESSAGES, '')
-    except locale.Error as e:
-        print("Advertencia: No se pudo establecer la configuración regional "
-              f"para el applet: {e}", file=sys.stderr)
-    gettext.bindtextdomain(APP_NAME, LOCALE_DIR)
-    gettext.textdomain(APP_NAME)
-    # La variable global _ ya está definida al inicio del archivo
-
     chat_history = ChatHistory()
-    icon_path = os.path.join(os.path.dirname(__file__),
-                             'hicolor/scalable/apps/',
-                             'org.fuentelibre.gtk_llm_Chat.svg')
+    icon_path = os.path.join(base_path, 'hicolor/scalable/apps/', 'org.fuentelibre.gtk_llm_Chat.svg')
     indicator = AppIndicator.Indicator.new(
         "org.fuentelibre.gtk_llm_Applet",
         icon_path,
@@ -104,12 +133,9 @@ def main():
     if hasattr(chat_history, 'db_path'):
         file = Gio.File.new_for_path(chat_history.db_path)
         file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
-        file_monitor.connect("changed", lambda *args: on_db_changed(*args,
-                                                                    indicator, chat_history))
+        file_monitor.connect("changed", lambda *args: on_db_changed(*args, indicator, chat_history))
 
     indicator.set_menu(create_menu(chat_history))
-
-    # Agregar manejador de señales
     signal.signal(signal.SIGINT, on_quit)
     Gtk.main()
 
