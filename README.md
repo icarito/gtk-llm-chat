@@ -15,6 +15,7 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 - Modern interface using libadwaita
 - Support for real-time streaming responses
 - Message history with automatic scrolling
+- Windows installer and Linux AppImage available
 - Markdown rendering of the responses
 - **Support for fragments:** Include external content (files, URLs, or text snippets) in your prompts.
 - **Conversation Management:** Rename and delete conversations.
@@ -37,15 +38,15 @@ llm install gtk-llm-chat
 
 You may want to manually copy the .desktop files to `~/.local/share/applications/` to make them available in your application menu.
 
-### Experimental Windows Version (NEW!)
+### Downloadable packages
 
-Windows users can try our experimental version of the GTK LLM Chat app. This version is built using the [MSYS2](https://www.msys2.org/) environment and includes a precompiled GTK4 package.
+Windows installers and Linux Appimages are available in our _releases_ section.
 
-While it is fully functional, there is no mechanism provided thru the GUI for adding plugins or API keys - and no system tray applet support either.
+While they are fully functional, there is no mechanism provided thru the GUI for adding plugins or API keys <s>and no system tray applet support either</s>.
 
-A welcome assistant is planned for the future, but for now, you can manually add your API keys to your `keys.json` file.
+While in the future the UI will be complete, for now, you'll have to manually add your API keys to your `keys.json` file.
 
-You will find the Windows version under "Releases" in the GitHub repository.
+In order to invoke the applet from the AppImage, you can use the --applet command argument.
 
 ### Dependencies
 
