@@ -12,6 +12,8 @@ import threading
 import hashlib
 import logging
 import llm
+import sqlite_utils
+from llm.migrations import migrate
 
 _ = gettext.gettext
 
@@ -23,18 +25,63 @@ class ChatHistory:
         if db_path is None:
             # Use llm.user_dir() to get the directory
             user_dir = llm.user_dir()
+            # Ensure the directory exists
+            os.makedirs(user_dir, exist_ok=True)
             db_path = os.path.join(user_dir, "logs.db")
         self.db_path = db_path
         self._thread_local = threading.local()
 
+        # Ensure the database schema is up-to-date using llm's migrations
+        self._run_llm_migrations()
+
+    def _run_llm_migrations(self):
+        """Ensures the database schema is managed by llm's migrations."""
+        db_utils = None
+        try:
+            db_utils = sqlite_utils.Database(self.db_path)
+            # Ejecutar las migraciones de llm
+            migrate(db_utils)
+            logging.info(f"LLM migrations applied successfully to {self.db_path}")
+        except Exception as e:
+            logging.error(f"Error running LLM migrations on {self.db_path}: {e}", exc_info=True)
+            # Considerar si se debe relanzar el error o manejarlo de otra forma
+            # raise RuntimeError(f"Failed to apply LLM migrations: {e}") from e
+        finally:
+            # Asegurarse de cerrar la conexión usada por sqlite_utils
+            if db_utils and hasattr(db_utils, 'conn') and db_utils.conn:
+                try:
+                    db_utils.conn.close()
+                except Exception as close_err:
+                    logging.error(f"Error closing sqlite_utils connection after migration: {close_err}", exc_info=True)
+
+
     def get_connection(self):
-        """Gets a connection for the current thread."""
+        """Gets a sqlite3 connection for the current thread."""
+        # ... (resto del método sin cambios) ...
         if not hasattr(self._thread_local, "conn") or self._thread_local.conn is None:
             try:
+                # Antes de conectar, asegurémonos que la BD y tablas existen
+                # (La migración ya se corrió en __init__, pero esto es una doble verificación
+                # por si algo falló silenciosamente o el archivo fue borrado)
+                if not os.path.exists(self.db_path):
+                     self._run_llm_migrations() # Intentar correr migraciones de nuevo si no existe
+
                 self._thread_local.conn = sqlite3.connect(self.db_path)
                 self._thread_local.conn.row_factory = sqlite3.Row
             except sqlite3.Error as e:
-                raise ConnectionError(_(f"Error al conectar a la base de datos: {e}"))
+                # Podríamos intentar correr migraciones aquí si el error es "no such table"
+                if "no such table" in str(e):
+                    logging.warning(f"Table not found error on connect, attempting migrations again: {e}")
+                    try:
+                        self._run_llm_migrations()
+                        # Reintentar la conexión después de la migración
+                        self._thread_local.conn = sqlite3.connect(self.db_path)
+                        self._thread_local.conn.row_factory = sqlite3.Row
+                    except Exception as migrate_err:
+                         logging.error(f"Failed to run migrations on 'no such table' error: {migrate_err}", exc_info=True)
+                         raise ConnectionError(_(f"Error al conectar a la base de datos después de fallo de migración: {e}")) from migrate_err
+                else:
+                    raise ConnectionError(_(f"Error al conectar a la base de datos: {e}")) from e
         return self._thread_local.conn
 
     def close_connection(self):
@@ -180,27 +227,49 @@ class ChatHistory:
         for order, fragment_specifier in enumerate(fragments):
             try:
                 fragment_content = self.resolve_fragment(fragment_specifier)
-                fragment_id = self._get_or_create_fragment(fragment_content)
+                # Obtener el ID entero del fragmento
+                fragment_id: int = self._get_or_create_fragment(fragment_content, source=fragment_specifier) # source podría ser mejorado
                 cursor.execute(f"""
                     INSERT INTO {table_name} (response_id, fragment_id, "order")
                     VALUES (?, ?, ?)
-                """, (response_id, fragment_id, order))
+                """, (response_id, fragment_id, order)) # Usar el ID entero
             except ValueError as e:
                 print(f"Error adding fragment '{fragment_specifier}': {e}")
+            except sqlite3.IntegrityError as e:
+                 # Manejar posibles errores de PK duplicado si la lógica de orden/ID es incorrecta
+                 print(f"Integrity error adding fragment '{fragment_specifier}' for response {response_id}: {e}")
+            except sqlite3.Error as e:
+                 print(f"Database error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
 
-    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> str:
+    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> int: # &lt;-- Devuelve int
         conn = self.get_connection()
         cursor = conn.cursor()
         content_hash = hashlib.sha256(fragment_content.encode('utf-8')).hexdigest()
         cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
         row = cursor.fetchone()
         if row:
-            return row['id']
+            return row['id'] # Devuelve el ID entero existente
         else:
-            cursor.execute("INSERT INTO fragments (content, hash, source) VALUES (?, ?, ?)", (fragment_content, content_hash, source))
+            # Usar datetime para el timestamp UTC como lo hace llm
+            timestamp_utc = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                "INSERT INTO fragments (content, hash, source, datetime_utc) VALUES (?, ?, ?, ?)",
+                (fragment_content, content_hash, source, timestamp_utc)
+            )
             conn.commit()
-            return hash
+            # Obtener el ID recién insertado
+            fragment_id = cursor.lastrowid
+            if fragment_id is None:
+                 # Fallback por si lastrowid no funciona (raro en SQLite con PK entero)
+                 cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
+                 row = cursor.fetchone()
+                 if row:
+                     fragment_id = row['id']
+                 else:
+                     # Esto no debería pasar si la inserción fue exitosa
+                     raise sqlite3.Error("Could not retrieve fragment ID after insertion.")
+            return fragment_id # Devuelve el nuevo ID entero
 
     def get_fragments_for_response(self, response_id: str, table_name: str) -> List[str]:
         conn = self.get_connection()
@@ -236,62 +305,78 @@ class ChatHistory:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # Check if it's a hash
+        # 1. Check if it's a hash (64 hex chars)
         if len(specifier) == 64 and all(c in '0123456789abcdef' for c in specifier):
             cursor.execute("SELECT content FROM fragments WHERE hash = ?", (specifier,))
             hash_row = cursor.fetchone()
             if hash_row:
                 return hash_row['content']
-            else:
-                # Check if it's a fragment id
-                pass
-        else:
-            # Check if it's an alias
-            cursor.execute("SELECT fragment_id FROM fragment_aliases WHERE alias = ?", (specifier,))
-            alias_row = cursor.fetchone()
-            if alias_row:
-                fragment_id = alias_row['fragment_id']
-                cursor.execute("SELECT content FROM fragments WHERE id = ?", (fragment_id,))
-                fragment_row = cursor.fetchone()
-                if fragment_row:
-                    return fragment_row['content']
-                else:
-                    raise ValueError(f"Fragment alias '{specifier}' points to a non-existent fragment.")
+            # If not found by hash, continue (maybe it's an alias that looks like a hash)
 
-            try:
-                if specifier.startswith(('http://', 'https://')):
-                    # Handle URL
-                    try:
-                        with urllib.request.urlopen(specifier, timeout=10) as response:
-                            if response.status == 200:
-                                charset = response.headers.get_content_charset() or 'utf-8'
-                                return response.read().decode(charset)
-                            else:
-                                raise ValueError(f"Failed to fetch URL '{specifier}': HTTP status {response.status}")
-                    except urllib.error.URLError as e:
-                        raise ValueError(f"Failed to fetch URL '{specifier}': {e}") from e
-                elif os.path.exists(specifier):
-                    # Handle file path
-                    try:
-                        with open(specifier, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            self._get_or_create_fragment(content, specifier)
-                            return content
-                    except UnicodeDecodeError as e:
-                        raise ValueError(f"Failed to decode file '{specifier}' as UTF-8: {e}") from e
-                    except PermissionError as e:
-                        raise ValueError(f"Permission error accessing file '{specifier}': {e}") from e
-                else:
-                    # Check if it's a fragment id
-                    cursor.execute("SELECT content FROM fragments WHERE id = ?", (specifier,))
+        # 2. Check if it's an alias
+        cursor.execute("""
+            SELECT fragments.content
+            FROM fragment_aliases
+            JOIN fragments ON fragment_aliases.fragment_id = fragments.id
+            WHERE fragment_aliases.alias = ?
+        """, (specifier,))
+        alias_row = cursor.fetchone()
+        if alias_row:
+            return alias_row['content']
+
+        # 3. Check if it's a URL or existing file path
+        try:
+            if specifier.startswith(('http://', 'https://')):
+                 try:
+                     with urllib.request.urlopen(specifier, timeout=10) as response:
+                         if response.status == 200:
+                             charset = response.headers.get_content_charset() or 'utf-8'
+                             content = response.read().decode(charset)
+                             # Considerar si guardar fragmentos de URL en la BD automáticamente
+                             # self._get_or_create_fragment(content, source=specifier)
+                             return content
+                         else:
+                             raise ValueError(f"Failed to fetch URL '{specifier}': HTTP status {response.status}")
+                 except urllib.error.URLError as e:
+                     raise ValueError(f"Failed to fetch URL '{specifier}': {e}") from e
+
+            elif os.path.exists(specifier):
+                 try:
+                     with open(specifier, 'r', encoding='utf-8') as f:
+                         content = f.read()
+                         # Ensure fragment exists in DB when resolved from file
+                         self._get_or_create_fragment(content, source=specifier)
+                         return content
+                 except UnicodeDecodeError as e:
+                     raise ValueError(f"Failed to decode file '{specifier}' as UTF-8: {e}") from e
+                 except PermissionError as e:
+                     raise ValueError(f"Permission error accessing file '{specifier}': {e}") from e
+                 except Exception as e: # Captura más genérica para errores de lectura
+                     raise ValueError(f"Error reading file '{specifier}': {e}") from e
+
+            # 4. Check if it's a fragment ID (integer)
+            elif specifier.isdigit():
+                try:
+                    fragment_id_int = int(specifier)
+                    cursor.execute("SELECT content FROM fragments WHERE id = ?", (fragment_id_int,))
                     id_row = cursor.fetchone()
                     if id_row:
                         return id_row['content']
-                    else:
-                        return specifier
-            except ValueError as e:
-                print(f"ChatHistory: Error resolving fragment '{specifier}': {e}")
-                raise
-            except Exception as e:
-                print(f"ChatHistory: Unexpected error resolving fragment '{specifier}': {e}")
-                raise ValueError(f"Unexpected error resolving fragment '{specifier}': {e}") from e
+                    # If not found by ID, fall through to treating as raw content
+                except ValueError:
+                    # Not a valid integer, treat as raw content below
+                    pass
+
+            # 5. If none of the above, treat as raw content
+            # Consider if raw content should be automatically added as a fragment
+            # self._get_or_create_fragment(specifier, source='raw') # Opcional
+            return specifier
+
+        except ValueError as e:
+             # Re-raise specific ValueErrors for clarity
+             logging.warning(f"ChatHistory: Could not resolve fragment '{specifier}': {e}")
+             raise
+        except Exception as e:
+             # Catch unexpected errors during resolution
+             logging.error(f"ChatHistory: Unexpected error resolving fragment '{specifier}': {e}", exc_info=True)
+             raise ValueError(f"Unexpected error resolving fragment '{specifier}': {e}") from e
