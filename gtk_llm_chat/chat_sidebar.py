@@ -5,7 +5,8 @@ from gi.repository import Gtk, Adw, GObject, GLib
 import llm
 from collections import defaultdict
 import os
-import json # Necesitamos importar json
+import pathlib
+import json
 
 try:
     from .chat_application import _
@@ -338,25 +339,61 @@ class ChatSidebar(Gtk.Box):
         dialog.present()
 
     def _on_api_key_dialog_response(self, dialog, response_id, provider_key, key_entry):
-        """Manejador para la respuesta del diálogo de API key."""
+        """Manejador para la respuesta del diálogo de API key.
+           Guarda la clave directamente en keys.json."""
         if response_id == "set":
             api_key = key_entry.get_text()
             if api_key:
                 try:
-                    user_dir_path = llm.user_dir()
-                    os.makedirs(user_dir_path, exist_ok=True)
-                    # CORRECCIÓN: Usar el alias como segundo argumento posicional para set_key
-                    # Asumiendo que la firma es set_key(value, name) o similar
-                    llm.set_key(api_key, provider_key)
-                    print(f"API Key set for {provider_key}")
+                    # Lógica adaptada de llm/cli.py keys_set
+                    keys_path = os.path.join(llm.user_dir(), "keys.json")
+                    keys_path_obj = pathlib.Path(keys_path) # Usar pathlib para manejo más fácil
+                    keys_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+                    default_keys = {"// Note": "This file stores secret API credentials. Do not share!"}
+                    current_keys = default_keys
+                    newly_created = False
+
+                    if keys_path_obj.exists():
+                        try:
+                            current_keys = json.loads(keys_path_obj.read_text())
+                            # Asegurarse de que sea un diccionario
+                            if not isinstance(current_keys, dict):
+                                print(f"Warning: {keys_path} does not contain a valid JSON object. Overwriting.")
+                                current_keys = default_keys
+                        except json.JSONDecodeError:
+                            print(f"Warning: Could not decode {keys_path}. Overwriting.")
+                            current_keys = default_keys
+                    else:
+                        newly_created = True
+
+                    # Actualizar la clave
+                    current_keys[provider_key] = api_key
+
+                    # Escribir el archivo
+                    keys_path_obj.write_text(json.dumps(current_keys, indent=2) + "\n")
+
+                    # Establecer permisos si es nuevo (imitando cli.py)
+                    if newly_created:
+                        try:
+                            # chmod solo funciona bien en sistemas POSIX (Linux/macOS)
+                            if os.name == 'posix':
+                                os.chmod(keys_path_obj, 0o600)
+                        except OSError as chmod_err:
+                             print(f"Warning: Could not set permissions on {keys_path_obj}: {chmod_err}")
+
+
+                    print(f"API Key set for {provider_key} in {keys_path}")
+                    # Actualizar el banner para reflejar el cambio
                     self._update_api_key_banner(provider_key)
+
                 except Exception as e:
-                    print(f"Error setting API key for {provider_key}: {e!r}")
+                    # Capturar errores de E/S, permisos, etc.
+                    print(f"Error saving API key for {provider_key} to {keys_path}: {e!r}")
             else:
                 print(f"API Key input empty for {provider_key}. No changes made.")
 
         dialog.destroy()
-
 
     def _on_temperature_changed(self, adjustment):
         """Manejador para cuando cambia el valor de la temperatura."""
