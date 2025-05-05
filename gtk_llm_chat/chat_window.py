@@ -104,7 +104,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
 
-        self.header.pack_start(self.sidebar_button) # Añadir al inicio
+        self.header.pack_end(self.sidebar_button)
         self.header.pack_end(menu_button)
         self.header.pack_end(rename_button)
         # --- Fin Botones Header Bar ---
@@ -117,6 +117,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_show_sidebar(False)
         self.split_view.set_min_sidebar_width(280)
         self.split_view.set_max_sidebar_width(400)
+        self.split_view.set_sidebar_position(Gtk.PackType.END)
 
         # Conectar la propiedad 'show-sidebar' del split_view al estado del botón
         self.split_view.bind_property(
@@ -176,7 +177,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # --- Panel Lateral (Sidebar) ---
         # Instanciar la clase ChatSidebar importada
-        self.model_sidebar = ChatSidebar()
+        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
         # Establecer el panel lateral en el split_view
         self.split_view.set_sidebar(self.model_sidebar)
 
