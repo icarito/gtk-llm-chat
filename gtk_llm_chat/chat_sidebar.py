@@ -45,6 +45,7 @@ class ChatSidebar(Gtk.Box):
         switcher_header = Adw.HeaderBar()
         switcher_header.set_title_widget(self.view_title)
         switcher_header.add_css_class('flat')
+        switcher_header.set_show_end_title_buttons(False)
         self.append(switcher_header)
 
         # --- Página 1: Lista de Proveedores ---

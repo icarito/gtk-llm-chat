@@ -145,6 +145,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         scroll.set_child(self.messages_box)
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        input_box.add_css_class('toolbar')
+        input_box.add_css_class('card')
         input_box.set_margin_top(6)
         input_box.set_margin_bottom(6)
         input_box.set_margin_start(6)
@@ -241,8 +243,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             .message-content {
                 padding: 6px;
-                /* Quitar min-width para que se ajuste mejor con el sidebar */
-                /* min-width: 400px; */
+                min-width: 400px;
             }
 
             .user-message .message-content {
