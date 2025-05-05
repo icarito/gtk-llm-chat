@@ -8,13 +8,13 @@ import locale
 import gettext
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
 
 from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 from chat_application import _
-
+from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 
 DEBUG = False
 
@@ -82,19 +82,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header.set_title_widget(self.title_widget)
         self.set_title(title)  # Set window title based on initial title
 
+        # --- Botones de la Header Bar ---
         # Botón de menú
         menu_button = Gtk.MenuButton()
         menu_button.set_icon_name("open-menu-symbolic")
-
-        # Crear menú
         menu = Gio.Menu.new()
         menu.append(_("Delete"), "app.delete")
         menu.append(_("About"), "app.about")
-
-        # Crear un popover para el menú
-        #popover = Gtk.PopoverMenu()
-        #menu_button.set_popover(popover)
-        #popover.set_menu_model(menu)
         menu_button.set_menu_model(menu)
 
         # Rename button
@@ -104,21 +98,41 @@ class LLMChatWindow(Adw.ApplicationWindow):
                               lambda x: self.get_application()
                               .on_rename_activate(None, None))
 
+        # Botón para mostrar/ocultar el panel lateral (sidebar)
+        self.sidebar_button = Gtk.ToggleButton()
+        self.sidebar_button.set_icon_name("sidebar-show-symbolic") # O "view-reveal-symbolic"
+        self.sidebar_button.set_tooltip_text(_("Model Settings"))
+        # No conectar 'toggled' aquí si usamos bind_property
+
+        self.header.pack_start(self.sidebar_button) # Añadir al inicio
         self.header.pack_end(menu_button)
         self.header.pack_end(rename_button)
+        # --- Fin Botones Header Bar ---
 
-        # Contenedor principal
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        main_box.append(self.header)
 
-        # Contenedor para el chat
-        chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        # --- Contenedor principal (OverlaySplitView) ---
+        self.split_view = Adw.OverlaySplitView()
+        self.split_view.set_vexpand(True)
+        self.split_view.set_collapsed(True) # Empezar colapsado
+        self.split_view.set_show_sidebar(False)
+        self.split_view.set_min_sidebar_width(280)
+        self.split_view.set_max_sidebar_width(400)
 
+        # Conectar la propiedad 'show-sidebar' del split_view al estado del botón
+        self.split_view.bind_property(
+            "show-sidebar", self.sidebar_button, "active",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
+        )
+        # Conectar al cambio de 'show-sidebar' para cambiar el icono y foco
+        self.split_view.connect("notify::show-sidebar", self._on_sidebar_visibility_changed)
+
+
+        # --- Contenido principal (el chat) ---
+        chat_content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # ScrolledWindow para el historial de mensajes
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -126,17 +140,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_margin_bottom(12)
         self.messages_box.set_margin_start(12)
         self.messages_box.set_margin_end(12)
-        # Desactivar la selección en la lista de mensajes
         self.messages_box.set_can_focus(False)
         scroll.set_child(self.messages_box)
-
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         input_box.set_margin_top(6)
         input_box.set_margin_bottom(6)
         input_box.set_margin_start(6)
         input_box.set_margin_end(6)
-
         # TextView para entrada
         self.input_text = Gtk.TextView()
         self.input_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -144,31 +155,39 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.set_pixels_below_lines(3)
         self.input_text.set_pixels_inside_wrap(3)
         self.input_text.set_hexpand(True)
-
-        # Configurar altura dinámica
         buffer = self.input_text.get_buffer()
         buffer.connect('changed', self._on_text_changed)
-
-        # Configurar atajo de teclado Enter
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect('key-pressed', self._on_key_pressed)
-        self.input_text.add_controller(key_controller)
-
+        key_controller_input = Gtk.EventControllerKey()
+        key_controller_input.connect('key-pressed', self._on_key_pressed)
+        self.input_text.add_controller(key_controller_input)
         # Botón enviar
         self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
-
-        # Ensamblar la interfaz
+        # Ensamblar la interfaz de chat
         input_box.append(self.input_text)
         input_box.append(self.send_button)
+        chat_content_box.append(scroll)
+        chat_content_box.append(input_box)
 
-        chat_box.append(scroll)
-        chat_box.append(input_box)
 
-        main_box.append(chat_box)
+        # Establecer el contenido principal en el split_view
+        self.split_view.set_content(chat_content_box)
 
-        self.set_content(main_box)
+        # --- Panel Lateral (Sidebar) ---
+        # Instanciar la clase ChatSidebar importada
+        self.model_sidebar = ChatSidebar()
+        # Establecer el panel lateral en el split_view
+        self.split_view.set_sidebar(self.model_sidebar)
+
+        # --- Ensamblado Final ---
+        # El contenedor principal ahora incluye la HeaderBar y el SplitView
+        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root_box.append(self.header)
+        root_box.append(self.split_view) # Añadir el split_view aquí
+
+        # Establecer el contenido de la ventana
+        self.set_content(root_box) # El root_box es el nuevo contenido
 
         # Agregar CSS provider
         self._setup_css()
@@ -194,20 +213,35 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Optionally: sys.exit(1) if it should still be fatal
 
         # Add a focus controller to the window
-        focus_controller = Gtk.EventControllerFocus.new()
-        focus_controller.connect("enter", self._on_focus_enter)
-        self.add_controller(focus_controller)
+        focus_controller_window = Gtk.EventControllerFocus.new()
+        focus_controller_window.connect("enter", self._on_focus_enter)
+        self.add_controller(focus_controller_window)
+
+    # Renombrar _on_sidebar_toggled a _on_sidebar_visibility_changed
+    # y conectarlo a notify::show-sidebar del split_view
+    def _on_sidebar_visibility_changed(self, split_view, param):
+        show_sidebar = split_view.get_show_sidebar()
+        if show_sidebar:
+            self.sidebar_button.set_icon_name("sidebar-hide-symbolic") # O "view-conceal-symbolic"
+        else:
+            self.sidebar_button.set_icon_name("sidebar-show-symbolic") # O "view-reveal-symbolic"
+            # Forzar el foco al input si el sidebar se oculta
+            self.input_text.grab_focus()
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
+        # Añadir estilo para el sidebar si es necesario
         data = """
+            /* ... (estilos existentes) ... */
+
             .message {
                 padding: 8px;
             }
 
             .message-content {
                 padding: 6px;
-                min-width: 400px;
+                /* Quitar min-width para que se ajuste mejor con el sidebar */
+                /* min-width: 400px; */
             }
 
             .user-message .message-content {
@@ -257,8 +291,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 background-color: rgba(255,255,255,0.3);
                 color: white;
             }
+
+            /* Estilos opcionales para el sidebar */
+            /* .sidebar-title { ... } */
         """
-        css_provider.load_from_data(data, len(data))
+        css_provider.load_from_data(data.encode('UTF-8'), -1) # Usar -1
 
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -488,9 +525,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, window):
         """Maneja el cierre de la ventana de manera elegante"""
-        self.llm.cancel()
-        sys.exit()
-        return False
+        debug_print("Close request received.")
+        if self.llm:
+            self.llm.cancel() # Intentar cancelar cualquier operación en curso
+        # No llamar a sys.exit() aquí
+        return False # Permitir cierre
 
     def _on_window_show(self, window):
         """Set focus to the input text when the window is shown."""
@@ -507,4 +546,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_focus_enter(self, controller):
         """Set focus to the input text when the window gains focus."""
-        self.input_text.grab_focus()
+        # Solo poner el foco si el sidebar no está visible
+        if not self.split_view.get_show_sidebar():
+            self.input_text.grab_focus()
