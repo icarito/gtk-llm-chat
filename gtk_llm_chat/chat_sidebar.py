@@ -349,7 +349,8 @@ class ChatSidebar(Gtk.Box):
             self.stack.set_visible_child_name("actions")
             if self.llm_client:
                 self.llm_client.set_model(model_id)
-                self.llm_client.chat_history.update_conversation_model(model_id)
+                cid = self.llm_client.get_conversation_id()
+                self.llm_client.chat_history.update_conversation_model(cid, model_id)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
