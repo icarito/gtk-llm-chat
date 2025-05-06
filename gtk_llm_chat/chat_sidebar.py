@@ -39,48 +39,71 @@ class ChatSidebar(Gtk.Box):
         self.set_margin_start(12)
         self.set_margin_end(12)
 
-        # --- Stack y Navegación ---
-        self.view_stack = Adw.ViewStack()
-        self.view_title = Adw.ViewSwitcherTitle(stack=self.view_stack, title=_("Select Provider"))
-        switcher_header = Adw.HeaderBar()
-        switcher_header.set_title_widget(self.view_title)
-        switcher_header.add_css_class('flat')
-        switcher_header.set_show_end_title_buttons(False)
-        self.append(switcher_header)
+        # Crear Gtk.Stack con transición rotate-left-right
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.ROTATE_LEFT_RIGHT)
+        self.stack.set_vexpand(True)
 
-        # --- Página 1: Lista de Proveedores ---
+        # --- Página 1: Grupo de acciones ---
+        actions_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        actions_group = Adw.PreferencesGroup(title=_("Actions"))
+
+        # Botón Delete
+        delete_row = Adw.ActionRow(title=_("Delete Conversation"))
+        delete_button = Gtk.Button(label=_("Delete"))
+        delete_button.add_css_class("destructive-action")
+        delete_button.connect("clicked", lambda x: self.get_root().get_application().on_delete_activate(None, None))
+        delete_row.add_suffix(delete_button)
+        delete_row.set_activatable_widget(delete_button)
+        actions_group.add(delete_row)
+
+        # Botón About
+        about_row = Adw.ActionRow(title=_("About"))
+        about_button = Gtk.Button(label=_("About"))
+        about_button.connect("clicked", lambda x: self.get_root().get_application().on_about_activate(None, None))
+        about_row.add_suffix(about_button)
+        about_row.set_activatable_widget(about_button)
+        actions_group.add(about_row)
+
+        # Botón Modelo Seleccionado
+        model_row = Adw.ActionRow(title=_("Current Model"))
+        self.model_button = Gtk.Button(label=self.config.get('model', _('Select Model')))
+        self.model_button.connect("clicked", lambda x: self.stack.set_visible_child_name("providers"))
+        model_row.add_suffix(self.model_button)
+        model_row.set_activatable_widget(self.model_button)
+        actions_group.add(model_row)
+
+        actions_page.append(actions_group)
+        self.stack.add_titled(actions_page, "actions", _("Actions"))
+
+        # --- Página 2: Lista de Proveedores ---
         provider_list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                   vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
         self.provider_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
-        self.provider_list.add_css_class('navigation-sidebar') # Estilo Adwaita
+        self.provider_list.add_css_class('navigation-sidebar')
         self.provider_list.connect("row-activated", self._on_provider_row_activated)
         provider_list_scroll.set_child(self.provider_list)
-        self.view_stack.add_titled(provider_list_scroll, PROVIDER_LIST_NAME, _("Providers"))
+        self.stack.add_titled(provider_list_scroll, "providers", _("Providers"))
 
-        # --- Página 2: Banner de API Key + Lista de Modelos ---
-        # Usar un Box vertical para contener el Banner y la ScrolledWindow
-        model_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-
-        # Crear el Banner (inicialmente oculto)
-        self.api_key_banner = Adw.Banner(revealed=False)
-        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
-        model_page_box.append(self.api_key_banner)
-
-        # Crear ScrolledWindow y ListBox para los modelos
+        # --- Página 3: Lista de Modelos ---
         model_list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-                                               vexpand=True) # Permitir que la lista ocupe espacio
+                                               vexpand=True)
         self.model_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.model_list.add_css_class('navigation-sidebar')
         self.model_list.connect("row-activated", self._on_model_row_activated)
         model_list_scroll.set_child(self.model_list)
-        model_page_box.append(model_list_scroll) # Añadir lista debajo del banner
 
-        # Añadir el Box contenedor como la página del stack
-        self.view_stack.add_titled(model_page_box, MODEL_LIST_NAME, _("Models")) # Título se actualizará
+        # Crear el contenedor para la página de modelos (solo una vez)
+        model_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.api_key_banner = Adw.Banner(revealed=False)
+        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
+        model_page_box.append(self.api_key_banner)
+        model_page_box.append(model_list_scroll)
+        self.stack.add_titled(model_page_box, "models", _("Models"))
 
-        self.view_stack.set_vexpand(True)
-        self.append(self.view_stack)
+        # Añadir el stack al sidebar
+        self.append(self.stack)
 
         # --- Poblar datos iniciales ---
         self._populate_providers_and_group_models()
@@ -98,8 +121,26 @@ class ChatSidebar(Gtk.Box):
         self.temperature_row.set_activatable_widget(scale)
         prefs_group_temp.add(self.temperature_row)
 
-        # --- Estado Inicial ---
-        GLib.idle_add(self._set_initial_state)
+        # Obtener el modelo predeterminado temprano
+        default_model = llm.get_default_model()
+        if default_model:
+            self.config['model'] = default_model  # default_model ya es un model_id (str)
+
+        # Crear el Banner (inicialmente oculto)
+        self.api_key_banner = Adw.Banner(revealed=False)
+        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
+        # Asegurarse de que el banner esté disponible en todas las páginas necesarias
+        model_page_box.append(self.api_key_banner)
+
+        # ---idle_add(self._set_initial_state)
+
+        # Volver a la primera pantalla al colapsar el sidebar
+        def _on_sidebar_toggled(self, toggled):
+            if not toggled:
+                self.stack.set_visible_child_name("actions")
+
+        # Conectar el evento de colapsar el sidebar
+        self.connect("notify::visible", lambda obj, pspec: self._on_sidebar_toggled(self.get_visible()))
 
 
     def set_llm_client(self, llm_client):
@@ -121,73 +162,83 @@ class ChatSidebar(Gtk.Box):
             child = next_child
 
     def _populate_providers_and_group_models(self):
-        """Obtiene modelos, los agrupa por proveedor y puebla la lista de proveedores."""
+        """Agrupa modelos por needs_key y puebla la lista de proveedores usando needs_key como clave."""
         self.models_by_provider.clear()
-        providers_set = set()
-
         try:
             all_models = llm.get_models()
-            if not all_models:
-                print("Warning: llm.get_models() returned empty list.")
+            print(f"Debug: Models fetched: {all_models}")
+            # Detectar proveedores por needs_key
+            providers_set = set([m.needs_key for m in all_models if m.needs_key])
+            print(f"Debug: Providers detected (needs_key): {providers_set}")
+
+            # Agrupar modelos por needs_key (proveedor externo) o LOCAL_PROVIDER_KEY (local/otros)
+            for model_obj in all_models:
+                provider_key = getattr(model_obj, 'needs_key', None)
+                if provider_key:
+                    self.models_by_provider[provider_key].append(model_obj)
+                else:
+                    self.models_by_provider[LOCAL_PROVIDER_KEY].append(model_obj)
+
+            # Limpiar y poblar la lista de proveedores
+            self._clear_list_box(self.provider_list)
+
+            def sort_key(p_key):
+                return self._get_provider_display_name(p_key).lower() if p_key else "local/other"
+
+            sorted_providers = sorted(list(providers_set) + ([LOCAL_PROVIDER_KEY] if self.models_by_provider[LOCAL_PROVIDER_KEY] else []), key=sort_key)
+
+            if not sorted_providers:
+                print("Debug: No providers found.")
+                row = Adw.ActionRow(title=_("No models found"), selectable=False)
+                self.provider_list.append(row)
                 return
 
-            for model_obj in all_models:
-                provider_key = getattr(model_obj, 'needs_key', None) or LOCAL_PROVIDER_KEY
-                providers_set.add(provider_key)
-                self.models_by_provider[provider_key].append(model_obj)
-
+            for provider_key in sorted_providers:
+                display_name = self._get_provider_display_name(provider_key)
+                print(f"Debug: Adding provider to list: {provider_key} ({display_name})")
+                row = Adw.ActionRow(title=display_name, activatable=True)
+                row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+                row.provider_key = provider_key
+                self.provider_list.append(row)
         except Exception as e:
             print(f"Error getting or processing models: {e}")
-            return
-
-        self._clear_list_box(self.provider_list)
-        def sort_key(p_key):
-            if p_key is None: return ""
-            return self._get_provider_display_name(p_key).lower()
-
-        sorted_providers = sorted(list(providers_set), key=sort_key)
-
-        if not sorted_providers:
-             row = Adw.ActionRow(title=_("No models found"), selectable=False)
-             self.provider_list.append(row)
-             return
-
-        for provider_key in sorted_providers:
-            row = Adw.ActionRow(title=self._get_provider_display_name(provider_key), activatable=True)
-            row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-            row.provider_key = provider_key
-            self.provider_list.append(row)
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos y actualiza el banner de API key."""
+        print(f"Debug: _populate_model_list called with provider_key={provider_key}")
         self._clear_list_box(self.model_list)
         self._selected_provider_key = provider_key
-        # self.api_key_row = None # Ya no se usa
 
         # --- Actualizar y Mostrar/Ocultar Banner de API Key ---
-        if provider_key != LOCAL_PROVIDER_KEY: # Si se necesita key
-            self._update_api_key_banner(provider_key) # Actualizar contenido del banner
-            self.api_key_banner.set_revealed(True) # Mostrar banner
+        if provider_key != LOCAL_PROVIDER_KEY:  # Si se necesita key
+            self._update_api_key_banner(provider_key)  # Actualizar contenido del banner
+            self.api_key_banner.set_revealed(True)  # Mostrar banner
         else:
-            self.api_key_banner.set_revealed(False) # Ocultar banner si es local
+            self.api_key_banner.set_revealed(False)  # Ocultar banner si es local
 
         # --- Poblar Modelos ---
-        models = self.models_by_provider.get(provider_key, [])
-        models.sort(key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
-
-        current_model_id = self.config.get('model')
-        active_row = None
+        all_models = llm.get_models()
+        print(f"Debug: all_models={all_models}")
+        if provider_key == LOCAL_PROVIDER_KEY:
+            models = [m for m in all_models if not getattr(m, 'needs_key', None)]
+        else:
+            models = [m for m in all_models if getattr(m, 'needs_key', None) == provider_key]
+        print(f"Debug: models found for provider {provider_key}: {models}")
 
         if not models:
-             # Mostrar mensaje solo si NO hay banner visible (proveedor local sin modelos)
-             if not self.api_key_banner.get_revealed():
-                  row = Adw.ActionRow(title=_("No models found for this provider"), selectable=False)
-                  self.model_list.append(row)
-             return
+            print(f"Debug: No models found for provider {provider_key}")
+            row = Adw.ActionRow(title=_('No models found for this provider'), selectable=False)
+            self.model_list.append(row)
+            return
+
+        models.sort(key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
+        current_model_id = self.config.get('model')
+        active_row = None
 
         for model_obj in models:
             model_id = getattr(model_obj, 'model_id', None)
             model_name = getattr(model_obj, 'name', None) or model_id
+            print(f"Debug: Adding model to list: {model_id} ({model_name})")
             if model_id:
                 row = Adw.ActionRow(title=model_name, activatable=True)
                 row.model_id = model_id
@@ -287,25 +338,18 @@ class ChatSidebar(Gtk.Box):
         provider_key = getattr(row, 'provider_key', 'missing')
         if provider_key != 'missing':
             self._populate_model_list(provider_key)
-            # El page se obtiene diferente ahora que hay un Box intermedio
-            page = self.view_stack.get_page(self.model_list.get_parent().get_parent()) # Box -> ScrolledWindow -> ListBox
-            if page:
-                 page.set_title(self._get_provider_display_name(provider_key))
-            self.view_stack.set_visible_child_name(MODEL_LIST_NAME)
+            self.stack.set_visible_child_name("models")
 
+    # Actualizar el modelo en la base de datos al cambiarlo
     def _on_model_row_activated(self, list_box, row):
-        """Manejador cuando se selecciona un modelo."""
-        # Ya no necesitamos chequear por API_KEY_ROW_NAME
         model_id = getattr(row, 'model_id', None)
         if model_id:
-            print(f"Sidebar: Model selected: {row.get_title()} (ID: {model_id})")
-            if self.config.get('model') != model_id:
-                self.config['model'] = model_id
-                if self.llm_client and hasattr(self.llm_client, 'set_model'):
-                    try:
-                        self.llm_client.set_model(model_id)
-                    except Exception as e:
-                        print(f"Error setting model ID in LLM client: {e}")
+            self.config['model'] = model_id
+            self.model_button.set_label(row.get_title())
+            self.stack.set_visible_child_name("actions")
+            if self.llm_client:
+                self.llm_client.set_model(model_id)
+                self.llm_client.chat_history.update_conversation_model(model_id)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""

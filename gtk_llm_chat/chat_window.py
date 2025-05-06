@@ -15,6 +15,7 @@ from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 from chat_application import _
 from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
+from llm import get_default_model
 
 DEBUG = False
 
@@ -83,30 +84,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.set_title(title)  # Set window title based on initial title
 
         # --- Botones de la Header Bar ---
-        # Botón de menú
-        menu_button = Gtk.MenuButton()
-        menu_button.set_icon_name("open-menu-symbolic")
-        menu = Gio.Menu.new()
-        menu.append(_("Delete"), "app.delete")
-        menu.append(_("About"), "app.about")
-        menu_button.set_menu_model(menu)
-
-        # Rename button
-        rename_button = Gtk.Button()
-        rename_button.set_icon_name("document-edit-symbolic")
-        rename_button.connect('clicked',
-                              lambda x: self.get_application()
-                              .on_rename_activate(None, None))
-
-        # Botón para mostrar/ocultar el panel lateral (sidebar)
+        # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
-        self.sidebar_button.set_icon_name("sidebar-show-symbolic") # O "view-reveal-symbolic"
+        self.sidebar_button.set_icon_name("open-menu-symbolic") # O "view-reveal-symbolic"
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
 
+        # Crear botón Rename
+        rename_button = Gtk.Button()
+        rename_button.set_icon_name("document-edit-symbolic")
+        rename_button.set_tooltip_text(_("Rename"))
+        rename_button.connect('clicked', lambda x: self.get_application().on_rename_activate(None, None))
+
         self.header.pack_end(self.sidebar_button)
-        self.header.pack_end(menu_button)
         self.header.pack_end(rename_button)
+
         # --- Fin Botones Header Bar ---
 
 
@@ -178,7 +170,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_content(chat_content_box)
 
         # --- Panel Lateral (Sidebar) ---
-        # Instanciar la clase ChatSidebar importada
+        # Initialize LLMClient *after* basic UI setup
+        try:
+            self.llm = LLMClient(self.config, self.chat_history)
+            # Connect signals *here*
+            self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
+            self.llm.connect('response', self._on_llm_response)
+            self.llm.connect('error', self._on_llm_error)
+            self.llm.connect('finished', self._on_llm_finished)
+        except Exception as e:
+            debug_print(_(f"Fatal error starting LLMClient: {e}"))
+            # Display error in UI instead of exiting?
+            error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
+            self.messages_box.append(error_widget)
+            self.set_enabled(False)  # Disable input if LLM fails critically
+            # Optionally: sys.exit(1) if it should still be fatal
+
+        # Obtener el modelo predeterminado o el modelo de la conversación activa
+        if not self.config.get('cid'):
+            default_model_id = get_default_model()
+            if default_model_id:
+                self.config['model'] = default_model_id
+        else:
+            self.config['model'] = self.llm.get_model_id()
+
+        # Crear el sidebar con el modelo actual
         self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
         # Establecer el panel lateral en el split_view
         self.split_view.set_sidebar(self.model_sidebar)
@@ -199,36 +215,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.current_message_widget = None
         self.accumulated_response = ""
 
-        # Initialize LLMClient *after* basic UI setup
-        try:
-            self.llm = LLMClient(self.config, self.chat_history)
-            # Connect signals *here*
-            self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
-            self.llm.connect('response', self._on_llm_response)
-            self.llm.connect('error', self._on_llm_error)
-            self.llm.connect('finished', self._on_llm_finished)
-        except Exception as e:
-            debug_print(_(f"Fatal error starting LLMClient: {e}"))
-            # Display error in UI instead of exiting?
-            error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
-            self.messages_box.append(error_widget)
-            self.set_enabled(False)  # Disable input if LLM fails critically
-            # Optionally: sys.exit(1) if it should still be fatal
-
         # Add a focus controller to the window
         focus_controller_window = Gtk.EventControllerFocus.new()
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
 
-    # Renombrar _on_sidebar_toggled a _on_sidebar_visibility_changed
-    # y conectarlo a notify::show-sidebar del split_view
+    # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
         show_sidebar = split_view.get_show_sidebar()
-        if show_sidebar:
-            self.sidebar_button.set_icon_name("sidebar-hide-symbolic") # O "view-conceal-symbolic"
-        else:
-            self.sidebar_button.set_icon_name("sidebar-show-symbolic") # O "view-reveal-symbolic"
-            # Forzar el foco al input si el sidebar se oculta
+        if not show_sidebar:
+            self.model_sidebar.stack.set_visible_child_name("actions")
             self.input_text.grab_focus()
 
     def _setup_css(self):
