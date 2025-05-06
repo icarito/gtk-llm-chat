@@ -358,6 +358,13 @@ class ChatSidebar(Gtk.Box):
                 cid = self.llm_client.get_conversation_id() if self.llm_client else None
                 if cid:
                     self.llm_client.chat_history.update_conversation_model(cid, model_id)
+                
+                # Notificar a la aplicación que debe ocultar el sidebar
+                # En lugar de intentar ocultarlo nosotros mismos, que la aplicación lo maneje
+                window = self.get_root()
+                window.split_view.set_show_sidebar(False)
+                # Volvemos a la página de acciones principal en todo caso
+                self.stack.set_visible_child_name("actions")
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
