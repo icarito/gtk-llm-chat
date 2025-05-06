@@ -138,25 +138,21 @@ class LLMChatApplication(Adw.Application):
                 window.set_conversation_name(
                     name.strip().removeprefix("user: "))
             
-            history = self.chat_history.get_conversation_history(
-                self.config['cid'])
 
-            # Determine the model_id from the first history entry
+            history = self.chat_history.get_conversation_history(self.config['cid'])
+
+            # Obtener el modelo desde la tabla conversations, no desde el historial
+            conversation_obj = self.chat_history.get_conversation(self.config['cid'])
             model_id = None
-            if history:
-                first_entry = history[0]
-                model_id = first_entry.get('model')
+            if conversation_obj:
+                model_id = conversation_obj.get('model')
 
             # Set the model in LLMClient *before* loading history
             if model_id:
-                debug_print(f"Setting model in LLMClient to: {model_id}")  # Debug debug_print
-                window.llm.set_model(model_id)  # Set the correct model
-                # Subtitle is now updated via the 'model-loaded' signal in LLMChatWindow
-                # window.title_widget.set_subtitle(model_id) # REMOVED
+                if not window.llm.set_model(model_id):
+                    debug_print(f"Warning: Model {model_id} not found.")
             else:
-                # If no model in history, the LLMClient will load the default,
-                # and the 'model-loaded' signal will update the subtitle accordingly.
-                debug_print("Warning: No model found in the first history entry.")
+                debug_print("Warning: No model found in conversation record.")
 
             # Load the history into the (now correctly configured) LLMClient
             if history:

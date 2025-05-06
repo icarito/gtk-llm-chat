@@ -79,7 +79,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear header bar
         self.header = Adw.HeaderBar()
-        self.title_widget = Adw.WindowTitle.new(title, _("LLM Chat"))
+        self.title_widget = Adw.WindowTitle.new(title, "")
         self.header.set_title_widget(self.title_widget)
         self.set_title(title)  # Set window title based on initial title
 
@@ -193,6 +193,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.config['model'] = default_model_id
         else:
             self.config['model'] = self.llm.get_model_id()
+
+        self.title_widget.set_subtitle(self.config['model'])
 
         # Crear el sidebar con el modelo actual
         self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)

@@ -30,7 +30,7 @@ class ChatSidebar(Gtk.Box):
         self.llm_client = llm_client
         self.models_by_provider = defaultdict(list)
         self._selected_provider_key = LOCAL_PROVIDER_KEY
-        # self.api_key_row = None # Ya no se usa
+        self._models_loaded = False  # Flag para saber si los modelos ya se cargaron
 
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0, **kwargs) # Sin espacio entre header y stack
 
@@ -67,8 +67,8 @@ class ChatSidebar(Gtk.Box):
 
         # Botón Modelo Seleccionado
         model_row = Adw.ActionRow(title=_("Current Model"))
-        self.model_button = Gtk.Button(label=self.config.get('model', _('Select Model')))
-        self.model_button.connect("clicked", lambda x: self.stack.set_visible_child_name("providers"))
+        self.model_button = Gtk.Button(label=_('Select Model'))
+        self.model_button.connect("clicked", self._on_model_button_clicked)
         model_row.add_suffix(self.model_button)
         model_row.set_activatable_widget(self.model_button)
         actions_group.add(model_row)
@@ -105,9 +105,6 @@ class ChatSidebar(Gtk.Box):
         # Añadir el stack al sidebar
         self.append(self.stack)
 
-        # --- Poblar datos iniciales ---
-        self._populate_providers_and_group_models()
-
         # --- Fila para ajustar la temperatura ---
         prefs_group_temp = Adw.PreferencesGroup()
         self.append(prefs_group_temp)
@@ -121,18 +118,27 @@ class ChatSidebar(Gtk.Box):
         self.temperature_row.set_activatable_widget(scale)
         prefs_group_temp.add(self.temperature_row)
 
-        # Obtener el modelo predeterminado temprano
-        default_model = llm.get_default_model()
-        if default_model:
-            self.config['model'] = default_model  # default_model ya es un model_id (str)
-
         # Crear el Banner (inicialmente oculto)
         self.api_key_banner = Adw.Banner(revealed=False)
         self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
         # Asegurarse de que el banner esté disponible en todas las páginas necesarias
         model_page_box.append(self.api_key_banner)
 
-        # ---idle_add(self._set_initial_state)
+        # No cargamos los modelos aquí - se cargarán bajo demanda 
+        # cuando el usuario haga clic en el botón de modelo
+
+        # Si ya tenemos llm_client, intentar obtener el modelo actual
+        if self.llm_client:
+            current_model_id = self.llm_client.get_model_id()
+            if current_model_id:
+                # Inicializar el botón con al menos el model_id, luego update_model_button lo mejorará
+                self.model_button.set_label(current_model_id)
+                # Programar la actualización del botón para obtener el nombre legible
+                GLib.idle_add(self.update_model_button)
+            else:
+                self.model_button.set_label(_('Select Model'))
+        else:
+            self.model_button.set_label(_('Select Model'))
 
         # Volver a la primera pantalla al colapsar el sidebar
         def _on_sidebar_toggled(self, toggled):
@@ -146,6 +152,11 @@ class ChatSidebar(Gtk.Box):
     def set_llm_client(self, llm_client):
         """Permite establecer el cliente LLM después de la inicialización."""
         self.llm_client = llm_client
+        # Conectar la señal model-loaded para actualizar el botón cuando cambie el modelo
+        if self.llm_client:
+            self.llm_client.connect('model-loaded', self._on_model_loaded)
+        # Actualizar el botón de modelo con el modelo actual de la conversación
+        self.update_model_button()
 
     def _get_provider_display_name(self, provider_key):
         """Obtiene un nombre legible para la clave del proveedor."""
@@ -166,10 +177,8 @@ class ChatSidebar(Gtk.Box):
         self.models_by_provider.clear()
         try:
             all_models = llm.get_models()
-            print(f"Debug: Models fetched: {all_models}")
             # Detectar proveedores por needs_key
             providers_set = set([m.needs_key for m in all_models if m.needs_key])
-            print(f"Debug: Providers detected (needs_key): {providers_set}")
 
             # Agrupar modelos por needs_key (proveedor externo) o LOCAL_PROVIDER_KEY (local/otros)
             for model_obj in all_models:
@@ -188,14 +197,12 @@ class ChatSidebar(Gtk.Box):
             sorted_providers = sorted(list(providers_set) + ([LOCAL_PROVIDER_KEY] if self.models_by_provider[LOCAL_PROVIDER_KEY] else []), key=sort_key)
 
             if not sorted_providers:
-                print("Debug: No providers found.")
                 row = Adw.ActionRow(title=_("No models found"), selectable=False)
                 self.provider_list.append(row)
                 return
 
             for provider_key in sorted_providers:
                 display_name = self._get_provider_display_name(provider_key)
-                print(f"Debug: Adding provider to list: {provider_key} ({display_name})")
                 row = Adw.ActionRow(title=display_name, activatable=True)
                 row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
                 row.provider_key = provider_key
@@ -205,7 +212,6 @@ class ChatSidebar(Gtk.Box):
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos y actualiza el banner de API key."""
-        print(f"Debug: _populate_model_list called with provider_key={provider_key}")
         self._clear_list_box(self.model_list)
         self._selected_provider_key = provider_key
 
@@ -218,27 +224,31 @@ class ChatSidebar(Gtk.Box):
 
         # --- Poblar Modelos ---
         all_models = llm.get_models()
-        print(f"Debug: all_models={all_models}")
         if provider_key == LOCAL_PROVIDER_KEY:
             models = [m for m in all_models if not getattr(m, 'needs_key', None)]
         else:
             models = [m for m in all_models if getattr(m, 'needs_key', None) == provider_key]
-        print(f"Debug: models found for provider {provider_key}: {models}")
 
         if not models:
-            print(f"Debug: No models found for provider {provider_key}")
             row = Adw.ActionRow(title=_('No models found for this provider'), selectable=False)
             self.model_list.append(row)
             return
 
         models.sort(key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
-        current_model_id = self.config.get('model')
+        
+        # Obtener el modelo actual de la conversación desde LLMClient
+        current_model_id = None
+        if self.llm_client:
+            current_model_id = self.llm_client.get_model_id()
+        # Si no hay modelo actual en LLMClient, usar el de la configuración
+        if not current_model_id:
+            current_model_id = self.config.get('model')
+            
         active_row = None
 
         for model_obj in models:
             model_id = getattr(model_obj, 'model_id', None)
             model_name = getattr(model_obj, 'name', None) or model_id
-            print(f"Debug: Adding model to list: {model_id} ({model_name})")
             if model_id:
                 row = Adw.ActionRow(title=model_name, activatable=True)
                 row.model_id = model_id
@@ -305,33 +315,28 @@ class ChatSidebar(Gtk.Box):
         self.api_key_banner.set_title(title)
         self.api_key_banner.set_button_label(button_label)
 
-    def _set_initial_state(self):
-        """Configura la vista inicial basada en la configuración."""
-        current_model_id = self.config.get('model')
-        initial_provider = LOCAL_PROVIDER_KEY
-
-        if current_model_id:
-            found = False
-            for provider_key, models in self.models_by_provider.items():
-                for model_obj in models:
-                    if getattr(model_obj, 'model_id', None) == current_model_id:
-                        initial_provider = provider_key
-                        found = True
-                        break
-                if found: break
-
-        self._populate_model_list(initial_provider)
-        page = self.view_stack.get_page(self.model_list.get_parent().get_parent()) # Box -> ScrolledWindow -> ListBox
-        if page:
-             page.set_title(self._get_provider_display_name(initial_provider))
-
-        # Mostrar la página de modelos si el proveedor inicial requiere key o si es local pero ya tiene un modelo seleccionado
-        if initial_provider != LOCAL_PROVIDER_KEY or (current_model_id and initial_provider == LOCAL_PROVIDER_KEY):
-             self.view_stack.set_visible_child_name(MODEL_LIST_NAME)
-        else:
-             self.view_stack.set_visible_child_name(PROVIDER_LIST_NAME)
-
-        return GLib.SOURCE_REMOVE
+    def _on_model_button_clicked(self, button):
+        """Handler para cuando se hace clic en el botón de modelo."""
+        # Solo cargar los modelos la primera vez que se haga clic
+        if not self._models_loaded:
+            self._populate_providers_and_group_models()
+            self._models_loaded = True
+        
+        # Actualizar la etiqueta del botón con el modelo actual de LLMClient
+        if self.llm_client:
+            current_model_id = self.llm_client.get_model_id()
+            if current_model_id:
+                self.config['model'] = current_model_id
+                # Buscar el nombre legible del modelo
+                for provider_key, models in self.models_by_provider.items():
+                    for model_obj in models:
+                        if getattr(model_obj, 'model_id', None) == current_model_id:
+                            model_name = getattr(model_obj, 'name', None) or current_model_id
+                            self.model_button.set_label(model_name)
+                            break
+        
+        # Mostrar la lista de proveedores
+        self.stack.set_visible_child_name("providers")
 
     def _on_provider_row_activated(self, list_box, row):
         """Manejador cuando se selecciona un proveedor."""
@@ -344,13 +349,15 @@ class ChatSidebar(Gtk.Box):
     def _on_model_row_activated(self, list_box, row):
         model_id = getattr(row, 'model_id', None)
         if model_id:
-            self.config['model'] = model_id
-            self.model_button.set_label(row.get_title())
-            self.stack.set_visible_child_name("actions")
-            if self.llm_client:
-                self.llm_client.set_model(model_id)
-                cid = self.llm_client.get_conversation_id()
-                self.llm_client.chat_history.update_conversation_model(cid, model_id)
+            # Intentar cambiar el modelo, solo continuar si fue exitoso
+            success = self.llm_client.set_model(model_id) if self.llm_client else False
+            if success:
+                self.config['model'] = model_id
+                self.model_button.set_label(row.get_title())
+                self.stack.set_visible_child_name("actions")
+                cid = self.llm_client.get_conversation_id() if self.llm_client else None
+                if cid:
+                    self.llm_client.chat_history.update_conversation_model(cid, model_id)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
@@ -450,3 +457,39 @@ class ChatSidebar(Gtk.Box):
                   self.llm_client.set_temperature(temperature)
              except Exception as e:
                   print(f"Error setting temperature in LLM client: {e}")
+
+    def update_model_button(self):
+        """Actualiza el texto del botón de modelo con el modelo actual de la conversación."""
+        if not self.llm_client:
+            return
+            
+        current_model_id = self.llm_client.get_model_id()
+        if not current_model_id:
+            return
+            
+        # Actualizar la configuración con el modelo actual
+        self.config['model'] = current_model_id
+        
+        # Si los modelos aún no se han cargado, cargarlos para poder buscar el nombre 
+        if not self._models_loaded:
+            self._populate_providers_and_group_models()
+            self._models_loaded = True
+
+        # Buscar el nombre legible del modelo
+        model_name = current_model_id  # Default: usar el ID si no encontramos el nombre
+        for provider_key, models in self.models_by_provider.items():
+            for model_obj in models:
+                if getattr(model_obj, 'model_id', None) == current_model_id:
+                    model_name = getattr(model_obj, 'name', None) or current_model_id
+                    break
+        
+        # Actualizar el botón
+        self.model_button.set_label(model_name)
+
+    def _on_model_loaded(self, client, model_id):
+        """Callback para la señal model-loaded del LLMClient"""
+        debug_print(f"ChatSidebar: Model loaded: {model_id}")
+        # Actualizar la configuración con el modelo actual
+        self.config['model'] = model_id
+        # Actualizar el botón de modelo
+        self.update_model_button()
