@@ -63,32 +63,42 @@ class ChatSidebar(Gtk.Box):
         actions_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         actions_group = Adw.PreferencesGroup(title=_("Actions"))
 
-        # Botón Delete
+        # Añadir un header con título centrado para la página de acciones
+        header = Adw.HeaderBar()
+        header.set_show_start_title_buttons(False)
+        header.set_show_end_title_buttons(False)
+        header.add_css_class("flat")
+        header.set_title_widget(Gtk.Label(label=_("Settings")))
+        actions_page.append(header)
+
+        # Filas de acciones con íconos simbólicos
+        # Delete Conversation - uso de ícono "user-trash-symbolic"
         delete_row = Adw.ActionRow(title=_("Delete Conversation"))
-        delete_button = Gtk.Button(label=_("Delete"))
-        delete_button.add_css_class("destructive-action")
-        delete_button.connect("clicked", lambda x: self.get_root().get_application().on_delete_activate(None, None))
-        delete_row.add_suffix(delete_button)
-        delete_row.set_activatable_widget(delete_button)
+        delete_row.add_css_class("destructive")
+        delete_row.set_icon_name("user-trash-symbolic")
+        delete_row.set_activatable(True)  # Hacerla accionable
+        delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
         actions_group.add(delete_row)
 
-        # Botón About
-        about_row = Adw.ActionRow(title=_("About"))
-        about_button = Gtk.Button(label=_("About"))
-        about_button.connect("clicked", lambda x: self.get_root().get_application().on_about_activate(None, None))
-        about_row.add_suffix(about_button)
-        about_row.set_activatable_widget(about_button)
-        actions_group.add(about_row)
-
-        # Botón Modelo Seleccionado
-        model_row = Adw.ActionRow(title=_("Current Model"))
-        self.model_button = Gtk.Button(label=_('Select Model'))
-        self.model_button.connect("clicked", self._on_model_button_clicked)
-        model_row.add_suffix(self.model_button)
-        model_row.set_activatable_widget(self.model_button)
+        # Modelo - uso de ícono de IA "preferences-system-symbolic"
+        model_row = Adw.ActionRow(title=_("Change Model"))
+        model_row.set_icon_name("brain-symbolic")
+        # NO establecer subtítulo aquí, lo hará model-loaded
+        model_row.set_activatable(True)  # Hacerla accionable
+        model_row.connect("activated", self._on_model_button_clicked)
         actions_group.add(model_row)
 
         actions_page.append(actions_group)
+        
+        # Grupo separado para About
+        about_group = Adw.PreferencesGroup()
+        # About - uso de ícono "help-about-symbolic" en su propio grupo
+        about_row = Adw.ActionRow(title=_("About"))
+        about_row.set_icon_name("help-about-symbolic")
+        about_row.set_activatable(True)  # Hacerla accionable
+        about_row.connect("activated", lambda x: self.get_root().get_application().on_about_activate(None, None))
+        about_group.add(about_row)
+        actions_page.append(about_group)
         self.stack.add_titled(actions_page, "actions", _("Actions"))
 
         # --- Página 2: Lista de Proveedores ---
@@ -160,25 +170,13 @@ class ChatSidebar(Gtk.Box):
         self.temperature_row.set_activatable_widget(scale)
         prefs_group_temp.add(self.temperature_row)
 
-        # Crear el Banner (inicialmente oculto)
-        self.api_key_banner = Adw.Banner(revealed=False)
-        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
-
         # No cargamos los modelos aquí - se cargarán bajo demanda 
         # cuando el usuario haga clic en el botón de modelo
 
-        # Si ya tenemos llm_client, intentar obtener el modelo actual
+        # Si ya tenemos llm_client, programar la actualización del modelo
         if self.llm_client:
-            current_model_id = self.llm_client.get_model_id()
-            if current_model_id:
-                # Inicializar el botón con al menos el model_id, luego update_model_button lo mejorará
-                self.model_button.set_label(current_model_id)
-                # Programar la actualización del botón para obtener el nombre legible
-                GLib.idle_add(self.update_model_button)
-            else:
-                self.model_button.set_label(_('Select Model'))
-        else:
-            self.model_button.set_label(_('Select Model'))
+            # Programar la actualización con el modelo actual
+            GLib.idle_add(self.update_model_button)
 
         # Volver a la primera pantalla al colapsar el sidebar
         def _on_sidebar_toggled(self, toggled):
@@ -243,7 +241,8 @@ class ChatSidebar(Gtk.Box):
 
             for provider_key in sorted_providers:
                 display_name = self._get_provider_display_name(provider_key)
-                row = Adw.ActionRow(title=display_name, activatable=True)
+                row = Adw.ActionRow(title=display_name)
+                row.set_activatable(True)  # Hacerla accionable explícitamente
                 row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
                 row.provider_key = provider_key
                 self.provider_list.append(row)
@@ -275,7 +274,7 @@ class ChatSidebar(Gtk.Box):
             return
 
         models.sort(key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
-        
+
         # Obtener el modelo actual de la conversación desde LLMClient
         current_model_id = None
         if self.llm_client:
@@ -283,14 +282,15 @@ class ChatSidebar(Gtk.Box):
         # Si no hay modelo actual en LLMClient, usar el de la configuración
         if not current_model_id:
             current_model_id = self.config.get('model')
-            
+
         active_row = None
 
         for model_obj in models:
             model_id = getattr(model_obj, 'model_id', None)
             model_name = getattr(model_obj, 'name', None) or model_id
             if model_id:
-                row = Adw.ActionRow(title=model_name, activatable=True)
+                row = Adw.ActionRow(title=model_name)
+                row.set_activatable(True)  # Hacerla accionable explícitamente
                 row.model_id = model_id
                 self.model_list.append(row)
                 if model_id == current_model_id:
@@ -302,14 +302,17 @@ class ChatSidebar(Gtk.Box):
     def _update_api_key_banner(self, provider_key):
         """Actualiza el título y etiqueta del botón del banner de API key,
            verificando la *existencia* de la clave en keys.json."""
-        if not self.api_key_banner: return
+        debug_print(f"Actualizando banner de API key para el proveedor: {provider_key}")
+        if not self.api_key_banner:
+            debug_print("El banner de API key no está inicializado.")
+            return
         if provider_key is None:
-             self.api_key_banner.set_revealed(False)
-             return
+            self.api_key_banner.set_revealed(False)
+            debug_print("Ocultando banner porque el proveedor es None o Local.")
+            return
 
         button_label = None
         title = ""
-        # CORRECCIÓN: Solo nos importa si la clave *existe* en el archivo JSON
         key_exists_in_file = False
 
         try:
@@ -318,62 +321,42 @@ class ChatSidebar(Gtk.Box):
                 with open(keys_path, 'r') as f:
                     try:
                         stored_keys = json.load(f)
-                        # Verificar si la clave para este provider_key existe en el diccionario
                         if provider_key in stored_keys:
                             key_exists_in_file = True
-                            # Para depuración, puedes imprimir el valor encontrado:
-                            # print(f"Debug: Found key '{provider_key}' with value: {stored_keys.get(provider_key)}")
+                            debug_print(f"Clave encontrada para el proveedor {provider_key}: {stored_keys.get(provider_key)}")
                     except json.JSONDecodeError:
-                        print(f"Warning: Could not decode {keys_path}")
+                        debug_print(f"Error al decodificar el archivo {keys_path}")
                         title = _("Error reading keys file")
                         button_label = _("Check File")
                         self.api_key_banner.set_title(title)
                         self.api_key_banner.set_button_label(button_label)
                         return
             else:
-                # Si keys.json no existe, ninguna clave está configurada
-                key_exists_in_file = False
+                debug_print(f"El archivo {keys_path} no existe. No hay claves configuradas.")
 
-            # Determinar título y etiqueta basado en key_exists_in_file
             if key_exists_in_file:
-                # Asumimos que si la clave existe, está "configurada" (aunque podría estar vacía)
-                # El comportamiento de 'llm set "" alias' no borra la clave, la deja vacía.
-                title = _("API Key is configured") # O podríamos decir "Key entry exists"
+                title = _("API Key is configured")
                 button_label = _("Change Key")
             else:
-                # Si la clave no existe en el archivo, definitivamente es requerida y no está configurada
                 title = _("API Key Required")
                 button_label = _("Set Key")
 
         except Exception as e:
-            # Capturar otros errores (p.ej., permisos de archivo)
-            print(f"Error accessing or reading API keys file: {e!r}")
+            debug_print(f"Error al acceder o leer el archivo de claves: {e}")
             title = _("Error accessing keys file")
             button_label = _("Check Permissions")
 
-        # Actualizar el banner
         self.api_key_banner.set_title(title)
         self.api_key_banner.set_button_label(button_label)
+        self.api_key_banner.set_revealed(True)
+        debug_print(f"Banner actualizado: {title} - {button_label}")
 
-    def _on_model_button_clicked(self, button):
-        """Handler para cuando se hace clic en el botón de modelo."""
+    def _on_model_button_clicked(self, row):
+        """Handler para cuando se activa la fila del modelo."""
         # Solo cargar los modelos la primera vez que se haga clic
         if not self._models_loaded:
             self._populate_providers_and_group_models()
             self._models_loaded = True
-        
-        # Actualizar la etiqueta del botón con el modelo actual de LLMClient
-        if self.llm_client:
-            current_model_id = self.llm_client.get_model_id()
-            if current_model_id:
-                self.config['model'] = current_model_id
-                # Buscar el nombre legible del modelo
-                for provider_key, models in self.models_by_provider.items():
-                    for model_obj in models:
-                        if getattr(model_obj, 'model_id', None) == current_model_id:
-                            model_name = getattr(model_obj, 'name', None) or current_model_id
-                            self.model_button.set_label(model_name)
-                            break
         
         # Mostrar la lista de proveedores
         self.stack.set_visible_child_name("providers")
@@ -390,21 +373,25 @@ class ChatSidebar(Gtk.Box):
         model_id = getattr(row, 'model_id', None)
         if model_id:
             # Intentar cambiar el modelo, solo continuar si fue exitoso
+            # No es necesario actualizar manualmente - la señal model-loaded lo hará
             success = self.llm_client.set_model(model_id) if self.llm_client else False
             if success:
                 self.config['model'] = model_id
-                self.model_button.set_label(row.get_title())
+                # Volver a la página de acciones
                 self.stack.set_visible_child_name("actions")
+                # Actualizar el modelo en la base de datos si hay una conversación actual
                 cid = self.llm_client.get_conversation_id() if self.llm_client else None
                 if cid:
                     self.llm_client.chat_history.update_conversation_model(cid, model_id)
                 
                 # Notificar a la aplicación que debe ocultar el sidebar
+                # Primero retrocedemos al panel principal
+                self.stack.set_visible_child_name("actions")
+                # Luego cerramos todo el sidebar
                 window = self.get_root()
                 if window and hasattr(window, 'split_view'):
-                    window.split_view.set_show_sidebar(False)
-                # Volvemos a la página de acciones principal en todo caso
-                self.stack.set_visible_child_name("actions")
+                    # Damos un pequeño tiempo para que se vea la transición
+                    GLib.timeout_add(100, lambda: window.split_view.set_show_sidebar(False))
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
@@ -506,7 +493,7 @@ class ChatSidebar(Gtk.Box):
                   print(f"Error setting temperature in LLM client: {e}")
 
     def update_model_button(self):
-        """Actualiza el texto del botón de modelo con el modelo actual de la conversación."""
+        """Actualiza la información del modelo seleccionado en la interfaz."""
         if not self.llm_client:
             return
             
@@ -530,13 +517,47 @@ class ChatSidebar(Gtk.Box):
                     model_name = getattr(model_obj, 'name', None) or current_model_id
                     break
         
-        # Actualizar el botón
-        self.model_button.set_label(model_name)
+        # Buscar la fila del modelo en la primera página (actions)
+        # Asegurarnos de que estamos en la página correcta
+        actions_page = self.stack.get_child_by_name("actions")
+        if not actions_page:
+            return
+            
+        # Recorrer los hijos de la página de acciones (primero el HeaderBar, luego los grupos)
+        child = actions_page.get_first_child()
+        while child:
+            if isinstance(child, Adw.PreferencesGroup) and child.get_title() == _("Actions"):
+                # Buscar la fila de modelo en este grupo
+                row_child = child.get_first_child()
+                while row_child:
+                    if isinstance(row_child, Adw.ActionRow) and row_child.get_title() == _("Change Model"):
+                        row_child.set_subtitle(_("Current: ") + model_name)
+                        return
+                    row_child = row_child.get_next_sibling()
+            child = child.get_next_sibling()
 
     def _on_model_loaded(self, client, model_id):
-        """Callback para la señal model-loaded del LLMClient"""
+        """Callback para la señal model-loaded del LLMClient."""
         debug_print(f"ChatSidebar: Model loaded: {model_id}")
-        # Actualizar la configuración con el modelo actual
-        self.config['model'] = model_id
-        # Actualizar el botón de modelo
-        self.update_model_button()
+
+        # Obtener el proveedor del modelo cargado
+        provider_name = "Unknown Provider"
+        if self.llm_client:
+            provider_name = self.llm_client.get_provider_for_model(model_id) or "Unknown Provider"
+
+        # Actualizar el subtítulo del ActionRow correspondiente
+        actions_page = self.stack.get_child_by_name("actions")
+        if not actions_page:
+            return
+
+        child = actions_page.get_first_child()
+        while child:
+            if isinstance(child, Adw.PreferencesGroup):
+                row_child = child.get_first_child()
+                while row_child:
+                    if isinstance(row_child, Adw.ActionRow) and row_child.get_title() == _("Change Model"):
+                        debug_print(f"Actualizando subtítulo del ActionRow a: Provider: {provider_name}")
+                        row_child.set_subtitle(f"Provider: {provider_name}")
+                        return
+                    row_child = row_child.get_next_sibling()
+            child = child.get_next_sibling()

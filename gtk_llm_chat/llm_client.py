@@ -66,58 +66,24 @@ class LLMClient(GObject.Object):
         self._stream_thread = threading.Thread(target=self._process_stream, args=(prompt,), daemon=True)
         self._stream_thread.start()
 
-    def set_model(self, model_id: str):
-        """Sets or changes the LLM model WITHOUT resetting the conversation/history.
-        Returns True si el cambio fue exitoso, False si falló."""
-        # If model is already loaded and it's the same, do nothing
-        if self.model and self.model.model_id == model_id:
-            debug_print(f"LLMClient: Model {model_id} is already loaded.")
-            return True
-
+    def set_model(self, model_id):
+        """Establece el modelo actual y actualiza el proveedor."""
         debug_print(f"LLMClient: Request to set model to: {model_id}")
-        current_cid = self.config.get('cid') # Store current cid before model/conversation changes
 
-        try:
-            new_model = llm.get_model(model_id)
-            self.model = new_model
-            
-            conversation_recreated_or_model_changed = False
-            # Siempre crear una nueva conversación al cambiar de modelo
-            debug_print(f"LLMClient: Creating new conversation object for model {new_model.model_id} in set_model.")
-            self.conversation = new_model.conversation()
-            conversation_recreated_or_model_changed = True
-
-            self._init_error = None
-
-            # If model setup was successful and a cid exists, update the model in database 
-            # and reload its history
-            if current_cid:
-                # Update the model in the database to keep everything in sync
-                self.chat_history.update_conversation_model(current_cid, model_id)
-                debug_print(f"LLMClient: Updated model to {model_id} in database for conversation {current_cid}")
-                
-                debug_print(f"LLMClient: Attempting to reload history for cid '{current_cid}' after model change.")
-                history_entries = self.chat_history.get_conversation_history(current_cid) # Corrected method name
-                if history_entries:
-                    self.load_history(history_entries)
-                    debug_print(f"LLMClient: Successfully reloaded {len(history_entries)} entries for cid '{current_cid}'.")
-                else:
-                    debug_print(f"LLMClient: No history entries found for cid '{current_cid}' to reload.")
-            else:
-                debug_print("LLMClient: No current cid in config, cannot automatically reload history.")
-
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
-            return True
-        except llm.UnknownModelError as e:
-            debug_print(f"LLMClient: Error - Unknown model: {e}")
-            self._init_error = str(e)
-            GLib.idle_add(self.emit, 'error', f"Modelo desconocido: {e}")
+        # Buscar el modelo en la lista de modelos disponibles
+        all_models = llm.get_models()
+        self.model = next((model for model in all_models if getattr(model, 'model_id', None) == model_id), None)
+        if not self.model:
+            debug_print(f"LLMClient: No se pudo encontrar el modelo con ID: {model_id}")
             return False
-        except Exception as e:
-            debug_print(f"LLMClient: Unexpected error loading model: {e}")
-            self._init_error = str(e)
-            GLib.idle_add(self.emit, 'error', f"Error inesperado al cargar modelo: {e}")
-            return False
+
+        # Actualizar el proveedor basado en el atributo needs_key del modelo
+        self.provider = getattr(self.model, 'needs_key', None) or "Local/Other"
+        debug_print(f"LLMClient: Proveedor actualizado a: {self.provider}")
+
+        # Emitir la señal model-loaded
+        self.emit('model-loaded', model_id)
+        return True
 
     def _load_model_internal(self, model_id=None):
         """Internal method to load a model. Can be called from init or set_model."""
@@ -509,4 +475,26 @@ class LLMClient(GObject.Object):
             # We still consider this a success even if there's no history
             return True
 
+    def get_provider_for_model(self, model_id):
+        """Obtiene el proveedor asociado a un modelo dado su ID."""
+        if not model_id:
+            debug_print("get_provider_for_model: model_id es None")
+            return "Unknown Provider"
+
+        # Obtener todos los modelos disponibles
+        try:
+            all_models = llm.get_models()
+
+            # Buscar el modelo por ID y devolver su proveedor
+            for model in all_models:
+                if getattr(model, 'model_id', None) == model_id:
+                    provider = getattr(model, 'needs_key', None) or "Local/Other"
+                    debug_print(f"Proveedor encontrado: {provider} para modelo {model_id}")
+                    self.provider = provider
+                    return provider
+        except Exception as e:
+            debug_print(f"Error al obtener modelos: {e}")
+
+        debug_print(f"No se encontró proveedor para el modelo: {model_id}")
+        return "Unknown Provider"  # Si no se encuentra el modelo
 GObject.type_register(LLMClient)
