@@ -1,7 +1,22 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GObject, GLib
+from gi.repository import Gtk, Adw, GObject, GLib, Gdk
+import llm
+from collections import defaultdict
+import os
+import pathlib
+import json
+
+from chat_application import _
+
+def debug_print(*args):
+    import logging
+    logging.debug(*args)
+    
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, GObject, GLib, Gdk
 import llm
 from collections import defaultdict
 import os
@@ -77,15 +92,47 @@ class ChatSidebar(Gtk.Box):
         self.stack.add_titled(actions_page, "actions", _("Actions"))
 
         # --- Página 2: Lista de Proveedores ---
+        provider_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        
+        # Añadir header para la página de proveedores con botón atrás simbólico
+        provider_header = Adw.HeaderBar()
+        provider_header.set_show_end_title_buttons(False)
+        provider_header.add_css_class("flat")
+        back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        back_button.connect("clicked", lambda x: self.stack.set_visible_child_name("actions"))
+        provider_header.pack_start(back_button)
+        provider_header.set_title_widget(Gtk.Label(label=_("Select Provider")))
+        provider_page_box.append(provider_header)
+        
         provider_list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                                  vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
+                                                  vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                                                  vexpand=True)
         self.provider_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.provider_list.add_css_class('navigation-sidebar')
         self.provider_list.connect("row-activated", self._on_provider_row_activated)
         provider_list_scroll.set_child(self.provider_list)
-        self.stack.add_titled(provider_list_scroll, "providers", _("Providers"))
+        provider_page_box.append(provider_list_scroll)
+        self.stack.add_titled(provider_page_box, "providers", _("Providers"))
 
         # --- Página 3: Lista de Modelos ---
+        model_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        
+        # Añadir header para la página de modelos con botón atrás simbólico
+        model_header = Adw.HeaderBar()
+        model_header.set_show_end_title_buttons(False)
+        model_header.add_css_class("flat")
+        back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        back_button.connect("clicked", lambda x: self.stack.set_visible_child_name("providers"))
+        model_header.pack_start(back_button)
+        model_header.set_title_widget(Gtk.Label(label=_("Select Model")))
+        model_page_box.append(model_header)
+        
+        # Banner para API key (inicialmente oculto)
+        self.api_key_banner = Adw.Banner(revealed=False)
+        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
+        model_page_box.append(self.api_key_banner)
+        
+        # ScrolledWindow para la lista de modelos
         model_list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
                                                vexpand=True)
@@ -93,13 +140,8 @@ class ChatSidebar(Gtk.Box):
         self.model_list.add_css_class('navigation-sidebar')
         self.model_list.connect("row-activated", self._on_model_row_activated)
         model_list_scroll.set_child(self.model_list)
-
-        # Crear el contenedor para la página de modelos (solo una vez)
-        model_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.api_key_banner = Adw.Banner(revealed=False)
-        self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
-        model_page_box.append(self.api_key_banner)
         model_page_box.append(model_list_scroll)
+        
         self.stack.add_titled(model_page_box, "models", _("Models"))
 
         # Añadir el stack al sidebar
@@ -121,8 +163,6 @@ class ChatSidebar(Gtk.Box):
         # Crear el Banner (inicialmente oculto)
         self.api_key_banner = Adw.Banner(revealed=False)
         self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
-        # Asegurarse de que el banner esté disponible en todas las páginas necesarias
-        model_page_box.append(self.api_key_banner)
 
         # No cargamos los modelos aquí - se cargarán bajo demanda 
         # cuando el usuario haga clic en el botón de modelo
@@ -360,9 +400,9 @@ class ChatSidebar(Gtk.Box):
                     self.llm_client.chat_history.update_conversation_model(cid, model_id)
                 
                 # Notificar a la aplicación que debe ocultar el sidebar
-                # En lugar de intentar ocultarlo nosotros mismos, que la aplicación lo maneje
                 window = self.get_root()
-                window.split_view.set_show_sidebar(False)
+                if window and hasattr(window, 'split_view'):
+                    window.split_view.set_show_sidebar(False)
                 # Volvemos a la página de acciones principal en todo caso
                 self.stack.set_visible_child_name("actions")
 

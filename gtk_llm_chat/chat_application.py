@@ -117,6 +117,11 @@ class LLMChatApplication(Adw.Application):
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
 
+        # Configurar el manejador de eventos de teclado a nivel de aplicación
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        window.add_controller(key_controller)
+
         # Focus should be handled within LLMChatWindow if needed after init
         window.input_text.grab_focus()
 
@@ -168,6 +173,34 @@ class LLMChatApplication(Adw.Application):
                         entry['response'],
                         sender='assistant',
                     )
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        """Maneja eventos de teclado a nivel de aplicación."""
+        window = self.get_active_window()
+        
+        # F10: Toggle del sidebar
+        if keyval == Gdk.KEY_F10:
+            if window and hasattr(window, 'split_view'):
+                is_visible = window.split_view.get_show_sidebar()
+                window.split_view.set_show_sidebar(not is_visible)
+                return True
+        
+        # F2: Renombrar conversación
+        if keyval == Gdk.KEY_F2:
+            if window:
+                self.on_rename_activate(None, None)
+                return True
+        
+        # Escape: Cerrar ventana solo si el input tiene el foco
+        if keyval == Gdk.KEY_Escape:
+            if window:
+                # Verificar si el foco está en el input_text
+                if hasattr(window, 'input_text') and window.input_text.has_focus():
+                    window.close()
+                    return True
+                
+        # Permitir que otros controles procesen otros eventos de teclado
+        return False
 
     def on_rename_activate(self, action, param):
         """Renames the current conversation"""
