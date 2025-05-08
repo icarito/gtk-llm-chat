@@ -16,7 +16,7 @@ from db_operations import ChatHistory
 
 _ = gettext.gettext
 
-DEBUG = True
+DEBUG = False
 
 
 def debug_print(*args, **kwargs):

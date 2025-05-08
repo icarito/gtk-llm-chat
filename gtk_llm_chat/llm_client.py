@@ -19,7 +19,7 @@ from db_operations import ChatHistory
 from chat_application import _
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
-DEBUG = True
+DEBUG = False
 
 
 def debug_print(*args, **kwargs):

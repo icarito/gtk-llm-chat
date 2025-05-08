@@ -19,7 +19,7 @@ def debug_print(*args):
 LOCAL_PROVIDER_KEY = None
 PROVIDER_LIST_NAME = "providers"
 MODEL_LIST_NAME = "models"
-DEBUG = True
+DEBUG = False
 
 class ChatSidebar(Gtk.Box):
     """
@@ -315,8 +315,7 @@ class ChatSidebar(Gtk.Box):
             self.model_list.select_row(active_row)
 
     def _update_api_key_banner(self, provider_key):
-        """Actualiza el título y etiqueta del botón del banner de API key,
-           verificando la *existencia* de la clave en keys.json."""
+        """Actualiza el título y el botón del banner de API key, mostrando solo clases CSS (success/error)."""
         debug_print(f"Actualizando banner de API key para el proveedor: {provider_key}")
         if not self.api_key_banner:
             debug_print("El banner de API key no está inicializado.")
@@ -341,28 +340,34 @@ class ChatSidebar(Gtk.Box):
                             debug_print(f"Clave encontrada para el proveedor {provider_key}: {stored_keys.get(provider_key)}")
                     except json.JSONDecodeError:
                         debug_print(f"Error al decodificar el archivo {keys_path}")
-                        title = _("Error reading keys file")
-                        button_label = _("Check File")
+                        title = _( "Error reading keys file")
+                        button_label = _( "Check File")
+                        # Solo error visual
                         self.api_key_banner.set_title(title)
                         self.api_key_banner.set_button_label(button_label)
+                        self.api_button.remove_css_class("success")
+                        self.api_button.add_css_class("error")
                         return
             else:
                 debug_print(f"El archivo {keys_path} no existe. No hay claves configuradas.")
 
             if key_exists_in_file:
-                title = _("API Key is configured")
-                button_label = _("Change Key")
-                # add a key icon
-                self.api_button.set_css_classes(['success'])
+                title = _( "API Key is configured")
+                button_label = _( "Change Key")
+                self.api_button.remove_css_class("error")
+                self.api_button.add_css_class("success")
             else:
-                title = _("API Key Required")
-                button_label = _("Set Key")
-                self.api_button.set_css_classes(['error'])
+                title = _( "API Key Required")
+                button_label = _( "Set Key")
+                self.api_button.remove_css_class("success")
+                self.api_button.add_css_class("error")
 
         except Exception as e:
             debug_print(f"Error al acceder o leer el archivo de claves: {e}")
-            title = _("Error accessing keys file")
-            button_label = _("Check Permissions")
+            title = _( "Error accessing keys file")
+            button_label = _( "Check Permissions")
+            self.api_button.remove_css_class("success")
+            self.api_button.add_css_class("error")
 
         self.api_key_banner.set_title(title)
         self.api_key_banner.set_button_label(button_label)
