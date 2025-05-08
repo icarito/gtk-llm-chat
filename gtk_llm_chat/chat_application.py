@@ -103,7 +103,7 @@ class LLMChatApplication(Adw.Application):
     def _setup_icon(self):
         """Configures the application icon"""
         # Set search directory
-        if getattr(sys, 'frozen', False) and sys.platform == "win32":
+        if getattr(sys, 'frozen', False):
             base_path = os.path.join(sys._MEIPASS, 'gtk_llm_chat')
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))

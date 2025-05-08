@@ -74,8 +74,8 @@ applet = Analysis(
     optimize=2,
     datas=[
         ('po', 'po'),
-	    ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
-	    ('windows/*.png', 'windows')
+        ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
+        ('windows/*.png', 'windows')
     ],
     hiddenimports=[
         'gettext',

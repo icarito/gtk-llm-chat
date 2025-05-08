@@ -84,7 +84,8 @@ def open_conversation(conversation_id=None):
             executable += ".exe"
         elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
             base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-            executable = 'AppRun'
+            if os.environ.get('APPIMAGE'):
+                executable = 'AppRun'
         args = [os.path.join(base, executable)] + args[2:]
     subprocess.Popen(args)
 
