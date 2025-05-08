@@ -92,7 +92,7 @@ class ChatSidebar(Gtk.Box):
 
         # --- Nueva ActionRow para Parámetros del Modelo en la página de Acciones ---
         parameters_action_row = Adw.ActionRow(title=_("Model Parameters"))
-        parameters_action_row.set_icon_name("preferences-other-symbolic") # O un ícono más adecuado
+        parameters_action_row.set_icon_name("brain-augmented-symbolic") # O un ícono más adecuado
         parameters_action_row.set_activatable(True)
         parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
         actions_group.add(parameters_action_row) # Añadir al primer grupo de acciones
@@ -183,7 +183,7 @@ class ChatSidebar(Gtk.Box):
 
         # Nueva Fila para System Prompt
         self.system_prompt_row = Adw.ActionRow(title=_("System Prompt"))
-        self.system_prompt_row.set_icon_name("wrench-wide-symbolic") # O un ícono más adecuado
+        self.system_prompt_row.set_icon_name("open-book-symbolic") # O un ícono más adecuado
         self.system_prompt_row.set_activatable(True)
         self.system_prompt_row.connect("activated", self._on_system_prompt_button_clicked)
         parameters_group.add(self.system_prompt_row)
