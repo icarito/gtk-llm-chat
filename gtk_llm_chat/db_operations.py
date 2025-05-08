@@ -384,7 +384,7 @@ class ChatHistory:
     def update_conversation_model(self, cid, model_id):
         """Actualiza el modelo asociado a una conversación existente."""
         if not cid:
-            print("No conversation ID provided to update model.")
+            logging.warning("No conversation ID provided to update model.")
             return
         with self.get_connection() as conn:
             conn.execute(
