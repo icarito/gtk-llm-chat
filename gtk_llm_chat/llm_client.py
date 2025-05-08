@@ -19,7 +19,7 @@ from db_operations import ChatHistory
 from chat_application import _
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
-DEBUG = False
+DEBUG = os.environ.get('DEBUG') or False
 
 
 def debug_print(*args, **kwargs):
@@ -68,7 +68,21 @@ class LLMClient(GObject.Object):
 
     def set_model(self, model_id):
         """Establece el modelo actual y actualiza el proveedor."""
-        debug_print(f"LLMClient: Request to set model to: {model_id}")
+        debug_print(f"LLMClient: Request to set model to: {model_id}, current cid: {self.config.get('cid')}")
+        # Mantener el modelo actual en la config
+        self.config['model'] = model_id
+
+        # Guardar cid antiguo
+        old_cid = self.config.get('cid')
+
+        # Si hay una conversación previa, actualizar el modelo en la BD antes de recargar
+        if old_cid:
+            self.chat_history.update_conversation_model(old_cid, model_id)
+            debug_print(f"LLMClient: Modelo en BD actualizado para cid={old_cid} -> {model_id}")
+
+        # Reiniciar referencias previas para evitar estados residuales
+        self.model = None
+        self.conversation = None
 
         # Buscar el modelo en la lista de modelos disponibles
         all_models = llm.get_models()
@@ -81,19 +95,25 @@ class LLMClient(GObject.Object):
         self.provider = getattr(self.model, 'needs_key', None) or "Local/Other"
         debug_print(f"LLMClient: Proveedor actualizado a: {self.provider}")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Reinicializar la conversación para el nuevo modelo.
-        # Esto asegura que self.conversation no sea None.
+        # Crear una nueva conversación para el modelo
         debug_print(f"LLMClient: Creando nueva instancia de conversación para el modelo {self.model.model_id}")
-        self.conversation = self.model.conversation() # Crea una nueva conversación vacía
+        self.conversation = self.model.conversation()
 
-        # Si se está gestionando un ID de conversación actual (current_cid),
-        # cambiar el modelo implica que la conversación actual se considera nueva
-        # para el historial. Reseteamos el CID.
-        if hasattr(self, 'current_cid'):
-            debug_print(f"LLMClient: Reseteando current_cid (era: {self.current_cid}) a None debido al cambio de modelo.")
-            self.current_cid = None
-        # --- FIN DE LA MODIFICACIÓN ---
+        # Recargar historial si había cid previo
+        if old_cid:
+            debug_print(f"LLMClient: Recargando historial para cid={old_cid} tras cambio de modelo.")
+            history_entries = self.chat_history.get_conversation_history(old_cid)
+            self.load_history(history_entries)
+            debug_print(f"LLMClient: Historial recargado ({len(history_entries)} entradas) para cid={old_cid} tras cambio de modelo.")
+            # Restaurar el cid en config
+            self.config['cid'] = old_cid
+        else:
+            # Nuevo cid para conversación sin historial previo
+            new_cid = self.conversation.id
+            self.config['cid'] = new_cid
+            debug_print(f"LLMClient: Nuevo cid asignado: {new_cid}")
+            # Crear conversación en BD
+            self.chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME(), model_id)
 
         # Emitir la señal model-loaded para que la UI se actualice
         self.emit('model-loaded', model_id)
@@ -184,30 +204,23 @@ class LLMClient(GObject.Object):
                 # Último elemento es un prompt de usuario sin respuesta, lo eliminamos
                 filtered_responses.pop()
             
-            # SOLUCIÓN UNIVERSAL: Recrear el objeto conversation para todos los modelos
-            # Esto asegura que no haya problemas de compatibilidad entre modelos
-            debug_print(f"LLMClient: Recreando conversation para modelo {self.model.model_id}")
-            self.conversation = self.model.conversation() # Nueva conversación limpia
-            filtered_responses = [] # No usaremos las respuestas filtradas
-            
-            # Mostrar el historial después de filtrar
+            # Mostrar el historial después de filtrar (solo para depuración)
             if self.conversation.responses:
                 valid_responses = []
                 for idx, response in enumerate(self.conversation.responses):
                     if idx % 2 == 0:  # Usuario
                         # Verificar que el prompt sea válido
-                        if response.prompt and response.prompt.prompt and response.prompt.prompt.strip():
-                            user_text = response.prompt.prompt
-                            # Buscar la siguiente respuesta (asistente)
-                            if idx + 1 < len(self.conversation.responses):
-                                assistant_response = self.conversation.responses[idx + 1]
-                                if hasattr(assistant_response, '_chunks') and assistant_response._chunks and any(chunk.strip() for chunk in assistant_response._chunks):
-                                    # Par válido: usuario con prompt y asistente con chunks
-                                    valid_responses.append(response)
-                                    valid_responses.append(assistant_response)
-                                    debug_print(f"  [{len(valid_responses)-2}] User: '{user_text[:50]}'")
-                                    assistant_text = "".join(assistant_response._chunks)
-                                    debug_print(f"  [{len(valid_responses)-1}] Assistant: '{assistant_text[:50]}'")
+                        user_text = response.prompt.prompt
+                        # Buscar la siguiente respuesta (asistente)
+                        if idx + 1 < len(self.conversation.responses):
+                            assistant_response = self.conversation.responses[idx + 1]
+                            if hasattr(assistant_response, '_chunks') and assistant_response._chunks and any(chunk.strip() for chunk in assistant_response._chunks):
+                                # Par válido: usuario con prompt y asistente con chunks
+                                valid_responses.append(response)
+                                valid_responses.append(assistant_response)
+                                debug_print(f"  [{len(valid_responses)-2}] User: '{user_text[:50]}'")
+                                assistant_text = "".join(assistant_response._chunks)
+                                debug_print(f"  [{len(valid_responses)-1}] Assistant: '{assistant_text[:50]}'")
                 
                 # Reemplazar con respuestas filtradas
                 if len(valid_responses) != len(self.conversation.responses):
@@ -215,6 +228,7 @@ class LLMClient(GObject.Object):
                     self.conversation.responses = valid_responses
             else:
                 debug_print("  [No conversation history available]")
+
             if prompt is None or str(prompt).strip() == "":
                 debug_print("LLMClient: ERROR: prompt vacío o None detectado en _process_stream. Abortando.")
                 GLib.idle_add(self.emit, 'error', "No se puede enviar un prompt vacío al modelo.")
@@ -322,13 +336,8 @@ class LLMClient(GObject.Object):
             GLib.idle_add(self.emit, 'finished', success)
 
     def cancel(self):
-        debug_print(_("LLMClient: Cancel request received."))
-        self._is_generating_flag = False
-        if self._stream_thread and self._stream_thread.is_alive():
-            debug_print(_("LLMClient: Terminating active stream thread."))
-            self._stream_thread = None
-        else:
-            debug_print(_("LLMClient: No active stream thread to cancel."))
+        """No-op cancel (el stream no se cancela)."""
+        pass
 
     def get_model_id(self):
         # self._ensure_model_loaded()
@@ -339,40 +348,30 @@ class LLMClient(GObject.Object):
         return self.conversation.id if self.conversation else None
 
     def load_history(self, history_entries):
-        # Permitir cargar historial aunque no haya modelo/conversación inicializada
         chat_history = self.chat_history
         try:
             # Si no hay modelo, usar el de la config o el primero del historial
+            model_id = self.config.get('model')
+            if not model_id and history_entries:
+                for entry in history_entries:
+                    if entry.get('model'):
+                        model_id = entry['model']
+                        break
+            # Siempre recrear self.model y self.conversation para evitar estados residuales
+            if model_id:
+                try:
+                    self.model = llm.get_model(model_id)
+                    debug_print(f"LLMClient: load_history - Modelo recreado: {model_id}")
+                except Exception as e:
+                    debug_print(f"LLMClient: Error recreando modelo '{model_id}' para historial: {e}")
+                    return
             if not self.model:
-                model_id = self.config.get('model')
-                if not model_id and history_entries:
-                    for entry in history_entries:
-                        if entry.get('model'):
-                            model_id = entry['model']
-                            break
-                if model_id:
-                    try:
-                        self.model = llm.get_model(model_id)
-                    except Exception as e:
-                        debug_print(f"LLMClient: Error cargando modelo '{model_id}' para historial: {e}")
-                        return 
-            
-            if not self.model: 
                 debug_print("LLMClient: Error - Modelo no disponible para cargar historial.")
                 return
-
-            if not self.conversation or self.conversation.model != self.model:
-                self.conversation = self.model.conversation()
-            
-            if not self.conversation: 
-                debug_print(_("LLMClient: Error - Conversación no disponible para cargar historial."))
-                return
-
-            current_model = self.model
-            current_conversation = self.conversation
-            
+            self.conversation = self.model.conversation()
+            debug_print(f"LLMClient: load_history - Conversación recreada para modelo: {self.model.model_id}")
             # Limpiar conversación existente
-            current_conversation.responses = []
+            self.conversation.responses = []
             debug_print(_(f"LLMClient: Historial limpiado. Cargando {len(history_entries)} entradas..."))
             
             valid_pairs = []  # Lista de pares (user_prompt, assistant_response) válidos
@@ -416,29 +415,29 @@ class LLMClient(GObject.Object):
                     # Crear el prompt del usuario
                     last_prompt_obj = llm.Prompt(
                         user_prompt,
-                        current_model,
+                        self.model,
                         fragments=resolved_fragments,
                         system_fragments=resolved_system_fragments
                     )
                     
                     # Crear y añadir la respuesta del usuario
                     resp_user = llm.Response(
-                        last_prompt_obj, current_model, stream=False,
-                        conversation=current_conversation
+                        last_prompt_obj, self.model, stream=False,
+                        conversation=self.conversation
                     )
                     resp_user._prompt_json = {'prompt': user_prompt}
                     resp_user._done = True
                     resp_user._chunks = []
-                    current_conversation.responses.append(resp_user)
+                    self.conversation.responses.append(resp_user)
                     
                     # Crear y añadir la respuesta del asistente
                     resp_assistant = llm.Response(
-                        last_prompt_obj, current_model, stream=False,
-                        conversation=current_conversation
+                        last_prompt_obj, self.model, stream=False,
+                        conversation=self.conversation
                     )
                     resp_assistant._done = True
                     resp_assistant._chunks = [str(assistant_response).strip()]  # Asegurar que no hay espacios innecesarios
-                    current_conversation.responses.append(resp_assistant)
+                    self.conversation.responses.append(resp_assistant)
                     
                 except Exception as e:
                     debug_print(f"LLMClient: Error procesando entrada (id: {entry.get('id')}): {e}")
@@ -446,7 +445,7 @@ class LLMClient(GObject.Object):
                     debug_print(traceback.format_exc())
             
             debug_print(_("LLMClient: Historial cargado. Total de respuestas en conversación: "
-                         + f"{len(current_conversation.responses)}"))
+                         + f"{len(self.conversation.responses)}"))
                 
         finally:
             chat_history.close_connection()

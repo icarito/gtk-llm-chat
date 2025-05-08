@@ -19,7 +19,7 @@ def debug_print(*args):
 LOCAL_PROVIDER_KEY = None
 PROVIDER_LIST_NAME = "providers"
 MODEL_LIST_NAME = "models"
-DEBUG = False
+DEBUG = os.environ.get('DEBUG') or False
 
 class ChatSidebar(Gtk.Box):
     """

@@ -17,7 +17,7 @@ from chat_application import _
 from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
 
-DEBUG = False
+DEBUG = os.environ.get('DEBUG') or False
 
 
 def debug_print(*args, **kwargs):
