@@ -28,7 +28,6 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
     - `Enter`: Send message
     - `Shift+Enter`: New line in input
     - `Ctrl+W`: Delete the current conversation
-- **Fragments:** Include external content (files, URLs, or text snippets) in your prompts.
 - **Conversation Management:** Rename and delete conversations.
 - **Applet Mode:** Run a system tray applet for quick access to recent conversations.
 - **Model Selection:** Choose from different LLM models.
