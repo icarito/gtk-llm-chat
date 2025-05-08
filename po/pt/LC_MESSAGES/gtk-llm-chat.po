@@ -20,7 +20,7 @@ msgstr ""
 
 #: gtk_llm_chat/chat_window.py:90
 msgid "Model Settings"
-msgstr ""
+msgstr "Configurações do modelo"
 
 #: gtk_llm_chat/chat_window.py:96
 msgid "Rename"
@@ -32,20 +32,19 @@ msgstr "Enviar"
 
 #: gtk_llm_chat/chat_sidebar.py:51 gtk_llm_chat/chat_sidebar.py:91
 msgid "Actions"
-msgstr ""
+msgstr "Ações"
 
 #: gtk_llm_chat/chat_sidebar.py:58
 msgid "Settings"
-msgstr ""
+msgstr "Configurações"
 
 #: gtk_llm_chat/chat_sidebar.py:63
-#, fuzzy
 msgid "Delete Conversation"
-msgstr "Nova Conversa"
+msgstr "Apagar conversa"
 
 #: gtk_llm_chat/chat_sidebar.py:72
 msgid "Change Model"
-msgstr ""
+msgstr "Alterar modelo"
 
 #: gtk_llm_chat/chat_sidebar.py:85
 msgid "About"
@@ -53,119 +52,119 @@ msgstr "Sobre"
 
 #: gtk_llm_chat/chat_sidebar.py:94 gtk_llm_chat/chat_sidebar.py:165
 msgid "Model Parameters"
-msgstr ""
+msgstr "Parâmetros do modelo"
 
 #: gtk_llm_chat/chat_sidebar.py:110
 msgid "Select Provider"
-msgstr ""
+msgstr "Selecionar provedor"
 
 #: gtk_llm_chat/chat_sidebar.py:121
 msgid "Providers"
-msgstr ""
+msgstr "Provedores"
 
 #: gtk_llm_chat/chat_sidebar.py:133
 msgid "Select Model"
-msgstr ""
+msgstr "Selecionar modelo"
 
 #: gtk_llm_chat/chat_sidebar.py:155
 msgid "Models"
-msgstr ""
+msgstr "Modelos"
 
 #: gtk_llm_chat/chat_sidebar.py:172
 msgid "Temperature"
-msgstr ""
+msgstr "Temperatura"
 
 #: gtk_llm_chat/chat_sidebar.py:185
 msgid "System Prompt"
-msgstr ""
+msgstr "Prompt do sistema"
 
 #: gtk_llm_chat/chat_sidebar.py:192
 msgid "Parameters"
-msgstr ""
+msgstr "Parâmetros"
 
 #: gtk_llm_chat/chat_sidebar.py:217
 msgid "Local/Other"
-msgstr ""
+msgstr "Local/Outro"
 
 #: gtk_llm_chat/chat_sidebar.py:218
 msgid "Unknown Provider"
-msgstr ""
+msgstr "Provedor desconhecido"
 
 #: gtk_llm_chat/chat_sidebar.py:253
 msgid "No models found"
-msgstr ""
+msgstr "Nenhum modelo encontrado"
 
 #: gtk_llm_chat/chat_sidebar.py:287
 msgid "No models found for this provider"
-msgstr ""
+msgstr "Nenhum modelo encontrado para este provedor"
 
 #: gtk_llm_chat/chat_sidebar.py:344
 msgid "Error reading keys file"
-msgstr ""
+msgstr "Erro ao ler o arquivo de chaves"
 
 #: gtk_llm_chat/chat_sidebar.py:345
 msgid "Check File"
-msgstr ""
+msgstr "Verificar arquivo"
 
 #: gtk_llm_chat/chat_sidebar.py:355
 msgid "API Key is configured"
-msgstr ""
+msgstr "Chave API configurada"
 
 #: gtk_llm_chat/chat_sidebar.py:356
 msgid "Change Key"
-msgstr ""
+msgstr "Alterar chave"
 
 #: gtk_llm_chat/chat_sidebar.py:361
 msgid "API Key Required"
-msgstr ""
+msgstr "Chave API obrigatória"
 
 #: gtk_llm_chat/chat_sidebar.py:362 gtk_llm_chat/chat_sidebar.py:433
 msgid "Set Key"
-msgstr ""
+msgstr "Definir chave"
 
 #: gtk_llm_chat/chat_sidebar.py:369
 msgid "Error accessing keys file"
-msgstr ""
+msgstr "Erro ao acessar o arquivo de chaves"
 
 #: gtk_llm_chat/chat_sidebar.py:370
 msgid "Check Permissions"
-msgstr ""
+msgstr "Verificar permissões"
 
 #: gtk_llm_chat/chat_sidebar.py:429
 msgid "Enter API Key"
-msgstr ""
+msgstr "Digite a chave API"
 
 #: gtk_llm_chat/chat_sidebar.py:430
 msgid "Enter the API key for"
-msgstr ""
+msgstr "Digite a chave API para"
 
 #: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/chat_sidebar.py:571
 msgid "Cancel"
-msgstr ""
+msgstr "Cancelar"
 
 #: gtk_llm_chat/chat_sidebar.py:439
 msgid "Paste your API key here"
-msgstr ""
+msgstr "Cole sua chave API aqui"
 
 #: gtk_llm_chat/chat_sidebar.py:568
 msgid "Set System Prompt"
-msgstr ""
+msgstr "Definir prompt do sistema"
 
 #: gtk_llm_chat/chat_sidebar.py:569
 msgid "Enter the system prompt for the AI model:"
-msgstr ""
+msgstr "Digite o prompt do sistema para o modelo de IA:"
 
 #: gtk_llm_chat/chat_sidebar.py:572
 msgid "Set"
-msgstr ""
+msgstr "Definir"
 
 #: gtk_llm_chat/chat_sidebar.py:622
 msgid "Current"
-msgstr ""
+msgstr "Atual"
 
 #: gtk_llm_chat/chat_sidebar.py:624
 msgid "Not set"
-msgstr ""
+msgstr "Não definido"
 
 #: gtk_llm_chat/gtk_llm_applet.py:57 gtk_llm_chat/chat_application.py:50
 msgid ""
@@ -230,7 +229,7 @@ msgstr "LLMClient: Nenhuma thread de stream ativa para cancelar."
 
 #: gtk_llm_chat/llm_client.py:368
 msgid "LLMClient: Error - Conversación no disponible para cargar historial."
-msgstr ""
+msgstr "LLMClient: Erro - Conversa não disponível para carregar histórico."
 
 #: gtk_llm_chat/llm_client.py:448
 #, fuzzy
@@ -244,7 +243,7 @@ msgstr "Nova Conversa"
 
 #: gtk_llm_chat/tk_llm_applet.py:143
 msgid "Exiting..."
-msgstr ""
+msgstr "Saindo..."
 
 #~ msgid "LLM Chat"
 #~ msgstr "LLM Chat"

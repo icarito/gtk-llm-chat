@@ -20,7 +20,7 @@ msgstr ""
 
 #: gtk_llm_chat/chat_window.py:90
 msgid "Model Settings"
-msgstr ""
+msgstr "模型设置"
 
 #: gtk_llm_chat/chat_window.py:96
 msgid "Rename"
@@ -32,20 +32,19 @@ msgstr "发送"
 
 #: gtk_llm_chat/chat_sidebar.py:51 gtk_llm_chat/chat_sidebar.py:91
 msgid "Actions"
-msgstr ""
+msgstr "操作"
 
 #: gtk_llm_chat/chat_sidebar.py:58
 msgid "Settings"
-msgstr ""
+msgstr "设置"
 
 #: gtk_llm_chat/chat_sidebar.py:63
-#, fuzzy
 msgid "Delete Conversation"
-msgstr "新的对话"
+msgstr "删除对话"
 
 #: gtk_llm_chat/chat_sidebar.py:72
 msgid "Change Model"
-msgstr ""
+msgstr "更改模型"
 
 #: gtk_llm_chat/chat_sidebar.py:85
 msgid "About"
@@ -53,119 +52,119 @@ msgstr "关于"
 
 #: gtk_llm_chat/chat_sidebar.py:94 gtk_llm_chat/chat_sidebar.py:165
 msgid "Model Parameters"
-msgstr ""
+msgstr "模型参数"
 
 #: gtk_llm_chat/chat_sidebar.py:110
 msgid "Select Provider"
-msgstr ""
+msgstr "选择提供者"
 
 #: gtk_llm_chat/chat_sidebar.py:121
 msgid "Providers"
-msgstr ""
+msgstr "提供者"
 
 #: gtk_llm_chat/chat_sidebar.py:133
 msgid "Select Model"
-msgstr ""
+msgstr "选择模型"
 
 #: gtk_llm_chat/chat_sidebar.py:155
 msgid "Models"
-msgstr ""
+msgstr "模型"
 
 #: gtk_llm_chat/chat_sidebar.py:172
 msgid "Temperature"
-msgstr ""
+msgstr "温度"
 
 #: gtk_llm_chat/chat_sidebar.py:185
 msgid "System Prompt"
-msgstr ""
+msgstr "系统提示"
 
 #: gtk_llm_chat/chat_sidebar.py:192
 msgid "Parameters"
-msgstr ""
+msgstr "参数"
 
 #: gtk_llm_chat/chat_sidebar.py:217
 msgid "Local/Other"
-msgstr ""
+msgstr "本地/其他"
 
 #: gtk_llm_chat/chat_sidebar.py:218
 msgid "Unknown Provider"
-msgstr ""
+msgstr "未知提供者"
 
 #: gtk_llm_chat/chat_sidebar.py:253
 msgid "No models found"
-msgstr ""
+msgstr "未找到模型"
 
 #: gtk_llm_chat/chat_sidebar.py:287
 msgid "No models found for this provider"
-msgstr ""
+msgstr "此提供者未找到模型"
 
 #: gtk_llm_chat/chat_sidebar.py:344
 msgid "Error reading keys file"
-msgstr ""
+msgstr "读取密钥文件出错"
 
 #: gtk_llm_chat/chat_sidebar.py:345
 msgid "Check File"
-msgstr ""
+msgstr "检查文件"
 
 #: gtk_llm_chat/chat_sidebar.py:355
 msgid "API Key is configured"
-msgstr ""
+msgstr "API 密钥已配置"
 
 #: gtk_llm_chat/chat_sidebar.py:356
 msgid "Change Key"
-msgstr ""
+msgstr "更改密钥"
 
 #: gtk_llm_chat/chat_sidebar.py:361
 msgid "API Key Required"
-msgstr ""
+msgstr "需要 API 密钥"
 
 #: gtk_llm_chat/chat_sidebar.py:362 gtk_llm_chat/chat_sidebar.py:433
 msgid "Set Key"
-msgstr ""
+msgstr "设置密钥"
 
 #: gtk_llm_chat/chat_sidebar.py:369
 msgid "Error accessing keys file"
-msgstr ""
+msgstr "访问密钥文件出错"
 
 #: gtk_llm_chat/chat_sidebar.py:370
 msgid "Check Permissions"
-msgstr ""
+msgstr "检查权限"
 
 #: gtk_llm_chat/chat_sidebar.py:429
 msgid "Enter API Key"
-msgstr ""
+msgstr "输入 API 密钥"
 
 #: gtk_llm_chat/chat_sidebar.py:430
 msgid "Enter the API key for"
-msgstr ""
+msgstr "请输入 API 密钥："
 
 #: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/chat_sidebar.py:571
 msgid "Cancel"
-msgstr ""
+msgstr "取消"
 
 #: gtk_llm_chat/chat_sidebar.py:439
 msgid "Paste your API key here"
-msgstr ""
+msgstr "请在此粘贴您的 API 密钥"
 
 #: gtk_llm_chat/chat_sidebar.py:568
 msgid "Set System Prompt"
-msgstr ""
+msgstr "设置系统提示"
 
 #: gtk_llm_chat/chat_sidebar.py:569
 msgid "Enter the system prompt for the AI model:"
-msgstr ""
+msgstr "请输入 AI 模型的系统提示："
 
 #: gtk_llm_chat/chat_sidebar.py:572
 msgid "Set"
-msgstr ""
+msgstr "设置"
 
 #: gtk_llm_chat/chat_sidebar.py:622
 msgid "Current"
-msgstr ""
+msgstr "当前"
 
 #: gtk_llm_chat/chat_sidebar.py:624
 msgid "Not set"
-msgstr ""
+msgstr "未设置"
 
 #: gtk_llm_chat/gtk_llm_applet.py:57 gtk_llm_chat/chat_application.py:50
 msgid ""
@@ -230,7 +229,7 @@ msgstr "LLMClient：没有要取消的活动流线程。"
 
 #: gtk_llm_chat/llm_client.py:368
 msgid "LLMClient: Error - Conversación no disponible para cargar historial."
-msgstr ""
+msgstr "LLMClient：错误 - 无法加载历史记录，对话不可用。"
 
 #: gtk_llm_chat/llm_client.py:448
 #, fuzzy
@@ -244,7 +243,7 @@ msgstr "新的对话"
 
 #: gtk_llm_chat/tk_llm_applet.py:143
 msgid "Exiting..."
-msgstr ""
+msgstr "正在退出..."
 
 #~ msgid "LLM Chat"
 #~ msgstr "LLM 聊天"
