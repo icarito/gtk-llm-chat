@@ -4,6 +4,8 @@ python-ulid
 llm
 llm-groq
 llm-gemini
-llm-deepseek; sys_platform == "win32"
+llm-deepseek
+llm-perplexity
+llm-openrouter
 pystray; sys_platform == "win32"
 watchdog; sys_platform == "win32"
