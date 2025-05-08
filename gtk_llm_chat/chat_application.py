@@ -16,7 +16,7 @@ from db_operations import ChatHistory
 
 _ = gettext.gettext
 
-DEBUG = True
+DEBUG = False
 
 
 def debug_print(*args, **kwargs):
@@ -117,6 +117,11 @@ class LLMChatApplication(Adw.Application):
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
         window.present()
 
+        # Configurar el manejador de eventos de teclado a nivel de aplicación
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        window.add_controller(key_controller)
+
         # Focus should be handled within LLMChatWindow if needed after init
         window.input_text.grab_focus()
 
@@ -138,25 +143,21 @@ class LLMChatApplication(Adw.Application):
                 window.set_conversation_name(
                     name.strip().removeprefix("user: "))
             
-            history = self.chat_history.get_conversation_history(
-                self.config['cid'])
 
-            # Determine the model_id from the first history entry
+            history = self.chat_history.get_conversation_history(self.config['cid'])
+
+            # Obtener el modelo desde la tabla conversations, no desde el historial
+            conversation_obj = self.chat_history.get_conversation(self.config['cid'])
             model_id = None
-            if history:
-                first_entry = history[0]
-                model_id = first_entry.get('model')
+            if conversation_obj:
+                model_id = conversation_obj.get('model')
 
             # Set the model in LLMClient *before* loading history
             if model_id:
-                debug_print(f"Setting model in LLMClient to: {model_id}")  # Debug debug_print
-                window.llm.set_model(model_id)  # Set the correct model
-                # Subtitle is now updated via the 'model-loaded' signal in LLMChatWindow
-                # window.title_widget.set_subtitle(model_id) # REMOVED
+                if not window.llm.set_model(model_id):
+                    debug_print(f"Warning: Model {model_id} not found.")
             else:
-                # If no model in history, the LLMClient will load the default,
-                # and the 'model-loaded' signal will update the subtitle accordingly.
-                debug_print("Warning: No model found in the first history entry.")
+                debug_print("Warning: No model found in conversation record.")
 
             # Load the history into the (now correctly configured) LLMClient
             if history:
@@ -172,6 +173,34 @@ class LLMChatApplication(Adw.Application):
                         entry['response'],
                         sender='assistant',
                     )
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        """Maneja eventos de teclado a nivel de aplicación."""
+        window = self.get_active_window()
+        
+        # F10: Toggle del sidebar
+        if keyval == Gdk.KEY_F10:
+            if window and hasattr(window, 'split_view'):
+                is_visible = window.split_view.get_show_sidebar()
+                window.split_view.set_show_sidebar(not is_visible)
+                return True
+        
+        # F2: Renombrar conversación
+        if keyval == Gdk.KEY_F2:
+            if window:
+                self.on_rename_activate(None, None)
+                return True
+        
+        # Escape: Cerrar ventana solo si el input tiene el foco
+        if keyval == Gdk.KEY_Escape:
+            if window:
+                # Verificar si el foco está en el input_text
+                if hasattr(window, 'input_text') and window.input_text.has_focus():
+                    window.close()
+                    return True
+                
+        # Permitir que otros controles procesen otros eventos de teclado
+        return False
 
     def on_rename_activate(self, action, param):
         """Renames the current conversation"""

@@ -17,17 +17,23 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 - Message history with automatic scrolling
 - Windows installer and Linux AppImage available
 - Markdown rendering of the responses
-- **Support for fragments:** Include external content (files, URLs, or text snippets) in your prompts.
+
+- **Sidebar Navigation:** Modern sidebar for model/provider selection, parameters, and settings.
+- **Model Parameters:** Adjust temperature and system prompt per conversation.
+- **API Key Management:** Banner with symbolic icons for setting/changing API keys per provider.
+- **Keyboard Shortcuts:**
+    - `F10`: Toggle sidebar
+    - `F2`: Rename conversation
+    - `Escape`: Minimize window
+    - `Enter`: Send message
+    - `Shift+Enter`: New line in input
+    - `Ctrl+W`: Delete the current conversation
 - **Conversation Management:** Rename and delete conversations.
 - **Applet Mode:** Run a system tray applet for quick access to recent conversations.
 - **Model Selection:** Choose from different LLM models.
 - **System Prompt:** Set a custom system prompt for each conversation.
 - **Error Handling:** Clear error messages displayed in the chat.
 - **Dynamic Input:** The input area dynamically adjusts its height.
-- **Keyboard Shortcuts:**
-    - `Enter`: Send message.
-    - `Shift+Enter`: New line in the input.
-    - `Ctrl+W`: Delete the current conversation.
 
 ## Installation
 
@@ -67,23 +73,33 @@ These are collected here for reference only, let me know if the list needs adjus
 
 ## Usage
 
-Run the application:
+
+### Running the Application
+
+To start the applet (system tray mode):
 ```
 llm gtk-applet
 ```
 
-or for an individual chat:
+To start a single chat window:
 ```
 llm gtk-chat
 ```
 
-With optional arguments:
+#### Optional arguments:
 ```
-llm gtk-chat --cid CONVERSATION_ID  # Continue a specific conversation
-llm gtk-chat -s "System prompt"  # Set system prompt
-llm gtk-chat -m model_name  # Select specific model
-llm gtk-chat -c  # Continue last conversation
+llm gtk-chat --cid CONVERSATION_ID   # Continue a specific conversation
+llm gtk-chat -s "System prompt"      # Set system prompt
+llm gtk-chat -m model_name           # Select specific model
+llm gtk-chat -c                      # Continue last conversation
 ```
+
+### Features Overview
+
+- Use the sidebar to select providers/models, adjust parameters, and manage API keys.
+- API key banner will appear when a provider requires a key. Use the button with the key or open-lock icon to set or change your key.
+- Model parameters (temperature, system prompt) are per conversation and accessible from the sidebar.
+- Keyboard shortcuts for sidebar, rename, minimize, and more (see above).
 
 ## Development
 

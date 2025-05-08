@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2025-04-18 19:58-0500\n"
+"POT-Creation-Date: 2025-05-08 00:10-0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,111 +18,261 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: gtk_llm_chat/chat_window.py:66
-msgid "LLM Chat"
-msgstr "LLM Chat"
+#: gtk_llm_chat/chat_window.py:90
+msgid "Model Settings"
+msgstr "Configurações do modelo"
 
-#: gtk_llm_chat/chat_window.py:75
+#: gtk_llm_chat/chat_window.py:96
 msgid "Rename"
 msgstr "Renomear"
 
-#: gtk_llm_chat/chat_window.py:76
-msgid "Delete"
-msgstr "Apagar"
-
-#: gtk_llm_chat/chat_window.py:77
-msgid "About"
-msgstr "Sobre"
-
-#: gtk_llm_chat/chat_window.py:142
+#: gtk_llm_chat/chat_window.py:159
 msgid "Send"
 msgstr "Enviar"
 
-#: gtk_llm_chat/gtk_llm_applet.py:23 gtk_llm_chat/chat_application.py:36
+#: gtk_llm_chat/chat_sidebar.py:51 gtk_llm_chat/chat_sidebar.py:91
+msgid "Actions"
+msgstr "Ações"
+
+#: gtk_llm_chat/chat_sidebar.py:58
+msgid "Settings"
+msgstr "Configurações"
+
+#: gtk_llm_chat/chat_sidebar.py:63
+msgid "Delete Conversation"
+msgstr "Apagar conversa"
+
+#: gtk_llm_chat/chat_sidebar.py:72
+msgid "Change Model"
+msgstr "Alterar modelo"
+
+#: gtk_llm_chat/chat_sidebar.py:85
+msgid "About"
+msgstr "Sobre"
+
+#: gtk_llm_chat/chat_sidebar.py:94 gtk_llm_chat/chat_sidebar.py:165
+msgid "Model Parameters"
+msgstr "Parâmetros do modelo"
+
+#: gtk_llm_chat/chat_sidebar.py:110
+msgid "Select Provider"
+msgstr "Selecionar provedor"
+
+#: gtk_llm_chat/chat_sidebar.py:121
+msgid "Providers"
+msgstr "Provedores"
+
+#: gtk_llm_chat/chat_sidebar.py:133
+msgid "Select Model"
+msgstr "Selecionar modelo"
+
+#: gtk_llm_chat/chat_sidebar.py:155
+msgid "Models"
+msgstr "Modelos"
+
+#: gtk_llm_chat/chat_sidebar.py:172
+msgid "Temperature"
+msgstr "Temperatura"
+
+#: gtk_llm_chat/chat_sidebar.py:185
+msgid "System Prompt"
+msgstr "Prompt do sistema"
+
+#: gtk_llm_chat/chat_sidebar.py:192
+msgid "Parameters"
+msgstr "Parâmetros"
+
+#: gtk_llm_chat/chat_sidebar.py:217
+msgid "Local/Other"
+msgstr "Local/Outro"
+
+#: gtk_llm_chat/chat_sidebar.py:218
+msgid "Unknown Provider"
+msgstr "Provedor desconhecido"
+
+#: gtk_llm_chat/chat_sidebar.py:253
+msgid "No models found"
+msgstr "Nenhum modelo encontrado"
+
+#: gtk_llm_chat/chat_sidebar.py:287
+msgid "No models found for this provider"
+msgstr "Nenhum modelo encontrado para este provedor"
+
+#: gtk_llm_chat/chat_sidebar.py:344
+msgid "Error reading keys file"
+msgstr "Erro ao ler o arquivo de chaves"
+
+#: gtk_llm_chat/chat_sidebar.py:345
+msgid "Check File"
+msgstr "Verificar arquivo"
+
+#: gtk_llm_chat/chat_sidebar.py:355
+msgid "API Key is configured"
+msgstr "Chave API configurada"
+
+#: gtk_llm_chat/chat_sidebar.py:356
+msgid "Change Key"
+msgstr "Alterar chave"
+
+#: gtk_llm_chat/chat_sidebar.py:361
+msgid "API Key Required"
+msgstr "Chave API obrigatória"
+
+#: gtk_llm_chat/chat_sidebar.py:362 gtk_llm_chat/chat_sidebar.py:433
+msgid "Set Key"
+msgstr "Definir chave"
+
+#: gtk_llm_chat/chat_sidebar.py:369
+msgid "Error accessing keys file"
+msgstr "Erro ao acessar o arquivo de chaves"
+
+#: gtk_llm_chat/chat_sidebar.py:370
+msgid "Check Permissions"
+msgstr "Verificar permissões"
+
+#: gtk_llm_chat/chat_sidebar.py:429
+msgid "Enter API Key"
+msgstr "Digite a chave API"
+
+#: gtk_llm_chat/chat_sidebar.py:430
+msgid "Enter the API key for"
+msgstr "Digite a chave API para"
+
+#: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/chat_sidebar.py:571
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: gtk_llm_chat/chat_sidebar.py:439
+msgid "Paste your API key here"
+msgstr "Cole sua chave API aqui"
+
+#: gtk_llm_chat/chat_sidebar.py:568
+msgid "Set System Prompt"
+msgstr "Definir prompt do sistema"
+
+#: gtk_llm_chat/chat_sidebar.py:569
+msgid "Enter the system prompt for the AI model:"
+msgstr "Digite o prompt do sistema para o modelo de IA:"
+
+#: gtk_llm_chat/chat_sidebar.py:572
+msgid "Set"
+msgstr "Definir"
+
+#: gtk_llm_chat/chat_sidebar.py:622
+msgid "Current"
+msgstr "Atual"
+
+#: gtk_llm_chat/chat_sidebar.py:624
+msgid "Not set"
+msgstr "Não definido"
+
+#: gtk_llm_chat/gtk_llm_applet.py:57 gtk_llm_chat/chat_application.py:50
 msgid ""
 "\n"
 "Closing application..."
 msgstr ""
-"\nA fechar a aplicação..."
+"\n"
+"A fechar a aplicação..."
 
-#: gtk_llm_chat/gtk_llm_applet.py:52 gtk_llm_chat/llm_client.py:22
+#: gtk_llm_chat/gtk_llm_applet.py:100 gtk_llm_chat/llm_client.py:21
+#: gtk_llm_chat/tk_llm_applet.py:65
 msgid "New Conversation"
 msgstr "Nova Conversa"
 
-#: gtk_llm_chat/gtk_llm_applet.py:64
+#: gtk_llm_chat/gtk_llm_applet.py:112 gtk_llm_chat/tk_llm_applet.py:69
 msgid "Quit"
 msgstr "Sair"
 
-#: gtk_llm_chat/db_operations.py:118
-msgid "Error: conversation_id is required to add to history."
-msgstr "Erro: o conversation_id é obrigatório para adicionar ao histórico."
-
-#: gtk_llm_chat/db_operations.py:158
-msgid "Error: conversation_id is required to create the conversation."
-msgstr "Erro: o conversation_id é obrigatório para criar a conversa."
-
-#: gtk_llm_chat/chat_application.py:80
+#: gtk_llm_chat/chat_application.py:99
 msgid "Error: _version.py not found"
 msgstr "Erro: _version.py não encontrado"
 
-#: gtk_llm_chat/chat_application.py:158
+#: gtk_llm_chat/chat_application.py:218
 msgid "Are you sure you want to delete the conversation?"
 msgstr "Tem a certeza que quer apagar a conversa?"
 
-#: gtk_llm_chat/chat_application.py:177
+#: gtk_llm_chat/chat_application.py:237
 msgid "Gtk LLM Chat"
 msgstr "Gtk LLM Chat"
 
-#: gtk_llm_chat/chat_application.py:180
+#: gtk_llm_chat/chat_application.py:240
 msgid "A frontend for LLM"
 msgstr "Um frontend para LLM"
 
-#: gtk_llm_client.py:94
+#: gtk_llm_chat/llm_client.py:231
 msgid "LLMClient: Ignoring invalid temperature:"
 msgstr "LLMClient: A ignorar temperatura inválida:"
 
-#: gtk_llm_client.py:98
+#: gtk_llm_chat/llm_client.py:266
 msgid "LLMClient: Starting stream processing..."
 msgstr "LLMClient: A iniciar o processamento de stream..."
 
-#: gtk_llm_client.py:101
+#: gtk_llm_chat/llm_client.py:269
 msgid "LLMClient: Stream processing cancelled externally."
 msgstr "LLMClient: Processamento de stream cancelado externamente."
 
-#: gtk_llm_client.py:107
+#: gtk_llm_chat/llm_client.py:275
 msgid "LLMClient: Stream finished normally."
 msgstr "LLMClient: Stream terminado normalmente."
 
-#: gtk_llm_client.py:139
+#: gtk_llm_chat/llm_client.py:325
 msgid "LLMClient: Cancel request received."
 msgstr "LLMClient: Pedido de cancelamento recebido."
 
-#: gtk_llm_client.py:142
+#: gtk_llm_chat/llm_client.py:328
 msgid "LLMClient: Terminating active stream thread."
 msgstr "LLMClient: A terminar a thread de stream ativa."
 
-#: gtk_llm_client.py:145
+#: gtk_llm_chat/llm_client.py:331
 msgid "LLMClient: No active stream thread to cancel."
 msgstr "LLMClient: Nenhuma thread de stream ativa para cancelar."
 
-#: gtk_llm_client.py:155
-msgid ""
-"LLMClient: Error - Attempting to load history with model initialization "
-"error."
-msgstr "LLMClient: Erro - A tentar carregar o histórico com erro de inicialização do modelo."
+#: gtk_llm_chat/llm_client.py:368
+msgid "LLMClient: Error - Conversación no disponible para cargar historial."
+msgstr "LLMClient: Erro - Conversa não disponível para carregar histórico."
 
-#: gtk_llm_client.py:158
-msgid ""
-"LLMClient: Error - Attempting to load history without initialized "
-"conversation."
-msgstr "LLMClient: Erro - A tentar carregar o histórico sem conversa inicializada."
-
-#: gtk_llm_client.py:196
-msgid ""
-"LLMClient: Warning - Assistant response without previous user prompt in "
-"history."
-msgstr "LLMClient: Aviso - Resposta do assistente sem pedido anterior do utilizador no histórico."
-
-#: gtk_llm_client.py:199
-msgid "LLMClient: History loaded. Total responses in conversation: "
+#: gtk_llm_chat/llm_client.py:448
+#, fuzzy
+msgid "LLMClient: Historial cargado. Total de respuestas en conversación: "
 msgstr "LLMClient: Histórico carregado. Total de respostas na conversa: "
+
+#: gtk_llm_chat/tk_llm_applet.py:119
+#, fuzzy
+msgid "LLM Conversations"
+msgstr "Nova Conversa"
+
+#: gtk_llm_chat/tk_llm_applet.py:143
+msgid "Exiting..."
+msgstr "Saindo..."
+
+#~ msgid "LLM Chat"
+#~ msgstr "LLM Chat"
+
+#~ msgid "Delete"
+#~ msgstr "Apagar"
+
+#~ msgid "Error: conversation_id is required to add to history."
+#~ msgstr "Erro: o conversation_id é obrigatório para adicionar ao histórico."
+
+#~ msgid "Error: conversation_id is required to create the conversation."
+#~ msgstr "Erro: o conversation_id é obrigatório para criar a conversa."
+
+#~ msgid ""
+#~ "LLMClient: Error - Attempting to load history with model initialization "
+#~ "error."
+#~ msgstr ""
+#~ "LLMClient: Erro - A tentar carregar o histórico com erro de inicialização "
+#~ "do modelo."
+
+#~ msgid ""
+#~ "LLMClient: Error - Attempting to load history without initialized "
+#~ "conversation."
+#~ msgstr ""
+#~ "LLMClient: Erro - A tentar carregar o histórico sem conversa inicializada."
+
+#~ msgid ""
+#~ "LLMClient: Warning - Assistant response without previous user prompt in "
+#~ "history."
+#~ msgstr ""
+#~ "LLMClient: Aviso - Resposta do assistente sem pedido anterior do "
+#~ "utilizador no histórico."

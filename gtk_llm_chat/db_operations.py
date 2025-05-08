@@ -380,3 +380,15 @@ class ChatHistory:
              # Catch unexpected errors during resolution
              logging.error(f"ChatHistory: Unexpected error resolving fragment '{specifier}': {e}", exc_info=True)
              raise ValueError(f"Unexpected error resolving fragment '{specifier}': {e}") from e
+
+    def update_conversation_model(self, cid, model_id):
+        """Actualiza el modelo asociado a una conversación existente."""
+        if not cid:
+            logging.warning("No conversation ID provided to update model.")
+            return
+        with self.get_connection() as conn:
+            conn.execute(
+                "UPDATE conversations SET model = ? WHERE id = ?",
+                (model_id, cid)
+            )
+            conn.commit()
