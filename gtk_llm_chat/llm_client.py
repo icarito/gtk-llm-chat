@@ -14,7 +14,7 @@ import llm
 import threading
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from db_operations import ChatHistory  # Import ChatHistory
+from db_operations import ChatHistory
 
 from chat_application import _
 
@@ -81,8 +81,23 @@ class LLMClient(GObject.Object):
         self.provider = getattr(self.model, 'needs_key', None) or "Local/Other"
         debug_print(f"LLMClient: Proveedor actualizado a: {self.provider}")
 
-        # Emitir la señal model-loaded
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Reinicializar la conversación para el nuevo modelo.
+        # Esto asegura que self.conversation no sea None.
+        debug_print(f"LLMClient: Creando nueva instancia de conversación para el modelo {self.model.model_id}")
+        self.conversation = self.model.conversation() # Crea una nueva conversación vacía
+
+        # Si se está gestionando un ID de conversación actual (current_cid),
+        # cambiar el modelo implica que la conversación actual se considera nueva
+        # para el historial. Reseteamos el CID.
+        if hasattr(self, 'current_cid'):
+            debug_print(f"LLMClient: Reseteando current_cid (era: {self.current_cid}) a None debido al cambio de modelo.")
+            self.current_cid = None
+        # --- FIN DE LA MODIFICACIÓN ---
+
+        # Emitir la señal model-loaded para que la UI se actualice
         self.emit('model-loaded', model_id)
+        debug_print(f"LLMClient: Modelo {model_id} cargado y conversación reinicializada.")
         return True
 
     def _load_model_internal(self, model_id=None):

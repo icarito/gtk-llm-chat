@@ -11,28 +11,15 @@ import json
 from chat_application import _
 
 def debug_print(*args):
-    import logging
-    logging.debug(*args)
+    if DEBUG:
+        print(*args)
     
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GObject, GLib, Gdk
-import llm
-from collections import defaultdict
-import os
-import pathlib
-import json
-
-try:
-    from .chat_application import _
-except ImportError:
-    def _(s): return s
 
 # Usaremos None para representar la ausencia de 'needs_key'
 LOCAL_PROVIDER_KEY = None
 PROVIDER_LIST_NAME = "providers"
 MODEL_LIST_NAME = "models"
-# Ya no necesitamos API_KEY_ROW_NAME
+DEBUG = True
 
 class ChatSidebar(Gtk.Box):
     """
@@ -81,12 +68,14 @@ class ChatSidebar(Gtk.Box):
         actions_group.add(delete_row)
 
         # Modelo - uso de ícono de IA "preferences-system-symbolic"
-        model_row = Adw.ActionRow(title=_("Change Model"))
-        model_row.set_icon_name("brain-symbolic")
+        model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
+        self.model_row = Adw.ActionRow(title=_("Change Model"),
+                                       subtitle="Provider: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
+        self.model_row.set_icon_name("brain-symbolic")
         # NO establecer subtítulo aquí, lo hará model-loaded
-        model_row.set_activatable(True)  # Hacerla accionable
-        model_row.connect("activated", self._on_model_button_clicked)
-        actions_group.add(model_row)
+        self.model_row.set_activatable(True)  # Hacerla accionable
+        self.model_row.connect("activated", self._on_model_button_clicked)
+        actions_group.add(self.model_row)
 
         actions_page.append(actions_group)
         
@@ -100,6 +89,13 @@ class ChatSidebar(Gtk.Box):
         about_group.add(about_row)
         actions_page.append(about_group)
         self.stack.add_titled(actions_page, "actions", _("Actions"))
+
+        # --- Nueva ActionRow para Parámetros del Modelo en la página de Acciones ---
+        parameters_action_row = Adw.ActionRow(title=_("Model Parameters"))
+        parameters_action_row.set_icon_name("preferences-other-symbolic") # O un ícono más adecuado
+        parameters_action_row.set_activatable(True)
+        parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
+        actions_group.add(parameters_action_row) # Añadir al primer grupo de acciones
 
         # --- Página 2: Lista de Proveedores ---
         provider_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -158,26 +154,51 @@ class ChatSidebar(Gtk.Box):
         
         self.stack.add_titled(model_page_box, "models", _("Models"))
 
-        # Añadir el stack al sidebar
-        self.append(self.stack)
+        # --- Página 4: Parámetros del Modelo ---
+        parameters_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        parameters_header = Adw.HeaderBar()
+        parameters_header.set_show_end_title_buttons(False)
+        parameters_header.add_css_class("flat")
+        param_back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        param_back_button.connect("clicked", lambda x: self.stack.set_visible_child_name("actions"))
+        parameters_header.pack_start(param_back_button)
+        parameters_header.set_title_widget(Gtk.Label(label=_("Model Parameters")))
+        parameters_page_box.append(parameters_header)
 
-        # --- Fila para ajustar la temperatura ---
-        prefs_group_temp = Adw.PreferencesGroup()
-        self.append(prefs_group_temp)
+        parameters_group = Adw.PreferencesGroup() # No necesita título si el header ya lo tiene
+        parameters_page_box.append(parameters_group)
+
+        # Mover la Fila de Temperatura aquí
         self.temperature_row = Adw.ActionRow(title=_("Temperature"))
+        self.temperature_row.set_icon_name("temperature-symbolic") # O un ícono más adecuado
         initial_temp = self.config.get('temperature', 0.7)
-        self.adjustment = Gtk.Adjustment(value=initial_temp, lower=0.0, upper=2.0, step_increment=0.1, page_increment=0.2)
+        self.adjustment = Gtk.Adjustment(value=initial_temp, lower=0.0, upper=1.0, step_increment=0.05, page_increment=0.1) # Ajustado upper y step
         self.adjustment.connect("value-changed", self._on_temperature_changed)
-        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=self.adjustment, digits=1, value_pos=Gtk.PositionType.RIGHT)
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=self.adjustment, digits=2, value_pos=Gtk.PositionType.RIGHT) # digits a 2
         scale.set_hexpand(True)
         self.temperature_row.add_suffix(scale)
         self.temperature_row.set_activatable_widget(scale)
-        prefs_group_temp.add(self.temperature_row)
+        parameters_group.add(self.temperature_row)
+        self._update_temperature_subtitle() # Actualizar subtítulo inicial de temperatura
+
+        # Nueva Fila para System Prompt
+        self.system_prompt_row = Adw.ActionRow(title=_("System Prompt"))
+        self.system_prompt_row.set_icon_name("wrench-wide-symbolic") # O un ícono más adecuado
+        self.system_prompt_row.set_activatable(True)
+        self.system_prompt_row.connect("activated", self._on_system_prompt_button_clicked)
+        parameters_group.add(self.system_prompt_row)
+        self._update_system_prompt_row_subtitle() # Actualizar subtítulo inicial
+
+        self.stack.add_titled(parameters_page_box, "parameters", _("Parameters"))
+
+        # Añadir el stack al sidebar
+        self.append(self.stack)
 
         # No cargamos los modelos aquí - se cargarán bajo demanda 
         # cuando el usuario haga clic en el botón de modelo
 
         # Si ya tenemos llm_client, programar la actualización del modelo
+        self.llm_client.connect('model-loaded', self._on_model_loaded)
         if self.llm_client:
             # Programar la actualización con el modelo actual
             GLib.idle_add(self.update_model_button)
@@ -189,16 +210,6 @@ class ChatSidebar(Gtk.Box):
 
         # Conectar el evento de colapsar el sidebar
         self.connect("notify::visible", lambda obj, pspec: self._on_sidebar_toggled(self.get_visible()))
-
-
-    def set_llm_client(self, llm_client):
-        """Permite establecer el cliente LLM después de la inicialización."""
-        self.llm_client = llm_client
-        # Conectar la señal model-loaded para actualizar el botón cuando cambie el modelo
-        if self.llm_client:
-            self.llm_client.connect('model-loaded', self._on_model_loaded)
-        # Actualizar el botón de modelo con el modelo actual de la conversación
-        self.update_model_button()
 
     def _get_provider_display_name(self, provider_key):
         """Obtiene un nombre legible para la clave del proveedor."""
@@ -498,6 +509,15 @@ class ChatSidebar(Gtk.Box):
                   self.llm_client.set_temperature(temperature)
              except Exception as e:
                   print(f"Error setting temperature in LLM client: {e}")
+        self._update_temperature_subtitle() # Actualizar subtítulo de temperatura
+
+    def _update_temperature_subtitle(self):
+        """Actualiza el subtítulo de la fila de temperatura con el valor actual."""
+        if hasattr(self, 'adjustment') and hasattr(self, 'temperature_row'):
+            temp_value = self.adjustment.get_value()
+            self.temperature_row.set_subtitle(f"{temp_value:.2f}")
+        else:
+            debug_print("ChatSidebar: Saltando actualización de subtítulo de temperatura (adjustment o temperature_row no inicializados).")
 
     def update_model_button(self):
         """Actualiza la información del modelo seleccionado en la interfaz."""
@@ -505,8 +525,6 @@ class ChatSidebar(Gtk.Box):
             return
             
         current_model_id = self.llm_client.get_model_id()
-        if not current_model_id:
-            return
             
         # Actualizar la configuración con el modelo actual
         self.config['model'] = current_model_id
@@ -516,32 +534,9 @@ class ChatSidebar(Gtk.Box):
             self._populate_providers_and_group_models()
             self._models_loaded = True
 
-        # Buscar el nombre legible del modelo
-        model_name = current_model_id  # Default: usar el ID si no encontramos el nombre
-        for provider_key, models in self.models_by_provider.items():
-            for model_obj in models:
-                if getattr(model_obj, 'model_id', None) == current_model_id:
-                    model_name = getattr(model_obj, 'name', None) or current_model_id
-                    break
         
-        # Buscar la fila del modelo en la primera página (actions)
-        # Asegurarnos de que estamos en la página correcta
-        actions_page = self.stack.get_child_by_name("actions")
-        if not actions_page:
-            return
-            
-        # Recorrer los hijos de la página de acciones (primero el HeaderBar, luego los grupos)
-        child = actions_page.get_first_child()
-        while child:
-            if isinstance(child, Adw.PreferencesGroup) and child.get_title() == _("Actions"):
-                # Buscar la fila de modelo en este grupo
-                row_child = child.get_first_child()
-                while row_child:
-                    if isinstance(row_child, Adw.ActionRow) and row_child.get_title() == _("Change Model"):
-                        row_child.set_subtitle(_("Current: ") + model_name)
-                        return
-                    row_child = row_child.get_next_sibling()
-            child = child.get_next_sibling()
+        self.model_row.set_subtitle(f"Provider: {self.llm_client.get_provider_for_model(current_model_id) or 'Unknown Provider'}")
+        self._update_system_prompt_row_subtitle() # Asegurar que el subtítulo del system prompt también se actualice
 
     def _on_model_loaded(self, client, model_id):
         """Callback para la señal model-loaded del LLMClient."""
@@ -551,20 +546,74 @@ class ChatSidebar(Gtk.Box):
         provider_name = "Unknown Provider"
         if self.llm_client:
             provider_name = self.llm_client.get_provider_for_model(model_id) or "Unknown Provider"
+        
+        self.model_row.set_subtitle(f"Provider: {provider_name}")
 
-        # Actualizar el subtítulo del ActionRow correspondiente
-        actions_page = self.stack.get_child_by_name("actions")
-        if not actions_page:
-            return
+    def _on_model_parameters_button_clicked(self, row):
+        self.stack.set_visible_child_name("parameters")
 
-        child = actions_page.get_first_child()
-        while child:
-            if isinstance(child, Adw.PreferencesGroup):
-                row_child = child.get_first_child()
-                while row_child:
-                    if isinstance(row_child, Adw.ActionRow) and row_child.get_title() == _("Change Model"):
-                        debug_print(f"Actualizando subtítulo del ActionRow a: Provider: {provider_name}")
-                        row_child.set_subtitle(f"Provider: {provider_name}")
-                        return
-                    row_child = row_child.get_next_sibling()
-            child = child.get_next_sibling()
+    def _on_system_prompt_button_clicked(self, row):
+        debug_print("ChatSidebar: _on_system_prompt_button_clicked llamado.")
+        root_window = self.get_root()
+        debug_print(f"ChatSidebar: Ventana raíz para el diálogo: {root_window}")
+
+        dialog = Adw.MessageDialog(
+            transient_for=root_window,
+            modal=True,
+            heading=_("Set System Prompt"),
+            body=_("Enter the system prompt for the AI model:"),
+        )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("set", _("Set"))
+        dialog.set_response_appearance("set", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("set")
+
+        text_view = Gtk.TextView(
+            editable=True,
+            wrap_mode=Gtk.WrapMode.WORD_CHAR,
+            vexpand=True,
+            hexpand=True,
+            left_margin=6, right_margin=6, top_margin=6, bottom_margin=6
+        )
+        text_view.get_buffer().set_text(self.config.get('system', '') or '')
+        text_view.add_css_class("card")
+        
+        scrolled_window = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            min_content_height=150 # Altura mínima para el text view
+        )
+        scrolled_window.set_child(text_view)
+
+        clamp = Adw.Clamp(maximum_size=600) # Ancho máximo del diálogo
+        clamp.set_child(scrolled_window)
+        dialog.set_extra_child(clamp)
+
+        dialog.connect("response", self._on_system_prompt_dialog_response, text_view)
+        GLib.idle_add(dialog.present)
+        GLib.idle_add(lambda: text_view.grab_focus())
+
+    def _on_system_prompt_dialog_response(self, dialog, response_id, text_view):
+        if response_id == "set":
+            buffer = text_view.get_buffer()
+            new_system_prompt = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            self.config['system'] = new_system_prompt.strip() # Guardar como 'system'
+            self._update_system_prompt_row_subtitle()
+            # No es necesario notificar a LLMClient explícitamente si lee de self.config['system']
+            debug_print(f"System prompt actualizado a: {self.config['system'][:100]}")
+        dialog.destroy()
+
+    def _update_system_prompt_row_subtitle(self):
+        current_prompt = self.config.get('system', '')
+        if current_prompt:
+            # Tomar las primeras N palabras o M caracteres
+            words = current_prompt.split()
+            if len(words) > 7:
+                subtitle_text = ' '.join(words[:7]) + "..."
+            elif len(current_prompt) > 40:
+                subtitle_text = current_prompt[:37] + "..."
+            else:
+                subtitle_text = current_prompt
+            self.system_prompt_row.set_subtitle(f"{_('Current')}: {subtitle_text}")
+        else:
+            self.system_prompt_row.set_subtitle(_("Not set"))
