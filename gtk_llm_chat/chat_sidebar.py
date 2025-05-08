@@ -139,6 +139,10 @@ class ChatSidebar(Gtk.Box):
         
         # Banner para API key (inicialmente oculto)
         self.api_key_banner = Adw.Banner(revealed=False)
+        gizmo = self.api_key_banner.get_first_child().get_first_child()
+        gizmo.set_css_classes(['card'])
+        self.api_button = gizmo.get_last_child()
+
         self.api_key_banner.connect("button-clicked", self._on_banner_button_clicked)
         model_page_box.append(self.api_key_banner)
         
@@ -337,9 +341,12 @@ class ChatSidebar(Gtk.Box):
             if key_exists_in_file:
                 title = _("API Key is configured")
                 button_label = _("Change Key")
+                # add a key icon
+                self.api_button.set_css_classes(['success'])
             else:
                 title = _("API Key Required")
                 button_label = _("Set Key")
+                self.api_button.set_css_classes(['error'])
 
         except Exception as e:
             debug_print(f"Error al acceder o leer el archivo de claves: {e}")
