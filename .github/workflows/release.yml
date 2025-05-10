@@ -31,6 +31,34 @@ jobs:
           name: linux-dist
           path: dist/
 
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          ./macos/bootstrap.sh
+          python3 -m pip install pycairo
+          python3 -m pip install PyGObject
+      - name: Set up environment
+        run: |
+          cp .env.ci .env
+      - name: (Optional) Ad-hoc signing
+        run: |
+          # Use ad-hoc signing if you don't want to use Apple Developer certificates
+          # codesign --sign - --force --deep /to/your/app
+          echo "Skipping ad-hoc signing. Add codesign if needed."
+      - name: Build package
+        run: |
+          python3 build-ci.py
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist
+          path: dist/
+
   build-windows:
     name: Build for Windows
     runs-on: windows-2022
@@ -63,7 +91,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,6 +106,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
+          path: dist/
+      - name: Download macOS dist
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dist
           path: dist/
       - name: Create GitHub Release
         env:
