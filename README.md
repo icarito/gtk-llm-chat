@@ -69,7 +69,7 @@ These are collected here for reference only, let me know if the list needs adjus
 - Python 3.8 or higher
 - GTK 4.0
 - libadwaita
-- libayatana-appindicator
+- libayatana-appindicator (optional)
 
 ## Usage
 
@@ -111,6 +111,13 @@ python -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+## Shoulders of giants
+
+This project is made possible thanks to these great components, among others:
+
+- [llm](https://llm.datasette.io/en/stable/) by @simonw
+- [hello-world-gtk](https://github.com/zevlee/hello-world-gtk) by @zevlee
 
 ## License
 
