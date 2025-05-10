@@ -12,3 +12,5 @@ build/
 *.egg-info/
 plans/
 po/**/*~
+.env
+tests
