@@ -348,107 +348,68 @@ class LLMClient(GObject.Object):
         return self.conversation.id if self.conversation else None
 
     def load_history(self, history_entries):
-        chat_history = self.chat_history
-        try:
-            # Si no hay modelo, usar el de la config o el primero del historial
-            model_id = self.config.get('model')
-            if not model_id and history_entries:
+        """
+        Carga el historial de mensajes en la conversación actual.
+        Solo recrea el modelo/conversación si es necesario.
+        """
+        if not history_entries:
+            debug_print("LLMClient: No hay historial para cargar.")
+            return
+
+        # Determinar el modelo a usar (de config o del historial)
+        model_id = self.config.get('model')
+        if not model_id:
+            # Try to get the model from the conversation details in the database
+            conversation_id = self.config.get('cid')
+            if conversation_id:
+                conv_details = self.chat_history.get_conversation(conversation_id)
+                if conv_details and conv_details.get('model'):
+                    model_id = conv_details['model']
+            # Fallback to extracting from history entries if not found in conversation details
+            if not model_id:
                 for entry in history_entries:
                     if entry.get('model'):
                         model_id = entry['model']
                         break
-            # Siempre recrear self.model y self.conversation para evitar estados residuales
-            if model_id:
-                try:
-                    self.model = llm.get_model(model_id)
-                    debug_print(f"LLMClient: load_history - Modelo recreado: {model_id}")
-                except Exception as e:
-                    debug_print(f"LLMClient: Error recreando modelo '{model_id}' para historial: {e}")
-                    return
-            if not self.model:
-                debug_print("LLMClient: Error - Modelo no disponible para cargar historial.")
+
+        # Si el modelo actual no corresponde, cargarlo
+        if not self.model or self.model.model_id != model_id:
+            try:
+                self.model = llm.get_model(model_id)
+                debug_print(f"LLMClient: load_history - Modelo cargado: {model_id}")
+            except Exception as e:
+                debug_print(f"LLMClient: Error cargando modelo '{model_id}' para historial: {e}")
                 return
+
+        # Si la conversación no existe o es de otro modelo, crearla
+        if not self.conversation or getattr(self.conversation, 'model', None) != self.model:
             self.conversation = self.model.conversation()
-            debug_print(f"LLMClient: load_history - Conversación recreada para modelo: {self.model.model_id}")
-            # Limpiar conversación existente
-            self.conversation.responses = []
-            debug_print(_(f"LLMClient: Historial limpiado. Cargando {len(history_entries)} entradas..."))
-            
-            valid_pairs = []  # Lista de pares (user_prompt, assistant_response) válidos
-            
-            # Primero, recopilamos pares válidos de prompt-response
-            for entry in history_entries:
-                user_prompt = entry.get('prompt')
-                assistant_response = entry.get('response')
-                
-                # Solo incluir pares donde AMBOS (prompt y response) son válidos
-                if (user_prompt and str(user_prompt).strip() and 
-                    assistant_response and str(assistant_response).strip()):
-                    valid_pairs.append((entry, user_prompt, assistant_response))
-                else:
-                    debug_print(f"LLMClient: Omitiendo entrada incompleta o inválida (id: {entry.get('id')})")
-            
-            # Ahora procesamos solo los pares válidos
-            for entry, user_prompt, assistant_response in valid_pairs:
-                try:
-                    # Resolver fragmentos
-                    resolved_fragments = []
-                    resolved_system_fragments = []
-                    response_id = entry.get('id')
-                    if response_id:
-                        # Obtener y resolver fragmentos
-                        fragments_data = chat_history.get_fragments_for_response(response_id, 'prompt_fragments')
-                        system_fragments_data = chat_history.get_fragments_for_response(response_id, 'system_fragments')
-                        
-                        for fragment_spec in fragments_data:
-                            try:
-                                resolved_fragments.append(chat_history.resolve_fragment(fragment_spec))
-                            except ValueError as e:
-                                debug_print(f"LLMClient: Error resolviendo fragmento: {e}")
-                        
-                        for sys_fragment_spec in system_fragments_data:
-                            try:
-                                resolved_system_fragments.append(chat_history.resolve_fragment(sys_fragment_spec))
-                            except ValueError as e:
-                                debug_print(f"LLMClient: Error resolviendo fragmento de sistema: {e}")
-                
-                    # Crear el prompt del usuario
-                    last_prompt_obj = llm.Prompt(
-                        user_prompt,
-                        self.model,
-                        fragments=resolved_fragments,
-                        system_fragments=resolved_system_fragments
-                    )
-                    
-                    # Crear y añadir la respuesta del usuario
-                    resp_user = llm.Response(
-                        last_prompt_obj, self.model, stream=False,
-                        conversation=self.conversation
-                    )
-                    resp_user._prompt_json = {'prompt': user_prompt}
-                    resp_user._done = True
-                    resp_user._chunks = []
-                    self.conversation.responses.append(resp_user)
-                    
-                    # Crear y añadir la respuesta del asistente
-                    resp_assistant = llm.Response(
-                        last_prompt_obj, self.model, stream=False,
-                        conversation=self.conversation
-                    )
-                    resp_assistant._done = True
-                    resp_assistant._chunks = [str(assistant_response).strip()]  # Asegurar que no hay espacios innecesarios
-                    self.conversation.responses.append(resp_assistant)
-                    
-                except Exception as e:
-                    debug_print(f"LLMClient: Error procesando entrada (id: {entry.get('id')}): {e}")
-                    import traceback
-                    debug_print(traceback.format_exc())
-            
-            debug_print(_("LLMClient: Historial cargado. Total de respuestas en conversación: "
-                         + f"{len(self.conversation.responses)}"))
-                
-        finally:
-            chat_history.close_connection()
+            debug_print(f"LLMClient: load_history - Conversación creada para modelo: {self.model.model_id}")
+
+        # Limpiar respuestas previas
+        self.conversation.responses = []
+
+        # Cargar pares válidos de prompt/respuesta
+        for entry in history_entries:
+            user_prompt = entry.get('prompt')
+            assistant_response = entry.get('response')
+            if not (user_prompt and str(user_prompt).strip() and assistant_response and str(assistant_response).strip()):
+                continue
+
+            # Crear prompt y respuestas
+            prompt_obj = llm.Prompt(user_prompt, self.model)
+            resp_user = llm.Response(prompt_obj, self.model, stream=False, conversation=self.conversation)
+            resp_user._prompt_json = {'prompt': user_prompt}
+            resp_user._done = True
+            resp_user._chunks = []
+            self.conversation.responses.append(resp_user)
+
+            resp_assistant = llm.Response(prompt_obj, self.model, stream=False, conversation=self.conversation)
+            resp_assistant._done = True
+            resp_assistant._chunks = [str(assistant_response).strip()]
+            self.conversation.responses.append(resp_assistant)
+
+        debug_print(f"LLMClient: Historial cargado. Total de respuestas: {len(self.conversation.responses)}")
 
     def set_conversation(self, conversation_id: str):
         """
