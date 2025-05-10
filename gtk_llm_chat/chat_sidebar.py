@@ -228,18 +228,29 @@ class ChatSidebar(Gtk.Box):
             child = next_child
 
     def _populate_providers_and_group_models(self):
-        """Agrupa modelos por needs_key y puebla la lista de proveedores usando needs_key como clave."""
+        """Agrupa modelos por needs_key y puebla la lista de proveedores usando keys.json para determinar el estado de la API key."""
         self.models_by_provider.clear()
         try:
             all_models = llm.get_models()
             all_plugins = llm.get_plugins()  # Obtener plugins después de los modelos
 
-            # Detectar proveedores por needs_key
-            providers_set = set([m.needs_key for m in all_models if m.needs_key])
+            # Leer el archivo keys.json para determinar las API keys configuradas
+            keys_path = os.path.join(llm.user_dir(), "keys.json")
+            configured_keys = {}
+            if os.path.exists(keys_path):
+                try:
+                    with open(keys_path, 'r') as f:
+                        configured_keys = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"Error al decodificar el archivo {keys_path}")
 
-            # Agrupar modelos por needs_key (proveedor externo) o LOCAL_PROVIDER_KEY (local/otros)
+            # Consolidar proveedores únicos
+            providers_set = {plugin['name']: plugin for plugin in all_plugins}
             for model_obj in all_models:
                 provider_key = getattr(model_obj, 'needs_key', None)
+                if provider_key and provider_key not in providers_set:
+                    providers_set[provider_key] = {'name': provider_key, 'hooks': []}
+
                 if provider_key:
                     self.models_by_provider[provider_key].append(model_obj)
                 else:
@@ -251,24 +262,28 @@ class ChatSidebar(Gtk.Box):
             def sort_key(p_key):
                 return self._get_provider_display_name(p_key).lower() if p_key else "local/other"
 
-            sorted_providers = sorted(list(providers_set) + ([LOCAL_PROVIDER_KEY] if self.models_by_provider[LOCAL_PROVIDER_KEY] else []), key=sort_key)
+            sorted_providers = sorted(providers_set.values(), key=lambda p: sort_key(p['name']))
 
             if not sorted_providers:
                 row = Adw.ActionRow(title=_("No models found"), selectable=False)
                 self.provider_list.append(row)
                 return
 
-            for provider_key in sorted_providers:
+            for provider in sorted_providers:
+                provider_key = provider['name']
                 display_name = self._get_provider_display_name(provider_key)
                 row = Adw.ActionRow(title=display_name)
                 row.set_activatable(True)  # Hacerla accionable explícitamente
-                row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+
+                # Añadir íconos según el estado de la API key
+                if provider_key in configured_keys:
+                    row.add_suffix(Gtk.Image.new_from_icon_name("object-locked-symbolic"))  # Candado cerrado
+                else:
+                    row.add_suffix(Gtk.Image.new_from_icon_name("object-unlocked-symbolic"))  # Candado abierto
+
+                row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))  # Flecha
                 row.provider_key = provider_key
                 self.provider_list.append(row)
-
-            # Registrar plugins (si es necesario)
-            for plugin in all_plugins:
-                print(f"Plugin registrado: {plugin['name']} con hooks {plugin['hooks']}")
 
         except Exception as e:
             print(f"Error getting or processing models/plugins: {e}")
