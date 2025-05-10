@@ -2,11 +2,14 @@ pygobject
 markdown-it-py
 python-ulid
 llm
-llm-groq
 llm-gemini
+llm-groq
+llm-grok
 llm-deepseek
 llm-perplexity
 llm-anthropic
 llm-openrouter
 pystray; sys_platform == "win32"
 watchdog; sys_platform == "win32"
+pystray; sys_platform == "darwin"
+watchdog; sys_platform == "darwin"
