@@ -61,9 +61,101 @@ jobs:
           name: windows-dist
           path: dist/
 
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          ./macos/bootstrap.sh
+          python3 -m pip install pycairo
+          python3 -m pip install PyGObject
+      - name: Set up environment
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
+          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+          MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
+        run: |
+          cp .env.ci .env
+          # NOTE: Comment out or remove the following commands to disable code signing and notarization
+#           # Decode certificate
+#           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+#           # Create keychain
+#           security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           security default-keychain -s build.keychain
+#           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+#           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           # Create keychain profile
+#           xcrun notarytool store-credentials "notarytool-profile" --apple-id "$MACOS_NOTARIZATION_APPLE_ID" --team-id "$MACOS_NOTARIZATION_TEAM_ID" --password "$MACOS_NOTARIZATION_PWD"
+#           # Store info in environment file
+#           echo 'CERT="'$MACOS_CERTIFICATE_NAME'"' >> .env
+#           echo 'KEYC=notarytool-profile' >> .env
+      - name: Build package
+        run: |
+          python3 build-ci.py
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist
+          path: dist/
+
+  build-macos-arm:
+    name: Build for macOS ARM
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          # Workaround for externally-managed-environment error
+          python3 -m pip config --global set global.break-system-packages true
+          ./macos/bootstrap.sh
+          python3 -m pip install pycairo
+          python3 -m pip install PyGObject
+      - name: Set up environment
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
+          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+          MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
+        run: |
+          cp .env.ci .env
+          # NOTE: Comment out or remove the following commands to disable code signing and notarization
+#           # Decode certificate
+#           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+#           # Create keychain
+#           security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           security default-keychain -s build.keychain
+#           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+#           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+#           # Create keychain profile
+#           xcrun notarytool store-credentials "notarytool-profile" --apple-id "$MACOS_NOTARIZATION_APPLE_ID" --team-id "$MACOS_NOTARIZATION_TEAM_ID" --password "$MACOS_NOTARIZATION_PWD"
+#           # Store info in environment file
+#           echo 'CERT="'$MACOS_CERTIFICATE_NAME'"' >> .env
+#           echo 'KEYC=notarytool-profile' >> .env
+      - name: Build package
+        run: |
+          python3 build-ci.py
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm-dist
+          path: dist/
+
   github-release:
     name: GitHub Release
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos, build-macos-arm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,6 +170,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
+          path: dist/
+      - name: Download macOS dist
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dist
+          path: dist/
+      - name: Download macOS ARM dist
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm-dist
           path: dist/
       - name: Create GitHub Release
         env:
