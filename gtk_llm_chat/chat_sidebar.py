@@ -205,7 +205,9 @@ class ChatSidebar(Gtk.Box):
 
         # Volver a la primera pantalla al colapsar el sidebar
         def _on_sidebar_toggled(self, toggled):
-            if not toggled:
+            if toggled:
+                self._populate_providers_and_group_models()  # Llamar al poblar modelos y plugins
+            else:
                 self.stack.set_visible_child_name("actions")
 
         # Conectar el evento de colapsar el sidebar
@@ -230,6 +232,8 @@ class ChatSidebar(Gtk.Box):
         self.models_by_provider.clear()
         try:
             all_models = llm.get_models()
+            all_plugins = llm.get_plugins()  # Obtener plugins después de los modelos
+
             # Detectar proveedores por needs_key
             providers_set = set([m.needs_key for m in all_models if m.needs_key])
 
@@ -261,8 +265,13 @@ class ChatSidebar(Gtk.Box):
                 row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
                 row.provider_key = provider_key
                 self.provider_list.append(row)
+
+            # Registrar plugins (si es necesario)
+            for plugin in all_plugins:
+                print(f"Plugin registrado: {plugin['name']} con hooks {plugin['hooks']}")
+
         except Exception as e:
-            print(f"Error getting or processing models: {e}")
+            print(f"Error getting or processing models/plugins: {e}")
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos y actualiza el banner de API key."""
