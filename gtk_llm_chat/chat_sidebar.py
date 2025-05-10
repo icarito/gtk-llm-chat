@@ -217,7 +217,7 @@ class ChatSidebar(Gtk.Box):
         """Obtiene un nombre legible para la clave del proveedor."""
         if provider_key == LOCAL_PROVIDER_KEY: # Comparar con None
             return _("Local/Other")
-        return provider_key.replace('-', ' ').title() if provider_key else _("Unknown Provider")
+        return provider_key.replace('-', ' ').title().removeprefix('Llm ') if provider_key else _("Unknown Provider")
 
     def _clear_list_box(self, list_box):
         """Elimina todas las filas de un Gtk.ListBox."""
@@ -228,59 +228,59 @@ class ChatSidebar(Gtk.Box):
             child = next_child
 
     def _populate_providers_and_group_models(self):
-        """Agrupa modelos por needs_key y puebla la lista de proveedores usando llm.get_plugins() después de llm.get_models()."""
+        """Agrupa modelos por needs_key y puebla la lista de proveedores usando introspección de plugins para descubrir todos los posibles, incluso si falta la key."""
+        from llm.plugins import pm, load_plugins
         self.models_by_provider.clear()
+        self._provider_to_needs_key = {}
         try:
-            # Obtener modelos y plugins
-            all_models = llm.get_models()
+            # 1. Descubrir todos los modelos posibles usando el hook register_models
+            load_plugins()
+            all_possible_models = []
+            def register_model(model, async_model=None, aliases=None):
+                all_possible_models.append(model)
+            pm.hook.register_models(register=register_model)
+
+            # 2. Obtener plugins con hook 'register_models'
             all_plugins = llm.get_plugins()
-
-            # Filtrar plugins que tienen el hook 'register_models'
             plugins_with_models = [plugin for plugin in all_plugins if 'register_models' in plugin['hooks']]
+            providers_set = {plugin['name']: plugin for plugin in plugins_with_models}
 
-            # Consolidar proveedores únicos
-            providers_set = {}
-            for plugin in plugins_with_models:
-                providers_set[plugin['name']] = plugin
-            for model_obj in all_models:
-                provider_key = getattr(model_obj, 'needs_key', None)
-                if provider_key and provider_key not in providers_set:
-                    providers_set[provider_key] = {'name': provider_key, 'hooks': []}
-
-                if provider_key:
-                    self.models_by_provider[provider_key].append(model_obj)
+            # 3. Construir mapping provider_key -> needs_key y agrupar modelos
+            for provider_key in providers_set.keys():
+                found_needs_key = None
+                for model_obj in all_possible_models:
+                    model_needs_key = getattr(model_obj, 'needs_key', None)
+                    # Heurística: si el provider_key es substring o prefijo del needs_key o viceversa
+                    if model_needs_key and (provider_key in model_needs_key or model_needs_key in provider_key):
+                        found_needs_key = model_needs_key
+                        self.models_by_provider[provider_key].append(model_obj)
+                if found_needs_key:
+                    self._provider_to_needs_key[provider_key] = found_needs_key
                 else:
-                    self.models_by_provider[LOCAL_PROVIDER_KEY].append(model_obj)
+                    # Si no hay modelos (por falta de key), usar heurística: quitar 'llm-' si existe
+                    self._provider_to_needs_key[provider_key] = provider_key.replace('llm-', '')
 
-            # Limpiar y poblar la lista de proveedores
+            # 4. Limpiar y poblar la lista de proveedores
             self._clear_list_box(self.provider_list)
-
             def sort_key(p_key):
                 return self._get_provider_display_name(p_key).lower() if p_key else "local/other"
-
-            sorted_providers = sorted(providers_set.values(), key=lambda p: sort_key(p['name']))
-
-            if not sorted_providers:
+            sorted_provider_keys = sorted(providers_set.keys(), key=sort_key)
+            if not sorted_provider_keys:
                 row = Adw.ActionRow(title=_("No models found"), selectable=False)
                 self.provider_list.append(row)
                 return
-
-            for provider in sorted_providers:
-                provider_key = provider['name']
+            for provider_key in sorted_provider_keys:
                 display_name = self._get_provider_display_name(provider_key)
                 row = Adw.ActionRow(title=display_name)
-                row.set_activatable(True)  # Hacerla accionable explícitamente
-
-                # Añadir íconos según el estado de la API key
-                row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))  # Flecha
+                row.set_activatable(True)
+                row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
                 row.provider_key = provider_key
                 self.provider_list.append(row)
-
         except Exception as e:
             print(f"Error getting or processing models/plugins: {e}")
 
     def _populate_model_list(self, provider_key):
-        """Puebla la lista de modelos y actualiza el banner de API key."""
+        """Puebla la lista de modelos y actualiza el banner de API key, usando introspección para mostrar todos los modelos posibles."""
         self._clear_list_box(self.model_list)
         self._selected_provider_key = provider_key
 
@@ -291,46 +291,83 @@ class ChatSidebar(Gtk.Box):
         else:
             self.api_key_banner.set_revealed(False)  # Ocultar banner si es local
 
-        # --- Poblar Modelos ---
-        all_models = llm.get_models()
-        if provider_key == LOCAL_PROVIDER_KEY:
-            models = [m for m in all_models if not getattr(m, 'needs_key', None)]
-        else:
-            models = [m for m in all_models if getattr(m, 'needs_key', None) == provider_key]
-
+        # --- Poblar Modelos usando self.models_by_provider (ya incluye todos los posibles) ---
+        models = self.models_by_provider.get(provider_key, [])
         if not models:
             row = Adw.ActionRow(title=_('No models found for this provider'), selectable=False)
             self.model_list.append(row)
             return
 
-        models.sort(key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
+        models = sorted(models, key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower())
 
         # Obtener el modelo actual de la conversación desde LLMClient
         current_model_id = None
         if self.llm_client:
             current_model_id = self.llm_client.get_model_id()
-        # Si no hay modelo actual en LLMClient, usar el de la configuración
         if not current_model_id:
             current_model_id = self.config.get('model')
 
         active_row = None
-
         for model_obj in models:
             model_id = getattr(model_obj, 'model_id', None)
             model_name = getattr(model_obj, 'name', None) or model_id
             if model_id:
                 row = Adw.ActionRow(title=model_name)
-                row.set_activatable(True)  # Hacerla accionable explícitamente
+                row.set_activatable(True)
                 row.model_id = model_id
                 self.model_list.append(row)
                 if model_id == current_model_id:
                     active_row = row
-
         if active_row:
             self.model_list.select_row(active_row)
 
+    def _get_provider_needs_key(self, provider_key):
+        """Busca el valor de needs_key real para un provider_key dado, usando los modelos cargados."""
+        all_models = llm.get_models()
+        for model in all_models:
+            if getattr(model, 'needs_key', None) == provider_key:
+                return getattr(model, 'needs_key', None)
+        # Si no se encuentra, devolver el provider_key tal cual
+        return provider_key
+
+    def _get_needs_key_map(self):
+        """Devuelve un mapeo {provider_key: needs_key} usando el mapping calculado en _populate_providers_and_group_models."""
+        if hasattr(self, '_provider_to_needs_key'):
+            return self._provider_to_needs_key
+        # Fallback legacy
+        needs_key_map = {}
+        all_models = llm.get_models()
+        for model in all_models:
+            nk = getattr(model, 'needs_key', None)
+            if nk:
+                needs_key_map[nk] = nk
+        needs_key_map[None] = None
+        return needs_key_map
+
+    def _get_keys_json(self):
+        """Lee y cachea keys.json solo una vez por ciclo de UI, con debug."""
+        if not hasattr(self, '_cached_keys_json'):
+            keys_path = os.path.join(llm.user_dir(), "keys.json")
+            debug_print(f"Leyendo keys.json desde: {keys_path}")
+            if os.path.exists(keys_path):
+                try:
+                    with open(keys_path, 'r') as f:
+                        self._cached_keys_json = json.load(f)
+                        debug_print(f"Contenido de keys.json: {self._cached_keys_json}")
+                except Exception as e:
+                    debug_print(f"Error leyendo/parsing keys.json: {e}")
+                    self._cached_keys_json = {}
+            else:
+                debug_print("keys.json no existe, usando dict vacío")
+                self._cached_keys_json = {}
+        return self._cached_keys_json
+
+    def _invalidate_keys_cache(self):
+        if hasattr(self, '_cached_keys_json'):
+            del self._cached_keys_json
+
     def _update_api_key_banner(self, provider_key):
-        """Actualiza el título y el botón del banner de API key, mostrando solo clases CSS (success/error)."""
+        """Actualiza el banner de API key: solo pide la clave si falta en keys.json, y muestra verde si ya existe. Debug detallado."""
         debug_print(f"Actualizando banner de API key para el proveedor: {provider_key}")
         if not self.api_key_banner:
             debug_print("El banner de API key no está inicializado.")
@@ -340,54 +377,26 @@ class ChatSidebar(Gtk.Box):
             debug_print("Ocultando banner porque el proveedor es None o Local.")
             return
 
-        button_label = None
-        title = ""
-        key_exists_in_file = False
+        needs_key_map = self._get_needs_key_map()
+        real_key = needs_key_map.get(provider_key, provider_key)
+        debug_print(f"Provider seleccionado: {provider_key} | needs_key usado: {real_key}")
 
-        try:
-            keys_path = os.path.join(llm.user_dir(), "keys.json")
-            if os.path.exists(keys_path):
-                with open(keys_path, 'r') as f:
-                    try:
-                        stored_keys = json.load(f)
-                        if provider_key in stored_keys:
-                            key_exists_in_file = True
-                            debug_print(f"Clave encontrada para el proveedor {provider_key}: {stored_keys.get(provider_key)}")
-                    except json.JSONDecodeError:
-                        debug_print(f"Error al decodificar el archivo {keys_path}")
-                        title = _( "Error reading keys file")
-                        button_label = _( "Check File")
-                        # Solo error visual
-                        self.api_key_banner.set_title(title)
-                        self.api_key_banner.set_button_label(button_label)
-                        self.api_button.remove_css_class("success")
-                        self.api_button.add_css_class("error")
-                        return
-            else:
-                debug_print(f"El archivo {keys_path} no existe. No hay claves configuradas.")
+        stored_keys = self._get_keys_json()
+        key_exists_in_file = real_key in stored_keys and bool(stored_keys[real_key])
+        debug_print(f"¿Clave existe en keys.json para {real_key}? {key_exists_in_file}")
 
-            if key_exists_in_file:
-                title = _( "API Key is configured")
-                button_label = _( "Change Key")
-                self.api_button.remove_css_class("error")
-                self.api_button.add_css_class("success")
-            else:
-                title = _( "API Key Required")
-                button_label = _( "Set Key")
-                self.api_button.remove_css_class("success")
-                self.api_button.add_css_class("error")
-
-        except Exception as e:
-            debug_print(f"Error al acceder o leer el archivo de claves: {e}")
-            title = _( "Error accessing keys file")
-            button_label = _( "Check Permissions")
+        if key_exists_in_file:
+            self.api_key_banner.set_title(_("API Key is configured"))
+            self.api_key_banner.set_button_label(_("Change Key"))
+            self.api_button.remove_css_class("error")
+            self.api_button.add_css_class("success")
+            self.api_key_banner.set_revealed(True)
+        else:
+            self.api_key_banner.set_title(_("API Key Required"))
+            self.api_key_banner.set_button_label(_("Set Key"))
             self.api_button.remove_css_class("success")
             self.api_button.add_css_class("error")
-
-        self.api_key_banner.set_title(title)
-        self.api_key_banner.set_button_label(button_label)
-        self.api_key_banner.set_revealed(True)
-        debug_print(f"Banner actualizado: {title} - {button_label}")
+            self.api_key_banner.set_revealed(True)
 
     def _on_model_button_clicked(self, row):
         """Handler para cuando se activa la fila del modelo."""
@@ -464,56 +473,50 @@ class ChatSidebar(Gtk.Box):
         dialog.present()
 
     def _on_api_key_dialog_response(self, dialog, response_id, provider_key, key_entry):
-        """Manejador para la respuesta del diálogo de API key.
-           Guarda la clave directamente en keys.json."""
+        """Manejador para la respuesta del diálogo de API key. Guarda la clave usando el identificador needs_key real y refresca el cache y la UI de modelos."""
         if response_id == "set":
             api_key = key_entry.get_text()
             if api_key:
                 try:
-                    # Lógica adaptada de llm/cli.py keys_set
                     keys_path = os.path.join(llm.user_dir(), "keys.json")
-                    keys_path_obj = pathlib.Path(keys_path) # Usar pathlib para manejo más fácil
+                    keys_path_obj = pathlib.Path(keys_path)
                     keys_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
                     default_keys = {"// Note": "This file stores secret API credentials. Do not share!"}
-                    current_keys = default_keys
+                    current_keys = default_keys.copy()
                     newly_created = False
 
                     if keys_path_obj.exists():
                         try:
                             current_keys = json.loads(keys_path_obj.read_text())
-                            # Asegurarse de que sea un diccionario
                             if not isinstance(current_keys, dict):
-                                print(f"Warning: {keys_path} does not contain a valid JSON object. Overwriting.")
-                                current_keys = default_keys
+                                current_keys = default_keys.copy()
                         except json.JSONDecodeError:
-                            print(f"Warning: Could not decode {keys_path}. Overwriting.")
-                            current_keys = default_keys
+                            current_keys = default_keys.copy()
                     else:
                         newly_created = True
 
-                    # Actualizar la clave
-                    current_keys[provider_key] = api_key
+                    needs_key_map = self._get_needs_key_map()
+                    real_key = needs_key_map.get(provider_key, provider_key)
+                    debug_print(f"Guardando API key para {real_key} (provider original: {provider_key})")
+                    current_keys[real_key] = api_key
 
-                    # Escribir el archivo
                     keys_path_obj.write_text(json.dumps(current_keys, indent=2) + "\n")
 
-                    # Establecer permisos si es nuevo (imitando cli.py)
                     if newly_created:
                         try:
-                            # chmod solo funciona bien en sistemas POSIX (Linux/macOS)
-                            if os.name == 'posix':
-                                os.chmod(keys_path_obj, 0o600)
+                            keys_path_obj.chmod(0o600)
                         except OSError as chmod_err:
-                             print(f"Warning: Could not set permissions on {keys_path_obj}: {chmod_err}")
+                            print(f"Error setting permissions for {keys_path}: {chmod_err}")
 
-
-                    print(f"API Key set for {provider_key} in {keys_path}")
-                    # Actualizar el banner para reflejar el cambio
+                    print(f"API Key set for {real_key} in {keys_path}")
+                    self._invalidate_keys_cache()
                     self._update_api_key_banner(provider_key)
+                    # --- Recargar lista de modelos y proveedores para reflejar los nuevos modelos disponibles ---
+                    self._populate_providers_and_group_models()
+                    self._populate_model_list(provider_key)
 
                 except Exception as e:
-                    # Capturar errores de E/S, permisos, etc.
                     print(f"Error saving API key for {provider_key} to {keys_path}: {e!r}")
             else:
                 print(f"API Key input empty for {provider_key}. No changes made.")
