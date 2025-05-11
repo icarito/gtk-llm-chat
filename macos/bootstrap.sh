@@ -12,7 +12,7 @@ fi
 
 echo "Instalando dependencias de sistema..."
 brew update
-brew install adwaita-icon-theme cairo pango gobject-introspection glib pkg-config
+brew install adwaita-icon-theme cairo pango gobject-introspection pkg-config
 
 echo "Instalando dependencias Python..."
 python3 -m pip install pycairo PyGObject Pillow
