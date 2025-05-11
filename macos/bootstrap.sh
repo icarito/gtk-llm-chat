@@ -15,17 +15,6 @@ brew update
 brew install gtk+4 adwaita-icon-theme cairo pango gobject-introspection glib pkg-config
 
 echo "Instalando dependencias Python..."
-python3 -m pip install --upgrade pip
 python3 -m pip install pycairo PyGObject Pillow
 
 echo "Dependencias instaladas."
-
-# Ad-hoc signing (opcional, para apps tipo bundle)
-# if [ -d "dist" ]; then
-#    for app in dist/*.app; do
-#        if [ -d "$app" ]; then
-#            echo "Firmando $app con ad-hoc..."
-#            codesign --sign - --force --deep "$app"
-#        fi
-#    done
-#fi

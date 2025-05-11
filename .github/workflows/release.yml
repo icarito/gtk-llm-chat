@@ -19,6 +19,8 @@ jobs:
           sudo apt upgrade
           sudo apt install desktop-file-utils
           sudo ./linux/bootstrap.sh
+      - name: Fetch all history for all tags and branches
+        run: git fetch --prune --unshallow
       - name: Set up environment
         run: |
           cp .env.ci .env
@@ -72,6 +74,8 @@ jobs:
           ./macos/bootstrap.sh
           python3 -m pip install pycairo
           python3 -m pip install PyGObject
+      - name: Fetch all history for all tags and branches
+        run: git fetch --prune --unshallow
       - name: Set up environment
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -119,6 +123,8 @@ jobs:
           ./macos/bootstrap.sh
           python3 -m pip install pycairo
           python3 -m pip install PyGObject
+      - name: Fetch all history for all tags and branches
+        run: git fetch --prune --unshallow
       - name: Set up environment
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
