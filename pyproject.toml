@@ -14,6 +14,11 @@ dependencies = [
     "llm",
     "llm-gemini",
     "llm-groq",
+    "llm-grok",
+    "llm-deepseek",
+    "llm-perplexity",
+    "llm-anthropic",
+    "llm-openrouter",
     "markdown-it-py",
     "python-ulid"
 ]
