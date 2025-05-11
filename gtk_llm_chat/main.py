@@ -104,8 +104,7 @@ def main(argv=None):
     # Continuar con la aplicación principal
     from chat_application import LLMChatApplication
     config = parse_args(argv)
-    chat_app = LLMChatApplication()
-    chat_app.config = config
+    chat_app = LLMChatApplication(config=config)
     return chat_app.run()
 
 if __name__ == "__main__":

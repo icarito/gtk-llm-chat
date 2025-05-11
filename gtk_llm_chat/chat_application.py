@@ -29,14 +29,14 @@ def debug_print(*args, **kwargs):
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
 
-    def __init__(self):
+    def __init__(self, config):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
             flags=Gio.ApplicationFlags.FLAGS_NONE  # Cambiado de NON_UNIQUE a FLAGS_NONE
         )
 
-        self.config = {}
         self.tray_process = None  # Subproceso del tray applet
+        self._last_window_config = config  # Configuración inicial para la ventana
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -149,72 +149,20 @@ class LLMChatApplication(Adw.Application):
         # Supervisar el tray applet
         GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
-        # Crear y mostrar la ventana principal
+        # Crear una nueva ventana con la configuración actual
         from chat_window import LLMChatWindow
-        self.chat_history = ChatHistory()
-        window = self.get_active_window()
-
-        if not window:
-            window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
-            window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
-            window.present()
+        chat_history = ChatHistory()
+        window = LLMChatWindow(application=self, config=self._last_window_config, chat_history=chat_history)
+        window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
+        window.present()
 
         # Configurar el manejador de eventos de teclado a nivel de aplicación
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self._on_key_pressed)
         window.add_controller(key_controller)
 
-        # Focus should be handled within LLMChatWindow if needed after init
+        # Focus en el input de texto
         window.input_text.grab_focus()
-
-        if self.config and (self.config.get('cid')
-                            or self.config.get('continue_last')):
-            # self.chat_history = ChatHistory() # Already initialized in __init__
-            if not self.config.get('cid'):
-                conversation = self.chat_history.get_last_conversation()
-                if conversation:
-                    self.config['cid'] = conversation['id']
-                    self.config['name'] = conversation['name']
-            else:
-                conversation = self.chat_history.get_conversation(
-                    self.config['cid'])
-                if conversation:
-                    self.config['name'] = conversation['name']
-            name = self.config.get('name')
-            if name:
-                window.set_conversation_name(
-                    name.strip().removeprefix("user: "))
-            
-
-            history = self.chat_history.get_conversation_history(self.config['cid'])
-
-            # Obtener el modelo desde la tabla conversations, no desde el historial
-            conversation_obj = self.chat_history.get_conversation(self.config['cid'])
-            model_id = None
-            if conversation_obj:
-                model_id = conversation_obj.get('model')
-
-            # Set the model in LLMClient *before* loading history
-            if model_id:
-                if not window.llm.set_model(model_id):
-                    debug_print(f"Warning: Model {model_id} not found.")
-            else:
-                debug_print("Warning: No model found in conversation record.")
-
-            # Load the history into the (now correctly configured) LLMClient
-            if history:
-                window.llm.load_history(history)
-
-                # Display messages in the UI
-                for entry in history:
-                    window.display_message(
-                        entry['prompt'],
-                        sender='user',
-                    )
-                    window.display_message(
-                        entry['response'],
-                        sender='assistant',
-                    )
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Maneja eventos de teclado a nivel de aplicación."""
