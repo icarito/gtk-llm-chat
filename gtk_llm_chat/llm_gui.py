@@ -64,6 +64,8 @@ def register_commands(cli):
         start_time = time.time() if benchmark_startup else None
 
         from gtk_llm_chat.chat_application import LLMChatApplication
+        from gtk_llm_chat.db_operations import ChatHistory
+        
         # Crear diccionario de configuración
         config = {
             'cid': cid,
@@ -77,8 +79,33 @@ def register_commands(cli):
             'benchmark_startup': benchmark_startup, # Add benchmark flag
             'start_time': start_time, # Pass start time if benchmarking
         }
+        
+        # Procesar la bandera continue_last si está presente
+        if continue_last:
+            try:
+                chat_history = ChatHistory()
+                last_conversation = chat_history.get_last_conversation()
+                if last_conversation and last_conversation.get('id'):
+                    config['cid'] = last_conversation['id']
+                    print(f"Continuando última conversación con ID: {config['cid']}")
+                else:
+                    print("No se encontró una conversación anterior para continuar")
+            except Exception as e:
+                print(f"Error al obtener la última conversación: {e}")
 
         # Crear y ejecutar la aplicación
-        app = LLMChatApplication()
-        app.config = config
-        return app.run()
+        app = LLMChatApplication(config)
+        
+        # Transformar la configuración en argumentos de línea de comandos
+        cmd_args = []
+        if config.get('cid'):
+            cmd_args.append(f"--cid={config['cid']}")
+        if config.get('model'):
+            cmd_args.append(f"--model={config['model']}")
+        if config.get('template'):
+            cmd_args.append(f"--template={config['template']}")
+        
+        if cmd_args:
+            return app.run(cmd_args)
+        else:
+            return app.run()

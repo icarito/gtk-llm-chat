@@ -16,6 +16,7 @@ start_time = time.time() if benchmark_startup else None
 
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from db_operations import ChatHistory
 
 TRAY_PROCESS = None
 
@@ -98,14 +99,47 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv
 
-    # Eliminar el lanzamiento del applet desde aquí
-    # launch_tray_applet()
-
-    # Continuar con la aplicación principal
-    from chat_application import LLMChatApplication
+    # Crear configuración desde argumentos
     config = parse_args(argv)
-    chat_app = LLMChatApplication(config=config)
-    return chat_app.run()
+    
+    # Procesar la bandera continue_last si está presente
+    if config.get('continue_last'):
+        try:
+            chat_history = ChatHistory()
+            last_conversation = chat_history.get_last_conversation()
+            if last_conversation and last_conversation.get('id'):
+                config['cid'] = last_conversation['id']
+                print(f"Continuando última conversación con ID: {config['cid']}")
+            else:
+                print("No se encontró una conversación anterior para continuar")
+        except Exception as e:
+            print(f"Error al obtener la última conversación: {e}")
+    
+    # Imprimir configuración para depuración
+    print(f"Iniciando aplicación con configuración: {config}")
+
+    # Transformar la configuración en argumentos de línea de comandos
+    cmd_args = []
+    if config.get('cid'):
+        cmd_args.append(f"--cid={config['cid']}")
+    if config.get('model'):
+        cmd_args.append(f"--model={config['model']}")
+    if config.get('template'):
+        cmd_args.append(f"--template={config['template']}")
+    
+    # Determinamos si es la primera instancia:
+    app_id = "org.gtk_llm_chat"
+    if config.get('applet'):
+        # Crear la aplicación y ejecutarla con los argumentos de línea de comandos
+        from chat_application import LLMChatApplication
+        chat_app = LLMChatApplication(config)
+        chat_app._start_tray_applet()
+        return chat_app.run()
+    else:
+        # Crear la aplicación y ejecutarla con los argumentos de línea de comandos
+        from chat_application import LLMChatApplication
+        chat_app = LLMChatApplication(config)
+        return chat_app.run()
 
 if __name__ == "__main__":
     sys.exit(main())
