@@ -32,7 +32,7 @@ class LLMChatApplication(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
-            flags=Gio.ApplicationFlags.NON_UNIQUE
+            flags=Gio.ApplicationFlags.FLAGS_NONE  # Cambiado de NON_UNIQUE a FLAGS_NONE
         )
 
         self.config = {}
@@ -55,8 +55,10 @@ class LLMChatApplication(Adw.Application):
         self.quit()
 
     def do_startup(self):
-        # Llamar correctamente al método de la clase base
         Adw.Application.do_startup(self)
+
+        # Manejar instancias múltiples
+        self.hold()  # Asegura que la aplicación no termine prematuramente
 
         # Iniciar el tray applet
         self._start_tray_applet()
@@ -142,7 +144,6 @@ class LLMChatApplication(Adw.Application):
         icon_theme.add_search_path(base_path)
 
     def do_activate(self):
-        # Llamar correctamente al método de la clase base
         Adw.Application.do_activate(self)
 
         # Supervisar el tray applet
@@ -151,9 +152,12 @@ class LLMChatApplication(Adw.Application):
         # Crear y mostrar la ventana principal
         from chat_window import LLMChatWindow
         self.chat_history = ChatHistory()
-        window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
-        window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
-        window.present()
+        window = self.get_active_window()
+
+        if not window:
+            window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
+            window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
+            window.present()
 
         # Configurar el manejador de eventos de teclado a nivel de aplicación
         key_controller = Gtk.EventControllerKey()
