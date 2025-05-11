@@ -3,6 +3,7 @@ import os
 import re
 import signal
 import sys
+import subprocess
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -18,6 +19,7 @@ _ = gettext.gettext
 
 DEBUG = os.environ.get('DEBUG') or False
 
+TRAY_PROCESS = None
 
 def debug_print(*args, **kwargs):
     if DEBUG:
@@ -34,9 +36,11 @@ class LLMChatApplication(Adw.Application):
         )
 
         self.config = {}
+        self.tray_process = None  # Subproceso del tray applet
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
+        self.connect('shutdown', self.on_shutdown)  # Conectar señal shutdown
 
         # Windows-specific adjustments
         if sys.platform == "win32":
@@ -51,8 +55,11 @@ class LLMChatApplication(Adw.Application):
         self.quit()
 
     def do_startup(self):
-        # Call the parent method using do_startup
+        # Llamar correctamente al método de la clase base
         Adw.Application.do_startup(self)
+
+        # Iniciar el tray applet
+        self._start_tray_applet()
 
         APP_NAME = "gtk-llm-chat"
         if getattr(sys, 'frozen', False):
@@ -88,6 +95,30 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+    def _start_tray_applet(self):
+        """Inicia el tray applet en un subproceso."""
+        if self.tray_process is None:
+            self.tray_process = subprocess.Popen([sys.executable, "gtk_llm_chat/tk_llm_applet.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def _handle_tray_exit(self):
+        """Maneja el cierre inesperado del tray applet."""
+        if self.tray_process and self.tray_process.poll() is not None:
+            print("El tray applet se cerró inesperadamente. Cerrando la aplicación principal.")
+            self.quit()
+
+    def on_shutdown(self, app):
+        """Handles application shutdown and terminates the tray process."""
+        if self.tray_process:
+            print("Terminando proceso del applet...")
+            self.tray_process.terminate()
+            try:
+                self.tray_process.wait(timeout=5)
+                print("Proceso terminado correctamente.")
+            except subprocess.TimeoutExpired:
+                print("Proceso no terminó a tiempo, matando a la fuerza.")
+                self.tray_process.kill()
+                self.tray_process.wait()
+
     def get_application_version(self):
         """
         Gets the application version from _version.py.
@@ -111,6 +142,13 @@ class LLMChatApplication(Adw.Application):
         icon_theme.add_search_path(base_path)
 
     def do_activate(self):
+        # Llamar correctamente al método de la clase base
+        Adw.Application.do_activate(self)
+
+        # Supervisar el tray applet
+        GLib.timeout_add_seconds(1, self._handle_tray_exit)
+
+        # Crear y mostrar la ventana principal
         from chat_window import LLMChatWindow
         self.chat_history = ChatHistory()
         window = LLMChatWindow(application=self, config=self.config, chat_history=self.chat_history)
@@ -245,3 +283,4 @@ class LLMChatApplication(Adw.Application):
             copyright="© 2024 Sebastian Silva"
         )
         about_dialog.present()
+

@@ -10,9 +10,9 @@ def register_commands(cli):
     def run_applet():
         """Runs the applet"""
         try:
-            from gtk_llm_chat.gtk_llm_applet import main
+            from gtk_llm_applet import main
         except Exception as e:
-            from gtk_llm_chat.tk_llm_applet import main
+            from tk_llm_applet import main
         finally:
             main()
 

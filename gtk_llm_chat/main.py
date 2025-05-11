@@ -5,6 +5,10 @@ import argparse
 import os
 import sys
 import time
+import threading
+import subprocess
+
+from gi.repository import Gio
 
 # Record start time if benchmarking
 benchmark_startup = '--benchmark-startup' in sys.argv
@@ -13,6 +17,7 @@ start_time = time.time() if benchmark_startup else None
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+TRAY_PROCESS = None
 
 def parse_args(argv):
     """Parsea los argumentos de la línea de comandos"""
@@ -61,36 +66,60 @@ def parse_args(argv):
     return config
 
 
+def create_tray_icon():
+    """Runs the tray icon in a subprocess to avoid mixing GTK3 and GTK4."""
+    import subprocess
+    subprocess.Popen([sys.executable, '-m', 'gtk_llm_chat.tk_llm_applet'])
+
+
+def is_instance_running(app_id):
+    """Check if an instance of the application is already running."""
+    try:
+        app = Gio.Application.new(app_id, Gio.ApplicationFlags.FLAGS_NONE)
+        app.connect("activate", lambda _: print("Señal enviada a la instancia existente."))
+        if not app.register():
+            print("Otra instancia ya está en ejecución.")
+            app.activate()  # Enviar señal a la instancia existente
+            return True
+    except Exception as e:
+        print(f"Error al registrar la aplicación: {e}")
+        return True
+    return False
+
+def launch_tray_applet():
+    """Launch the tray applet in a separate subprocess."""
+    global TRAY_PROCESS
+    TRAY_PROCESS = subprocess.Popen([sys.executable, "gtk_llm_chat/gtk_llm_applet.py"])
+
 def main(argv=None):
     """
     Aquí inicia todo
     """
     if argv is None:
         argv = sys.argv
-    
-    # Parsear argumentos ANTES de que GTK los vea
-    argv = [arg for arg in argv if not arg.startswith(
-        ('--gtk', '--gdk', '--display'))]
-    config = parse_args(argv)
 
-    # Pasar solo los argumentos de GTK a la aplicación
-    gtk_args = [arg for arg in sys.argv if arg.startswith(
-        ('--gtk', '--gdk', '--display'))]
-    gtk_args.insert(0, sys.argv[0])  # Agregar el nombre del programa
+    # Eliminar el lanzamiento del applet desde aquí
+    # launch_tray_applet()
 
-    if config['applet']:
-        from gtk_llm_applet import main
-        main()
-        sys.exit(0)
-
-    # Crear y ejecutar la aplicación
+    # Continuar con la aplicación principal
     from chat_application import LLMChatApplication
-    app = LLMChatApplication()
-    app.config = config
-    return app.run(gtk_args)
-
+    config = parse_args(argv)
+    chat_app = LLMChatApplication()
+    chat_app.config = config
+    return chat_app.run()
 
 if __name__ == "__main__":
     sys.exit(main())
 
+    # Eliminar manejo redundante del proceso del applet
+    # if TRAY_PROCESS:
+    #     print("Terminando proceso del applet...")
+    #     TRAY_PROCESS.terminate()
+    #     try:
+    #         TRAY_PROCESS.wait(timeout=5)
+    #         print("Proceso terminado correctamente.")
+    #     except subprocess.TimeoutExpired:
+    #         print("Proceso no terminó a tiempo, matando a la fuerza.")
+    #         TRAY_PROCESS.kill()
+    #         TRAY_PROCESS.wait()
 # flake8: noqa E402
