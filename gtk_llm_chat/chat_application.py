@@ -111,26 +111,26 @@ class LLMChatApplication(Adw.Application):
             debug_print("El applet ya está en ejecución, no se inicia otro")
             return False
             
-        try:
-            debug_print("Iniciando tray applet...")
+        debug_print("Iniciando tray applet...")
 
-            args = []
-            if getattr(sys, 'frozen', False):
-                    base = os.path.abspath(os.path.dirname(sys.argv[0]))
-                    executable = "gtk-llm-applet"
-                    if sys.platform == "win32":
-                        executable += ".exe"
-                    elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-                        base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-                        if os.environ.get('APPIMAGE'):
-                            executable = 'AppRun'
-            else:
-                executable = sys.executable
-                args += [os.path.join(base, "gtk_llm_chat", "gtk_llm_applet.py")]
-            
+        args = []
+        base = os.path.abspath(os.path.dirname(sys.argv[0]))
+        if getattr(sys, 'frozen', False):
+                executable = "gtk-llm-applet"
+                if sys.platform == "win32":
+                    executable += ".exe"
+                elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
+                    base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
+                    if os.environ.get('APPIMAGE'):
+                        executable = 'AppRun'
+        else:
+            executable = sys.executable
+            args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]
+
+        try:
             args += ['--applet']
             self.tray_process = subprocess.Popen(
-                executable + args, 
+                [executable] + args,
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE
             )
