@@ -87,11 +87,6 @@ def is_instance_running(app_id):
         return True
     return False
 
-def launch_tray_applet():
-    """Launch the tray applet in a separate subprocess."""
-    global TRAY_PROCESS
-    TRAY_PROCESS = subprocess.Popen([sys.executable, "gtk_llm_chat/gtk_llm_applet.py"])
-
 def main(argv=None):
     """
     Aquí inicia todo
@@ -118,7 +113,11 @@ def main(argv=None):
     # Imprimir configuración para depuración
     print(f"Iniciando aplicación con configuración: {config}")
 
-    # Transformar la configuración en argumentos de línea de comandos
+    # Crear la aplicación y ejecutarla
+    from chat_application import LLMChatApplication
+    chat_app = LLMChatApplication(config)
+    
+    # Si hay argumentos de línea de comandos para el CID, model, etc., pasarlos explícitamente
     cmd_args = []
     if config.get('cid'):
         cmd_args.append(f"--cid={config['cid']}")
@@ -127,18 +126,9 @@ def main(argv=None):
     if config.get('template'):
         cmd_args.append(f"--template={config['template']}")
     
-    # Determinamos si es la primera instancia:
-    app_id = "org.gtk_llm_chat"
-    if config.get('applet'):
-        # Crear la aplicación y ejecutarla con los argumentos de línea de comandos
-        from chat_application import LLMChatApplication
-        chat_app = LLMChatApplication(config)
-        chat_app._start_tray_applet()
-        return chat_app.run()
+    if cmd_args:
+        return chat_app.run(cmd_args)
     else:
-        # Crear la aplicación y ejecutarla con los argumentos de línea de comandos
-        from chat_application import LLMChatApplication
-        chat_app = LLMChatApplication(config)
         return chat_app.run()
 
 if __name__ == "__main__":

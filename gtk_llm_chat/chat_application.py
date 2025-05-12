@@ -40,7 +40,14 @@ class LLMChatApplication(Adw.Application):
         # Inicializar un registro de ventanas por CID
         self._window_by_cid = {}  # Mapa de CID -> ventana
 
-        debug_print(f"Inicializando aplicación con configuración: {config}")
+        # Configuración de inicio
+        if config:
+            # Verificar si debemos iniciar el applet
+            self._applet_mode = dict(config).pop('applet', False)
+            debug_print(f"Modo applet: {self._applet_mode}")
+        else:
+            self._applet_mode = False
+            debug_print("Inicializando aplicación sin configuración")
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -51,9 +58,6 @@ class LLMChatApplication(Adw.Application):
             settings = Gtk.Settings.get_default()
             if settings:
                 settings.set_property('gtk-font-name', 'Segoe UI')
-
-        self._last_window_config = config or {}  # Asegurar que nunca sea None
-        self._last_window_config['applet'] = False
 
 
     def _handle_sigint(self, signum, frame):
@@ -102,26 +106,56 @@ class LLMChatApplication(Adw.Application):
         self.add_action(about_action)
 
     def _start_tray_applet(self):
-        """Inicia el tray applet en un subproceso."""
-        if self.tray_process is None:
-            self.tray_process = subprocess.Popen([sys.executable, "gtk_llm_chat/tk_llm_applet.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        """
+        Inicia el tray applet en un subproceso si no está ya en ejecución.
+        """
+        if self.tray_process is not None and self.tray_process.poll() is None:
+            debug_print("El applet ya está en ejecución, no se inicia otro")
+            return False
+            
+        try:
+            debug_print("Iniciando tray applet...")
+            self.tray_process = subprocess.Popen(
+                [sys.executable, "gtk_llm_chat/tk_llm_applet.py"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE
+            )
+            debug_print(f"Tray applet iniciado con PID: {self.tray_process.pid}")
+            return True
+        except Exception as e:
+            debug_print(f"Error al iniciar el tray applet: {e}")
+            self.tray_process = None
+            return False
 
     def _handle_tray_exit(self):
-        """Maneja el cierre inesperado del tray applet."""
-        if self.tray_process and self.tray_process.poll() is not None:
-            print("El tray applet se cerró inesperadamente. Cerrando la aplicación principal.")
-            self.quit()
+        """
+        Monitorea el estado del tray applet y lo reinicia si ha terminado
+        inesperadamente.
+        """
+        if self.tray_process is None:
+            return True
+            
+        # Verificar si el proceso del applet ha terminado
+        if self.tray_process.poll() is not None:
+            debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
+            
+            # Opcional: Reiniciar el applet si terminó inesperadamente
+            if self._applet_mode:
+                debug_print("Reiniciando tray applet...")
+                self._start_tray_applet()
+                
+        return True  # Mantener el timer activo
 
     def on_shutdown(self, app):
         """Handles application shutdown and terminates the tray process."""
         if self.tray_process:
-            print("Terminando proceso del applet...")
+            debug_print("Terminando proceso del applet...")
             self.tray_process.terminate()
             try:
                 self.tray_process.wait(timeout=5)
-                print("Proceso terminado correctamente.")
+                debug_print("Proceso terminado correctamente.")
             except subprocess.TimeoutExpired:
-                print("Proceso no terminó a tiempo, matando a la fuerza.")
+                debug_print("Proceso no terminó a tiempo, matando a la fuerza.")
                 self.tray_process.kill()
                 self.tray_process.wait()
 
@@ -181,6 +215,13 @@ class LLMChatApplication(Adw.Application):
 
         # Supervisar el tray applet
         GLib.timeout_add_seconds(1, self._handle_tray_exit)
+
+        # Si estamos en modo applet, solo iniciar el applet sin abrir ventana
+        if self._applet_mode:
+            debug_print("Ejecutando en modo applet, iniciando el tray applet...")
+            self._start_tray_applet()
+            self.hold()  # Mantener la aplicación en ejecución
+            return
 
         # Abrir ventana de conversación con la configuración actual
         self.open_conversation_window()
@@ -331,7 +372,7 @@ class LLMChatApplication(Adw.Application):
             LLMChatWindow: La ventana creada o enfocada
         """
         # Asegurar que tenemos una configuración
-        config = config or getattr(self, '_last_window_config', {}) or {}
+        config = config or {}
         
         # Evitar que se abra una ventana de applet
         conversation_config = dict(config)
