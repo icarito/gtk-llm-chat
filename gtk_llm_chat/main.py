@@ -10,10 +10,6 @@ import time
 benchmark_startup = '--benchmark-startup' in sys.argv
 start_time = time.time() if benchmark_startup else None
 
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-
 def parse_args(argv):
     """Parsea los argumentos de la línea de comandos"""
     parser = argparse.ArgumentParser(description='GTK Frontend para LLM')
@@ -67,30 +63,26 @@ def main(argv=None):
     """
     if argv is None:
         argv = sys.argv
-    
-    # Parsear argumentos ANTES de que GTK los vea
-    argv = [arg for arg in argv if not arg.startswith(
-        ('--gtk', '--gdk', '--display'))]
+
+    # Crear configuración desde argumentos
     config = parse_args(argv)
-
-    # Pasar solo los argumentos de GTK a la aplicación
-    gtk_args = [arg for arg in sys.argv if arg.startswith(
-        ('--gtk', '--gdk', '--display'))]
-    gtk_args.insert(0, sys.argv[0])  # Agregar el nombre del programa
-
-    if config['applet']:
-        from gtk_llm_applet import main
-        main()
-        sys.exit(0)
-
-    # Crear y ejecutar la aplicación
+    
+    # Crear la aplicación y ejecutarla
     from chat_application import LLMChatApplication
-    app = LLMChatApplication()
-    app.config = config
-    return app.run(gtk_args)
+    chat_app = LLMChatApplication(config)
 
+    # Si hay argumentos de línea de comandos para el CID, model, etc., pasarlos explícitamente
+    cmd_args = []
+    if config.get('cid'):
+        cmd_args.append(f"--cid={config['cid']}")
+    if config.get('model'):
+        cmd_args.append(f"--model={config['model']}")
+    if config.get('template'):
+        cmd_args.append(f"--template={config['template']}")
+    if config.get('applet'):
+        cmd_args.append(f"--applet")
+    
+    return chat_app.run(cmd_args)
 
 if __name__ == "__main__":
     sys.exit(main())
-
-# flake8: noqa E402

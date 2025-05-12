@@ -38,8 +38,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.connect('close-request', self._on_close_request)
         self.connect('show', self._on_window_show)  # Connect to the 'show' signal
 
+        # Inicializar flags para carga de historial
+        self._history_loaded = False
+        self._history_displayed = False
+
         # Asegurar que config no sea None
         self.config = config or {}
+        
+        # Extraer cid de la configuración
+        self.cid = self.config.get('cid')
+        debug_print(f"Inicializando ventana con CID: {self.cid}")
+        
         # Store benchmark flag and start time from config
         self.benchmark_startup = self.config.get('benchmark_startup', False)
         self.start_time = self.config.get('start_time')
@@ -57,7 +66,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.llm = None
 
         # Configurar la ventana principal
-        title = self.config.get('template') or DEFAULT_CONVERSATION_NAME()
+        # Si hay un CID, intentar obtener el título de la conversación desde el inicio
+        title = DEFAULT_CONVERSATION_NAME()
+        if self.cid:
+            try:
+                conversation = self.chat_history.get_conversation(self.cid)
+                if conversation:
+                    if conversation.get('title'):
+                        title = conversation['title']
+                    elif conversation.get('name'):  # En algunas BD puede estar como 'name'
+                        title = conversation['name']
+                    debug_print(f"Título inicial cargado de conversación: {title}")
+            except Exception as e:
+                debug_print(f"Error al cargar título inicial: {e}")
+        else:
+            # Si no hay CID, usar template si existe
+            if self.config.get('template'):
+                title = self.config.get('template')
+                
         self.title_entry = Gtk.Entry()
         self.title_entry.set_hexpand(True)
         self.title_entry.set_text(title)
@@ -172,12 +198,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Panel Lateral (Sidebar) ---
         # Initialize LLMClient *after* basic UI setup
         try:
+            debug_print(f"Inicializando LLMClient con config: {self.config}")
             self.llm = LLMClient(self.config, self.chat_history)
             # Connect signals *here*
             self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
             self.llm.connect('response', self._on_llm_response)
             self.llm.connect('error', self._on_llm_error)
             self.llm.connect('finished', self._on_llm_finished)
+            
+            if self.cid:
+                debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
+            else:
+                debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
+                
         except Exception as e:
             debug_print(_(f"Fatal error starting LLMClient: {e}"))
             # Display error in UI instead of exiting?
@@ -191,8 +224,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
             default_model_id = get_default_model()
             if default_model_id:
                 self.config['model'] = default_model_id
+                debug_print(f"Usando modelo predeterminado: {default_model_id}")
         else:
-            self.config['model'] = self.llm.get_model_id()
+            model_id = self.llm.get_model_id()
+            self.config['model'] = model_id
+            debug_print(f"Usando modelo de la conversación: {model_id}")
+            
+            # Cargar el título de la conversación existente si hay un cid
+            try:
+                conversation = self.chat_history.get_conversation(self.cid)
+                if conversation and conversation.get('title'):
+                    title = conversation['title']
+                    self.set_conversation_name(title)
+                    debug_print(f"Cargando título de conversación existente: {title}")
+            except Exception as e:
+                debug_print(f"Error al cargar el título de la conversación: {e}")
 
         self.title_widget.set_subtitle(self.config['model'])
 
@@ -305,25 +351,27 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""
+        debug_print(f"Estableciendo título de la conversación: '{title}'")
         self.title_widget.set_title(title)
         self.title_entry.set_text(title)
-        self.set_title(title)
+        self.set_title(title)  # Actualizar también el título de la ventana
 
     def _on_save_title(self, widget):
         app = self.get_application()
         conversation_id = self.config.get('cid')
         if conversation_id:
-            app.chat_history.set_conversation_title(
-            conversation_id, self.title_entry.get_text())
+            self.chat_history.set_conversation_title(
+                conversation_id, self.title_entry.get_text())
+            debug_print(f"Guardando título para conversación {conversation_id}: {self.title_entry.get_text()}")
         else:
             debug_print("Conversation ID is not available yet. Title update deferred.")
             # Schedule the title update for the next prompt
             def update_title_on_next_prompt(llm_client, response):
                 conversation_id = self.config.get('cid')
-                print("Conversation ID:", conversation_id)
+                debug_print(f"Conversation ID post-respuesta: {conversation_id}")
                 if conversation_id:
-                    app.chat_history.set_conversation_title(
-                    conversation_id, self.title_entry.get_text())
+                    self.chat_history.set_conversation_title(
+                        conversation_id, self.title_entry.get_text())
                     self.llm.disconnect_by_func(update_title_on_next_prompt)
             self.llm.connect('response', update_title_on_next_prompt)
         self.header.set_title_widget(self.title_widget)
@@ -331,7 +379,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.title_widget.set_title(new_title)
         self.set_title(new_title)
-
 
     def _cancel_set_title(self, controller, keyval, keycode, state):
         """Cancela la edición y restaura el título anterior"""
@@ -403,23 +450,73 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         return message_widget
 
-    def _on_model_loaded(self, llm_client, model_name):
-        """Updates the window subtitle with the model name."""
-        self.title_widget.set_subtitle(model_name)
-        # Save the model name to the chat history
-        cid = self.config.get('cid') or llm_client.get_conversation_id()
-        if cid:
-            if not self.config.get('cid'):
-                self.config['cid'] = cid
-                debug_print(f"Conversation ID set in config: {cid}")
+    def _on_model_loaded(self, llm_client, model_id):
+        """Maneja el evento cuando se carga un modelo."""
+        debug_print(f"Modelo cargado correctamente: {model_id}")
+        
+        # Actualizar el título de la ventana con el nombre del modelo
+        self.title_widget.set_subtitle(model_id)
+        
+        # Verificar si necesitamos cargar una conversación existente basada en CID
+        if self.cid:
+            debug_print(f"Verificando conversación existente para CID: {self.cid}")
             try:
-                self.chat_history.create_conversation_if_not_exists(
-                    cid,
-                    DEFAULT_CONVERSATION_NAME(),
-                    model_name
-                )
+                conversation = self.chat_history.get_conversation(self.cid)
+                if conversation:
+                    debug_print(f"Conversación encontrada en BD: {conversation}")
+                    # Usar el título de la conversación si existe
+                    if conversation.get('title'):
+                        title = conversation['title']
+                        self.set_conversation_name(title)
+                        debug_print(f"Título actualizado para conversación: {title}")
+                    elif conversation.get('name'):  # En algunas BD puede estar como 'name' en lugar de 'title'
+                        title = conversation['name']
+                        self.set_conversation_name(title)
+                        debug_print(f"Título actualizado para conversación (name): {title}")
+                    
+                    # Cargar explícitamente los mensajes de la conversación
+                    history_entries = self.chat_history.get_conversation_history(self.cid)
+                    
+                    if history_entries:
+                        debug_print(f"Se encontraron {len(history_entries)} mensajes para mostrar")
+                        # Asegurarse de que este método se ejecute solo una vez
+                        # Agregar una flag para evitar cargas duplicadas
+                        if not hasattr(self, '_history_loaded') or not self._history_loaded:
+                            self._history_loaded = True
+                            # Usar idle_add con prioridad alta para asegurar que la UI esté lista
+                            GLib.idle_add(self._load_and_display_history, history_entries, GLib.PRIORITY_HIGH)
+                    else:
+                        debug_print("No se encontraron mensajes en el historial")
+                else:
+                    debug_print(f"No se encontró la conversación con CID: {self.cid}")
             except Exception as e:
-                debug_print(f"Error creando la conversación en BD: {e}")
+                debug_print(f"Error al recuperar conversación en _on_model_loaded: {e}")
+                import traceback
+                debug_print(traceback.format_exc())
+        else:
+            debug_print("Sin CID específico, no se carga ninguna conversación")
+            
+    def _load_and_display_history(self, history_entries):
+        """Método auxiliar para cargar y mostrar el historial después de que la UI esté lista."""
+        try:
+            debug_print("Cargando y mostrando historial de conversación...")
+            # Verificar que no se haya cargado ya el historial (doble verificación)
+            if hasattr(self, '_history_displayed') and self._history_displayed:
+                debug_print("El historial ya ha sido mostrado, evitando duplicación")
+                return False
+                
+            self._history_displayed = True
+            self._display_conversation_history(history_entries)
+            
+            # Asegurarse de que se haga scroll al final
+            GLib.timeout_add(100, self._scroll_to_bottom)
+            
+            return False  # Ejecutar solo una vez
+        except Exception as e:
+            debug_print(f"Error al cargar historial: {e}")
+            import traceback
+            debug_print(traceback.format_exc())
+            return False  # Ejecutar solo una vez
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
@@ -542,7 +639,85 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.idle_add(self.get_application().quit)
             return  # Don't grab focus if we are exiting
 
+        # Verificación de integridad: si tenemos un CID pero después de un tiempo no se ha cargado 
+        # el historial, intentar cargarlo explícitamente aquí
+        if self.cid and not (hasattr(self, '_history_loaded') and self._history_loaded):
+            debug_print("Verificación de integridad: el historial no se ha cargado a pesar de tener un CID")
+            
+            def delayed_history_check():
+                if not (hasattr(self, '_history_loaded') and self._history_loaded):
+                    debug_print("Iniciando carga de historial de emergencia...")
+                    # Reintentar carga de historial
+                    try:
+                        conversation = self.chat_history.get_conversation(self.cid)
+                        if conversation:
+                            # Verificar también el título de la conversación
+                            if conversation.get('title'):
+                                self.set_conversation_name(conversation['title'])
+                                debug_print(f"Título actualizado en carga de emergencia: {conversation['title']}")
+                            elif conversation.get('name'):
+                                self.set_conversation_name(conversation['name'])
+                                debug_print(f"Título actualizado en carga de emergencia: {conversation['name']}")
+                                
+                            history_entries = self.chat_history.get_conversation_history(self.cid)
+                            if history_entries:
+                                self._history_loaded = True
+                                self._load_and_display_history(history_entries)
+                    except Exception as e:
+                        debug_print(f"Error en carga de emergencia: {e}")
+                return False  # Ejecutar solo una vez
+                
+            # Verificar después de un breve retraso
+            GLib.timeout_add(500, delayed_history_check)
+        
         self.input_text.grab_focus()
+
+    def _display_conversation_history(self, history_entries):
+        """Muestra el historial de conversación en la UI."""
+        # Limpiar contenedor de mensajes existentes
+        for child in self.messages_box:
+            self.messages_box.remove(child)
+            
+        # Verificar que tengamos entradas válidas
+        if not history_entries:
+            debug_print("No hay entradas de historial para mostrar")
+            return
+            
+        debug_print(f"Mostrando {len(history_entries)} mensajes de historial")
+        debug_print(f"Detalle de las entradas: {history_entries}")
+        
+        # Mostrar cada mensaje en la UI
+        for entry in history_entries:
+            try:
+                debug_print(f"Procesando entrada: {entry}")
+                
+                # Verificar campos obligatorios en la entrada
+                prompt = entry.get('prompt')
+                response = entry.get('response')
+                
+                if prompt:
+                    debug_print(f"Creando mensaje de usuario con: {prompt[:50]}...")
+                    # Crear un objeto Message antes de pasarlo a MessageWidget
+                    msg = Message(prompt, sender="user")
+                    user_message = MessageWidget(msg)
+                    self.messages_box.append(user_message)
+                else:
+                    debug_print("Entrada sin prompt, saltando mensaje de usuario")
+                    
+                if response:
+                    debug_print(f"Creando mensaje de asistente con: {response[:50]}...")
+                    # Crear un objeto Message antes de pasarlo a MessageWidget
+                    msg = Message(response, sender="assistant")
+                    assistant_message = MessageWidget(msg)
+                    self.messages_box.append(assistant_message)
+                else:
+                    debug_print("Entrada sin response, saltando mensaje de asistente")
+            except Exception as e:
+                debug_print(f"Error al mostrar mensaje de historial: {e}")
+                debug_print(f"Excepción completa:", exc_info=True)
+        
+        # Scroll hasta el final cuando todos los mensajes estén en pantalla
+        GLib.idle_add(self._scroll_to_bottom)
 
     def _on_focus_enter(self, controller):
         """Set focus to the input text when the window gains focus."""
