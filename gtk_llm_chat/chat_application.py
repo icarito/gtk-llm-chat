@@ -40,14 +40,9 @@ class LLMChatApplication(Adw.Application):
         # Inicializar un registro de ventanas por CID
         self._window_by_cid = {}  # Mapa de CID -> ventana
 
-        # Configuración de inicio
-        if config:
-            # Verificar si debemos iniciar el applet
-            self._applet_mode = dict(config).pop('applet', False)
-            debug_print(f"Modo applet: {self._applet_mode}")
-        else:
-            self._applet_mode = False
-            debug_print("Inicializando aplicación sin configuración")
+        GLib.idle_add(self._start_tray_applet)
+        # Supervisar el tray applet
+        GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -138,11 +133,6 @@ class LLMChatApplication(Adw.Application):
         # Verificar si el proceso del applet ha terminado
         if self.tray_process.poll() is not None:
             debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
-            
-            # Opcional: Reiniciar el applet si terminó inesperadamente
-            if self._applet_mode:
-                debug_print("Reiniciando tray applet...")
-                self._start_tray_applet()
                 
         return True  # Mantener el timer activo
 
@@ -200,10 +190,10 @@ class LLMChatApplication(Adw.Application):
                 config['template'] = arg.split("=", 1)[1]
         
         # Guardar esta configuración para usarla en do_activate
-        self._last_window_config = config
         debug_print(f"Configuración preparada para do_activate: {config}")
         
         # Abrir ventana de conversación con la configuración extraída
+        print (1)
         self.open_conversation_window(config)
         
         return 0
@@ -213,17 +203,7 @@ class LLMChatApplication(Adw.Application):
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
 
-        # Supervisar el tray applet
-        GLib.timeout_add_seconds(1, self._handle_tray_exit)
-
-        # Si estamos en modo applet, solo iniciar el applet sin abrir ventana
-        if self._applet_mode:
-            debug_print("Ejecutando en modo applet, iniciando el tray applet...")
-            self._start_tray_applet()
-            self.hold()  # Mantener la aplicación en ejecución
-            return
-
-        # Abrir ventana de conversación con la configuración actual
+        print (2)
         self.open_conversation_window()
 
     def _create_new_window_with_config(self, config):
