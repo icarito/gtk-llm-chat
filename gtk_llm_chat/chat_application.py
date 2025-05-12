@@ -40,10 +40,6 @@ class LLMChatApplication(Adw.Application):
         # Inicializar un registro de ventanas por CID
         self._window_by_cid = {}  # Mapa de CID -> ventana
 
-        GLib.idle_add(self._start_tray_applet)
-        # Supervisar el tray applet
-        GLib.timeout_add_seconds(1, self._handle_tray_exit)
-
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
         self.connect('shutdown', self.on_shutdown)  # Conectar señal shutdown
@@ -87,6 +83,13 @@ class LLMChatApplication(Adw.Application):
         # Configure the application icon
         self._setup_icon()
 
+        # Setup system tray applet
+        GLib.idle_add(self._start_tray_applet)
+
+        # Supervisar el tray applet
+        GLib.timeout_add_seconds(1, self._handle_tray_exit)
+
+
         # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
         rename_action.connect("activate", self.on_rename_activate)
@@ -116,11 +119,11 @@ class LLMChatApplication(Adw.Application):
                 stderr=subprocess.PIPE
             )
             debug_print(f"Tray applet iniciado con PID: {self.tray_process.pid}")
-            return True
         except Exception as e:
             debug_print(f"Error al iniciar el tray applet: {e}")
             self.tray_process = None
-            return False
+
+        return False
 
     def _handle_tray_exit(self):
         """
@@ -133,6 +136,12 @@ class LLMChatApplication(Adw.Application):
         # Verificar si el proceso del applet ha terminado
         if self.tray_process.poll() is not None:
             debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
+            if self.tray_process.returncode != 0:
+                debug_print("Reiniciando el tray applet...")
+                GLib.idle_add( self._start_tray_applet)
+            else:
+                debug_print("El tray applet terminó normalmente.")
+                self.quit()
                 
         return True  # Mantener el timer activo
 
@@ -180,6 +189,7 @@ class LLMChatApplication(Adw.Application):
         debug_print(f"Argumentos recibidos: {args}")
         
         config = {}
+        only_applet = False
         for arg in args:
             if arg.startswith("--cid="):
                 config['cid'] = arg.split("=", 1)[1]
@@ -188,13 +198,15 @@ class LLMChatApplication(Adw.Application):
                 config['model'] = arg.split("=", 1)[1]
             elif arg.startswith("--template="):
                 config['template'] = arg.split("=", 1)[1]
+            elif arg.startswith("--applet"):
+                only_applet = True
         
         # Guardar esta configuración para usarla en do_activate
         debug_print(f"Configuración preparada para do_activate: {config}")
         
         # Abrir ventana de conversación con la configuración extraída
-        print (1)
-        self.open_conversation_window(config)
+        if not only_applet:
+            self.open_conversation_window(config)
         
         return 0
 
