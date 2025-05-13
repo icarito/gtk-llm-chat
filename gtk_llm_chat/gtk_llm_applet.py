@@ -57,7 +57,7 @@ from db_operations import ChatHistory
 def on_quit(*args):
     """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
     print(_("\nClosing application..."))
-    Gtk.main_quit()
+    Gtk.main_quit(0)
 
 
 def add_last_conversations_to_menu(menu, chat_history):

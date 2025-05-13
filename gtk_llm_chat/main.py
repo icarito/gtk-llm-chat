@@ -90,6 +90,8 @@ def main(argv=None):
         cmd_args.append(f"--template={config['template']}")
     if config.get('applet'):
         cmd_args.append(f"--applet")
+    if config.get('legacy_applet'):
+        cmd_args.append(f"--legacy-applet")
     
     return chat_app.run(cmd_args)
 

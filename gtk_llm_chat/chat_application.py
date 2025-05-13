@@ -62,7 +62,6 @@ class LLMChatApplication(Adw.Application):
             if settings:
                 settings.set_property('gtk-font-name', 'Segoe UI')
 
-
     def _handle_sigint(self, signum, frame):
         """Handles SIGINT signal to close the application"""
         debug_print(_("\nClosing application..."))
@@ -131,7 +130,6 @@ class LLMChatApplication(Adw.Application):
 
         # Supervisar el tray applet
         GLib.timeout_add_seconds(1, self._handle_tray_exit)
-
 
         # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
@@ -284,6 +282,7 @@ class LLMChatApplication(Adw.Application):
         
         config = {}
         only_applet = False
+        legacy_applet = False
         for arg in args:
             if arg.startswith("--cid="):
                 config['cid'] = arg.split("=", 1)[1]
@@ -294,6 +293,8 @@ class LLMChatApplication(Adw.Application):
                 config['template'] = arg.split("=", 1)[1]
             elif arg.startswith("--applet"):
                 only_applet = True
+            elif arg.startswith("--legacy-applet"):
+                legacy_applet = True
         
         # Guardar esta configuración para usarla en do_activate
         debug_print(f"Configuración preparada para do_activate: {config}")
@@ -301,6 +302,8 @@ class LLMChatApplication(Adw.Application):
         # Abrir ventana de conversación con la configuración extraída
         if not only_applet:
             self.open_conversation_window(config)
+        if legacy_applet:
+            self._applet_loaded = True
         
         return 0
 
@@ -309,7 +312,10 @@ class LLMChatApplication(Adw.Application):
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
 
-        print (2)
+        if not hasattr(self, '_applet_loaded'):
+            # Setup system tray applet
+            GLib.idle_add(self._start_tray_applet)
+
         self.open_conversation_window()
 
     def _create_new_window_with_config(self, config):
