@@ -127,15 +127,15 @@ class LLMChatApplication(Adw.Application):
 
 
         args = []
-        base = os.path.abspath(os.path.dirname(sys.argv[0]))
         if getattr(sys, 'frozen', False):
                 executable = "gtk-llm-applet"
                 if sys.platform == "win32":
                     executable += ".exe"
                 elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-                    base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
                     if os.environ.get('APPIMAGE'):
-                        executable = 'AppRun'
+                        debug_print('Error fatal, imposible hacer el icono')
+                        executable = os.environ.get('APPIMAGE')
+                        args = ['--legacy-applet']
         else:
             executable = sys.executable
             args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]

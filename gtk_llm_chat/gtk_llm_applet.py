@@ -13,7 +13,7 @@ try:
     gi.require_version('AyatanaAppIndicator3', '0.1')
     from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
 except Exception as e:
-    from gtk_llm_chat.tk_llm_applet import main as main_alt
+    from tk_llm_applet import main as main_alt
     ALT=True
 
 import gettext
