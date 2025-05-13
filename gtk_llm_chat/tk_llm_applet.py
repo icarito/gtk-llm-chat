@@ -1,3 +1,6 @@
+"""
+Un applet TK para navegar conversaciones LLM (alternativa a la versión GTK)
+"""
 import os
 import sys
 import signal
@@ -6,25 +9,80 @@ import gettext
 import locale
 from threading import Thread
 
+# Importaciones para la interfaz de usuario
 from pystray import Icon, MenuItem, Menu
 from PIL import Image
+
+# Importaciones para monitoreo de archivos
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import dbus
 
+# Importar dbus-fast para la comunicación D-Bus
+import dbus_fast
+
+# Importar historial de chat
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
 
-
+# Inicializar gettext
 _ = gettext.gettext
 
 
 def open_conversation(conversation_id=None):
-    """Enviar un mensaje D-Bus para abrir una nueva conversación"""
-    bus = dbus.SessionBus()
-    chat_service = bus.get_object('org.fuentelibre.ChatApplication', '/org.fuentelibre/ChatApplication')
-    open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatApplication')
-    open_conversation_method(conversation_id or "")
+    """Enviar un mensaje D-Bus para abrir una nueva conversación usando dbus-fast"""
+    from dbus_fast import SessionMessageBus
+    from dbus_fast import Message, MessageType
+    
+    try:
+        # Conectar al bus de sesión
+        bus = SessionMessageBus()
+        bus.connect_sync()
+        
+        # Crear un mensaje D-Bus directamente
+        message = Message(
+            message_type=MessageType.METHOD_CALL,
+            destination='org.fuentelibre.ChatApplication',
+            path='/org/fuentelibre/ChatApplication',
+            interface='org.fuentelibre.ChatApplication',
+            member='OpenConversation',
+            signature='s',
+            body=[conversation_id or ""]
+        )
+        
+        # Enviar el mensaje y esperar la respuesta
+        reply = bus.send_message_with_reply_sync(message)
+        if reply.message_type == MessageType.ERROR:
+            print(f"Error al abrir la conversación: {reply.body[0]}")
+            # Intentar usar el método de fallback si falla
+            _fallback_open_conversation(conversation_id)
+    except Exception as e:
+        print(f"Error al comunicarse con D-Bus: {e}")
+        # Usar el método de fallback si falla D-Bus
+        _fallback_open_conversation(conversation_id)
+    finally:
+        bus.disconnect()
+
+
+def _fallback_open_conversation(conversation_id=None):
+    """Método alternativo para abrir conversación si falla D-Bus"""
+    args = ['llm', 'gtk-chat']
+    if conversation_id:
+        args += ['--cid', str(conversation_id)]
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.abspath(os.path.dirname(sys.argv[0]))
+        executable = "gtk-llm-chat"
+        if sys.platform == "win32":
+            executable += ".exe"
+        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
+            base_path = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
+            if os.environ.get('APPIMAGE'):
+                executable = 'AppRun'
+        args = [os.path.join(base_path, executable)] + args[2:]
+    
+    try:
+        subprocess.Popen(args)
+    except Exception as e:
+        print(f"Error al iniciar la aplicación: {e}")
 
 
 def make_conv_action(cid):

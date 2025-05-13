@@ -5,21 +5,24 @@ import os
 import subprocess
 import signal
 import sys
+import gettext
+import locale
 
-ALT=False
-import dbus
+# Importar dbus-fast para la comunicación D-Bus
+import dbus_fast
+
+ALT = False
 try:
     import gi
     gi.require_version('Gtk', '3.0')
     gi.require_version('AyatanaAppIndicator3', '0.1')
     from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
 except Exception as e:
+    print(f"Error al importar dependencias GTK: {e}")
     from tk_llm_applet import main as main_alt
-    ALT=True
+    ALT = True
 
-import gettext
-import locale
-
+# Inicializar gettext
 _ = gettext.gettext
 
 
@@ -120,11 +123,56 @@ def create_menu(chat_history):
     return menu
 
 def open_new_conversation(cid):
-    """Enviar un mensaje D-Bus para abrir una nueva conversación"""
-    bus = dbus.SessionBus()
-    chat_service = bus.get_object('org.fuentelibre.ChatApplication', '/org/fuentelibre/ChatApplication')
-    open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatApplication')
-    open_conversation_method(cid)
+    """Enviar un mensaje D-Bus para abrir una nueva conversación usando dbus-fast"""
+    # Usar la API sincrónica de dbus-fast para mayor portabilidad
+    from dbus_fast import SessionMessageBus
+    from dbus_fast import Message, MessageType
+    
+    try:
+        # Conectar al bus de sesión
+        bus = SessionMessageBus()
+        bus.connect_sync()
+        
+        # Crear un mensaje D-Bus directamente
+        message = Message(
+            message_type=MessageType.METHOD_CALL,
+            destination='org.fuentelibre.ChatApplication',
+            path='/org/fuentelibre/ChatApplication',
+            interface='org.fuentelibre.ChatApplication',
+            member='OpenConversation',
+            signature='s',
+            body=[cid or ""]
+        )
+        
+        # Enviar el mensaje y esperar la respuesta
+        reply = bus.send_message_with_reply_sync(message)
+        if reply.message_type == MessageType.ERROR:
+            print(f"Error al abrir la conversación: {reply.body[0]}")
+            # Intentar usar el método de fallback si falla
+            _fallback_open_conversation(cid)
+    except Exception as e:
+        print(f"Error al comunicarse con D-Bus: {e}")
+        # Usar el método de fallback si falla D-Bus
+        _fallback_open_conversation(cid)
+    finally:
+        bus.disconnect()
+
+def _fallback_open_conversation(cid=None):
+    """Método alternativo para abrir conversación si falla D-Bus"""
+    args = ['llm', 'gtk-chat']
+    if cid:
+        args += ['--cid', str(cid)]
+    if getattr(sys, 'frozen', False):
+        base = os.path.abspath(os.path.dirname(sys.argv[0]))
+        executable = "gtk-llm-chat"
+        if sys.platform == "win32":
+            executable += ".exe"
+        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
+            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
+            if os.environ.get('APPIMAGE'):
+                executable = 'AppRun'
+        args = [os.path.join(base, executable)] + args[2:]
+    subprocess.Popen(args)
 
 def main(legacy=False):
     if ALT:

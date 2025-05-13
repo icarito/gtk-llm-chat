@@ -20,7 +20,10 @@ dependencies = [
     "llm-anthropic",
     "llm-openrouter",
     "markdown-it-py",
-    "python-ulid"
+    "python-ulid",
+    "dbus-fast",
+    "pystray",
+    "watchdog"
 ]
 requires-python = ">=3.8"
 dynamic = ["version"]
