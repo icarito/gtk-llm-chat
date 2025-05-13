@@ -10,7 +10,6 @@ from pystray import Icon, MenuItem, Menu
 from PIL import Image
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import pydbus
 import dbus
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -23,8 +22,8 @@ _ = gettext.gettext
 def open_conversation(conversation_id=None):
     """Enviar un mensaje D-Bus para abrir una nueva conversación"""
     bus = dbus.SessionBus()
-    chat_service = bus.get_object('org.fuentelibre.ChatService', '/')
-    open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatService')
+    chat_service = bus.get_object('org.fuentelibre.ChatApplication', '/org.fuentelibre/ChatApplication')
+    open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatApplication')
     open_conversation_method(conversation_id or "")
 
 
