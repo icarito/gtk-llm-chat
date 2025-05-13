@@ -5,7 +5,6 @@ import signal
 import sys
 import subprocess
 import threading
-import pydbus
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -27,8 +26,6 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
-
-from pydbus.generic import signal as dbus_signal
 
 # Reemplazar la definición de la interfaz D-Bus con XML
 DBUS_INTERFACE_XML = """
@@ -71,16 +68,39 @@ class LLMChatApplication(Adw.Application):
         debug_print(_("\nClosing application..."))
         self.quit()
 
+    # Simplificar el registro D-Bus con un enfoque más directo
     def do_startup(self):
         Adw.Application.do_startup(self)
 
-        # Registrar el servicio D-Bus
-        bus = pydbus.SessionBus()
-        self.dbus_service = bus.register_object(
-            '/',  # Ruta del objeto
-            self,  # Instancia del objeto
-            DBUS_INTERFACE_XML  # Definición de la interfaz en XML
+        # Configurar D-Bus usando Gio
+        connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        # Obtener la información de la interfaz
+        node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
+        interface_info = node_info.interfaces[0]
+        
+        # Crear una función manejadora para métodos D-Bus
+        def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
+            if method_name == "OpenConversation":
+                cid = parameters.unpack()[0]
+                self.OpenConversation(cid)
+                invocation.return_value(None)
+            else:
+                invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
+        
+        # Registrar la interfaz D-Bus
+        reg_id = connection.register_object(
+            '/org/fuentelibre/ChatApplication',
+            interface_info,
+            method_call_handler,
+            None,  # get_property_handler
+            None   # set_property_handler
         )
+        
+        if reg_id > 0:
+            self.dbus_registration_id = reg_id
+            debug_print("Interfaz D-Bus registrada correctamente")
+        else:
+            debug_print("Error al registrar la interfaz D-Bus")
 
         # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
@@ -213,7 +233,7 @@ class LLMChatApplication(Adw.Application):
         return True  # Mantener el timer activo
 
     def on_shutdown(self, app):
-        """Handles application shutdown and terminates the tray process."""
+        """Handles application shutdown and unregisters D-Bus."""
         if self.tray_process:
             debug_print("Terminando proceso/hilo del applet...")
             try:
@@ -227,11 +247,10 @@ class LLMChatApplication(Adw.Application):
                     self.tray_process.wait()
             except Exception as e:
                 debug_print(f"Excepción al terminar el applet: {e}")
-                # Los hilos daemon se terminarán cuando termine la aplicación principal
 
-        if self.dbus_service:
-            # En lugar de intentar llamar a un método `unpublish`, eliminamos la referencia al objeto D-Bus
-            self.dbus_service = None
+        if hasattr(self, 'dbus_registration_id'):
+            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            connection.unregister_object(self.dbus_registration_id)
 
     def get_application_version(self):
         """

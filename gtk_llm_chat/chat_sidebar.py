@@ -196,6 +196,9 @@ class ChatSidebar(Gtk.Box):
 
         # No cargamos los modelos aquí - se cargarán bajo demanda 
         # cuando el usuario haga clic en el botón de modelo
+        # Sin embargo, programaremos la carga para que ocurra poco después de la inicialización
+        # para evitar bloquear la UI durante el arranque
+        GLib.timeout_add(500, self._delayed_model_load)
 
         # Si ya tenemos llm_client, programar la actualización del modelo
         self.llm_client.connect('model-loaded', self._on_model_loaded)
@@ -206,12 +209,23 @@ class ChatSidebar(Gtk.Box):
         # Volver a la primera pantalla al colapsar el sidebar
         def _on_sidebar_toggled(self, toggled):
             if toggled:
-                self._populate_providers_and_group_models()  # Llamar al poblar modelos y plugins
+                # Asegurar que los modelos se carguen si no lo han hecho
+                if not self._models_loaded:
+                    self._populate_providers_and_group_models()
+                    self._models_loaded = True
             else:
                 self.stack.set_visible_child_name("actions")
 
         # Conectar el evento de colapsar el sidebar
         self.connect("notify::visible", lambda obj, pspec: self._on_sidebar_toggled(self.get_visible()))
+        
+    def _delayed_model_load(self):
+        """Carga los modelos después de un breve retraso para no bloquear la UI durante el arranque."""
+        if not self._models_loaded:
+            debug_print("ChatSidebar: Cargando modelos en segundo plano...")
+            self._populate_providers_and_group_models()
+            self._models_loaded = True
+        return False  # No repetir el timeout
 
     def _get_provider_display_name(self, provider_key):
         """Obtiene un nombre legible para la clave del proveedor."""
@@ -233,27 +247,53 @@ class ChatSidebar(Gtk.Box):
         self.models_by_provider.clear()
         self._provider_to_needs_key = {}
         try:
-            # 1. Descubrir todos los modelos posibles usando el hook register_models
-            load_plugins()
+            # 1. Asegurar que los plugins están cargados, sin forzar recarga
+            import llm.plugins
+            if not hasattr(llm.plugins, '_loaded') or not llm.plugins._loaded:
+                # Solo cargar si no están ya cargados
+                load_plugins()
+                debug_print("ChatSidebar: Plugins cargados correctamente")
+            else:
+                debug_print("ChatSidebar: Plugins ya estaban cargados, omitiendo carga")
             all_possible_models = []
+            
+            # Función de registro para capturar modelos durante la invocación del hook
             def register_model(model, async_model=None, aliases=None):
                 all_possible_models.append(model)
+            
+            # Llamar explícitamente al hook de registro de modelos
             pm.hook.register_models(register=register_model)
+            
+            # Log para debug
+            debug_print(f"Encontrados {len(all_possible_models)} modelos posibles durante introspección")
 
             # 2. Obtener plugins con hook 'register_models'
             all_plugins = llm.get_plugins()
             plugins_with_models = [plugin for plugin in all_plugins if 'register_models' in plugin['hooks']]
             providers_set = {plugin['name']: plugin for plugin in plugins_with_models}
+            
+            debug_print(f"Plugins con modelos: {list(providers_set.keys())}")
 
             # 3. Construir mapping provider_key -> needs_key y agrupar modelos
             for provider_key in providers_set.keys():
                 found_needs_key = None
+                provider_models = []
+                
                 for model_obj in all_possible_models:
                     model_needs_key = getattr(model_obj, 'needs_key', None)
                     # Heurística: si el provider_key es substring o prefijo del needs_key o viceversa
                     if model_needs_key and (provider_key in model_needs_key or model_needs_key in provider_key):
                         found_needs_key = model_needs_key
-                        self.models_by_provider[provider_key].append(model_obj)
+                        provider_models.append(model_obj)
+                    elif provider_key.lower() in getattr(model_obj, 'model_id', '').lower():
+                        # Heurística adicional: si el provider está en el ID del modelo
+                        provider_models.append(model_obj)
+                
+                # Agregar los modelos encontrados para este proveedor
+                if provider_models:
+                    self.models_by_provider[provider_key] = provider_models
+                    debug_print(f"Proveedor {provider_key}: {len(provider_models)} modelos")
+                
                 if found_needs_key:
                     self._provider_to_needs_key[provider_key] = found_needs_key
                 else:
@@ -265,10 +305,38 @@ class ChatSidebar(Gtk.Box):
             def sort_key(p_key):
                 return self._get_provider_display_name(p_key).lower() if p_key else "local/other"
             sorted_provider_keys = sorted(providers_set.keys(), key=sort_key)
+            
             if not sorted_provider_keys:
+                # Si no hay proveedores, intentar obtener modelos directamente
+                all_models = llm.get_models()
+                debug_print(f"No se encontraron proveedores, intentando obtener modelos directamente: {len(all_models)} modelos")
+                
+                # Agrupar modelos por proveedor
+                providers_from_models = defaultdict(list)
+                for model in all_models:
+                    provider = getattr(model, 'needs_key', None) or LOCAL_PROVIDER_KEY
+                    providers_from_models[provider].append(model)
+                
+                # Si hay modelos, usarlos para poblar proveedores
+                if providers_from_models:
+                    self.models_by_provider = providers_from_models
+                    sorted_provider_keys = sorted(providers_from_models.keys(), key=sort_key)
+                    
+                    for provider_key in sorted_provider_keys:
+                        display_name = self._get_provider_display_name(provider_key)
+                        row = Adw.ActionRow(title=display_name)
+                        row.set_activatable(True)
+                        row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+                        row.provider_key = provider_key
+                        self.provider_list.append(row)
+                    return
+                
+                # Si todavía no hay proveedores, mostrar mensaje de error
                 row = Adw.ActionRow(title=_("No models found"), selectable=False)
                 self.provider_list.append(row)
                 return
+                
+            # Si hemos llegado aquí, tenemos proveedores de la primera forma
             for provider_key in sorted_provider_keys:
                 display_name = self._get_provider_display_name(provider_key)
                 row = Adw.ActionRow(title=display_name)
@@ -278,6 +346,8 @@ class ChatSidebar(Gtk.Box):
                 self.provider_list.append(row)
         except Exception as e:
             print(f"Error getting or processing models/plugins: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos y actualiza el banner de API key, usando introspección para mostrar todos los modelos posibles."""
@@ -291,6 +361,25 @@ class ChatSidebar(Gtk.Box):
         else:
             self.api_key_banner.set_revealed(False)  # Ocultar banner si es local
 
+        # --- Poblar Modelos usando el cliente LLM si está disponible ---
+        if getattr(self, 'llm_client', None) and hasattr(self.llm_client, 'get_all_models'):
+            try:
+                # Usar el método del cliente para obtener los modelos sin recargar plugins
+                debug_print("Obteniendo modelos desde llm_client.get_all_models()")
+                all_models = self.llm_client.get_all_models()
+                
+                # Agrupar modelos por proveedor si no lo hemos hecho antes
+                if not self.models_by_provider:
+                    # Inicializar grouping
+                    provider_models = defaultdict(list)
+                    for model in all_models:
+                        provider = getattr(model, 'needs_key', None) or LOCAL_PROVIDER_KEY
+                        provider_models[provider].append(model)
+                    self.models_by_provider = provider_models
+            except Exception as e:
+                debug_print(f"Error al obtener modelos desde llm_client: {e}")
+                # Caer en el comportamiento normal si falla
+        
         # --- Poblar Modelos usando self.models_by_provider (ya incluye todos los posibles) ---
         models = self.models_by_provider.get(provider_key, [])
         if not models:
