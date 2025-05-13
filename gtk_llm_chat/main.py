@@ -73,7 +73,7 @@ def main(argv=None):
 
     if config.get('legacy_applet'):
         from gtk_llm_applet import main
-        main()
+        main(legacy=True)
         return
 
     # Crear la aplicación y ejecutarla

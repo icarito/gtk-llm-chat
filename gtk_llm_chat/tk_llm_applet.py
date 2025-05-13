@@ -94,7 +94,7 @@ class DBChangeHandler(FileSystemEventHandler):
         if os.path.abspath(event.src_path) == self.db_path:
             self.icon.menu = create_menu(self.icon)
 
-def run_systray():
+def run_systray(legacy=False):
     APP_NAME = "gtk-llm-chat"
     LOCALE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'po'))
 
@@ -123,6 +123,10 @@ def run_systray():
         observer.daemon = True
         observer.start()
 
+    if legacy:
+        icon.run_detached()
+        return
+
     try:
         icon.run()
     finally:
@@ -137,10 +141,8 @@ def signal_handler(sig, frame):
 
 signal.signal(signal.SIGINT, signal_handler)
 
-def main():
-    tray_thread = Thread(target=run_systray, daemon=True)
-    tray_thread.start()
-    tray_thread.join()
+def main(legacy=False):
+    run_systray(legacy)
 
 if __name__ == '__main__':
     main()

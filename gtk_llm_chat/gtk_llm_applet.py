@@ -126,9 +126,9 @@ def open_new_conversation(cid):
     open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatApplication')
     open_conversation_method(cid)
 
-def main():
+def main(legacy=False):
     if ALT:
-        return(main_alt())
+        return(main_alt(legacy))
     chat_history = ChatHistory()
     icon_path = os.path.join(base_path, 'hicolor/scalable/apps/', 'org.fuentelibre.gtk_llm_Chat.svg')
     indicator = AppIndicator.Indicator.new(
