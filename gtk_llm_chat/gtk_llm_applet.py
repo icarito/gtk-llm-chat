@@ -7,6 +7,7 @@ import signal
 import sys
 
 ALT=False
+import pydbus
 try:
     import gi
     gi.require_version('Gtk', '3.0')
@@ -118,6 +119,12 @@ def create_menu(chat_history):
     menu.show_all()
     return menu
 
+def open_new_conversation(cid):
+    """Enviar un mensaje D-Bus para abrir una nueva conversación"""
+    bus = pydbus.SessionBus()
+    chat_service = bus.get("org.fuentelibre.ChatApplication")
+    chat_service.OpenConversation(cid)
+
 def main():
     if ALT:
         return(main_alt())
@@ -142,6 +149,8 @@ def main():
     indicator.set_menu(create_menu(chat_history))
     signal.signal(signal.SIGINT, on_quit)
     Gtk.main()
+
+    open_new_conversation("example_cid")
 
 
 if __name__ == "__main__":

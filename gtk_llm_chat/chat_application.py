@@ -5,6 +5,7 @@ import signal
 import sys
 import subprocess
 import threading
+import pydbus
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -26,6 +27,19 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
+
+from pydbus.generic import signal as dbus_signal
+
+# Reemplazar la definición de la interfaz D-Bus con XML
+DBUS_INTERFACE_XML = """
+<node>
+  <interface name='org.fuentelibre.ChatApplication'>
+    <method name='OpenConversation'>
+      <arg type='s' name='cid' direction='in'/>
+    </method>
+  </interface>
+</node>
+"""
 
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
@@ -59,6 +73,14 @@ class LLMChatApplication(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+
+        # Registrar el servicio D-Bus
+        bus = pydbus.SessionBus()
+        self.dbus_service = bus.register_object(
+            '/',  # Ruta del objeto
+            self,  # Instancia del objeto
+            DBUS_INTERFACE_XML  # Definición de la interfaz en XML
+        )
 
         # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
@@ -103,6 +125,22 @@ class LLMChatApplication(Adw.Application):
         about_action = Gio.SimpleAction.new("about", None)  # Corrected: parameter_type should be None
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
+
+    def OpenConversation(self, cid):
+        """Abrir una nueva conversación dado un CID"""
+        if cid not in self._window_by_cid:
+            # Crear y registrar una nueva ventana
+            window = self.create_chat_window(cid)
+            self._window_by_cid[cid] = window
+            window.show()
+        else:
+            # Enfocar la ventana existente
+            self._window_by_cid[cid].present()
+
+    def create_chat_window(self, cid):
+        """Crear una nueva ventana de chat"""
+        # Implementación para crear una ventana de chat
+        pass
 
     def _start_tray_applet(self):
         """
@@ -190,6 +228,9 @@ class LLMChatApplication(Adw.Application):
             except Exception as e:
                 debug_print(f"Excepción al terminar el applet: {e}")
                 # Los hilos daemon se terminarán cuando termine la aplicación principal
+
+        if self.dbus_service:
+            self.dbus_service.unpublish()
 
     def get_application_version(self):
         """
