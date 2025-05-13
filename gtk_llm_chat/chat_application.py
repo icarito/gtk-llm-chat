@@ -48,6 +48,7 @@ class LLMChatApplication(Adw.Application):
         )
 
         self.tray_process = None  # Subproceso del tray applet
+        self._shutting_down = False  # Bandera para controlar proceso de cierre
 
         # Inicializar un registro de ventanas por CID
         self._window_by_cid = {}  # Mapa de CID -> ventana
@@ -221,17 +222,20 @@ class LLMChatApplication(Adw.Application):
         poll_result = self.tray_process.poll()
         if poll_result is not None:
             debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
-            if self.tray_process.returncode != 0:
+            # Reiniciar solo si el código no es 0 y no estamos en proceso de cierre
+            if self.tray_process.returncode != 0 and not getattr(self, '_shutting_down', False):
                 debug_print("Reiniciando el tray applet...")
                 GLib.idle_add(self._start_tray_applet)
             else:
-                debug_print("El tray applet terminó normalmente.")
-                self.quit()
+                debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
                 
         return True  # Mantener el timer activo
 
     def on_shutdown(self, app):
         """Handles application shutdown and unregisters D-Bus."""
+        # Establecer bandera para evitar que se reinicie el applet durante el cierre
+        self._shutting_down = True
+        
         if self.tray_process:
             debug_print("Terminando proceso/hilo del applet...")
             try:

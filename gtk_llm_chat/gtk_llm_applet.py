@@ -8,8 +8,9 @@ import sys
 import gettext
 import locale
 
-# Importar dbus-fast para la comunicación D-Bus
-import dbus_fast
+# Importar el cliente D-Bus compartido
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from dbus_client import open_conversation_dbus
 
 ALT = False
 try:
@@ -60,7 +61,9 @@ from db_operations import ChatHistory
 def on_quit(*args):
     """Maneja la señal SIGINT (Ctrl+C) de manera elegante"""
     print(_("\nClosing application..."))
-    Gtk.main_quit(0)
+    # Usar sys.exit(0) para asegurar una salida limpia con código de retorno 0
+    Gtk.main_quit()
+    sys.exit(0)
 
 
 def add_last_conversations_to_menu(menu, chat_history):
@@ -79,20 +82,9 @@ def add_last_conversations_to_menu(menu, chat_history):
 
 
 def open_conversation(conversation_id=None):
-    args = ['llm', 'gtk-chat']
-    if conversation_id:
-        args += ['--cid', str(conversation_id)]
-    if getattr(sys, 'frozen', False):
-        base = os.path.abspath(os.path.dirname(sys.argv[0]))
-        executable = "gtk-llm-chat"
-        if sys.platform == "win32":
-            executable += ".exe"
-        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-            if os.environ.get('APPIMAGE'):
-                executable = 'AppRun'
-        args = [os.path.join(base, executable)] + args[2:]
-    subprocess.Popen(args)
+    """Enviar un mensaje D-Bus para abrir una nueva conversación"""
+    # Usar la implementación compartida del cliente D-Bus
+    open_conversation_dbus(conversation_id)
 
 
 def on_new_conversation(widget):
@@ -122,57 +114,7 @@ def create_menu(chat_history):
     menu.show_all()
     return menu
 
-def open_new_conversation(cid):
-    """Enviar un mensaje D-Bus para abrir una nueva conversación usando dbus-fast"""
-    # Usar la API sincrónica de dbus-fast para mayor portabilidad
-    from dbus_fast import SessionMessageBus
-    from dbus_fast import Message, MessageType
-    
-    try:
-        # Conectar al bus de sesión
-        bus = SessionMessageBus()
-        bus.connect_sync()
-        
-        # Crear un mensaje D-Bus directamente
-        message = Message(
-            message_type=MessageType.METHOD_CALL,
-            destination='org.fuentelibre.ChatApplication',
-            path='/org/fuentelibre/ChatApplication',
-            interface='org.fuentelibre.ChatApplication',
-            member='OpenConversation',
-            signature='s',
-            body=[cid or ""]
-        )
-        
-        # Enviar el mensaje y esperar la respuesta
-        reply = bus.send_message_with_reply_sync(message)
-        if reply.message_type == MessageType.ERROR:
-            print(f"Error al abrir la conversación: {reply.body[0]}")
-            # Intentar usar el método de fallback si falla
-            _fallback_open_conversation(cid)
-    except Exception as e:
-        print(f"Error al comunicarse con D-Bus: {e}")
-        # Usar el método de fallback si falla D-Bus
-        _fallback_open_conversation(cid)
-    finally:
-        bus.disconnect()
-
-def _fallback_open_conversation(cid=None):
-    """Método alternativo para abrir conversación si falla D-Bus"""
-    args = ['llm', 'gtk-chat']
-    if cid:
-        args += ['--cid', str(cid)]
-    if getattr(sys, 'frozen', False):
-        base = os.path.abspath(os.path.dirname(sys.argv[0]))
-        executable = "gtk-llm-chat"
-        if sys.platform == "win32":
-            executable += ".exe"
-        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-            if os.environ.get('APPIMAGE'):
-                executable = 'AppRun'
-        args = [os.path.join(base, executable)] + args[2:]
-    subprocess.Popen(args)
+# Se eliminó open_new_conversation ya que usamos open_conversation directamente
 
 def main(legacy=False):
     if ALT:
@@ -198,8 +140,8 @@ def main(legacy=False):
     indicator.set_menu(create_menu(chat_history))
     signal.signal(signal.SIGINT, on_quit)
     Gtk.main()
-
-    open_new_conversation("example_cid")
+    
+    # No abrir una nueva conversación automáticamente al salir
 
 
 if __name__ == "__main__":

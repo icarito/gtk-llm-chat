@@ -11,4 +11,4 @@ llm-anthropic
 llm-openrouter
 pystray
 watchdog
-dbus-fast
+dbus-next
