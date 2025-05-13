@@ -230,7 +230,8 @@ class LLMChatApplication(Adw.Application):
                 # Los hilos daemon se terminarán cuando termine la aplicación principal
 
         if self.dbus_service:
-            self.dbus_service.unpublish()
+            # En lugar de intentar llamar a un método `unpublish`, eliminamos la referencia al objeto D-Bus
+            self.dbus_service = None
 
     def get_application_version(self):
         """
