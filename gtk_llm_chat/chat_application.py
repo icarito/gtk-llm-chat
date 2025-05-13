@@ -5,6 +5,7 @@ import signal
 import sys
 import subprocess
 import threading
+import pydbus
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -27,8 +28,21 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 
+from pydbus.generic import signal as dbus_signal
+
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
+
+    # Definir la interfaz D-Bus
+    dbus = {
+        'org.fuentelibre.ChatApplication': {
+            'methods': {
+                'OpenConversation': ('s', ''),  # Recibe un string (CID) y no retorna nada
+            },
+            'signals': {},
+            'properties': {},
+        }
+    }
 
     def __init__(self, config=None):
         super().__init__(
@@ -59,6 +73,10 @@ class LLMChatApplication(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+
+        # Registrar el servicio D-Bus
+        bus = pydbus.SessionBus()
+        self.dbus_service = bus.publish("org.fuentelibre.ChatApplication", self)
 
         # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
@@ -104,6 +122,22 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+    def OpenConversation(self, cid):
+        """Abrir una nueva conversación dado un CID"""
+        if cid not in self._window_by_cid:
+            # Crear y registrar una nueva ventana
+            window = self.create_chat_window(cid)
+            self._window_by_cid[cid] = window
+            window.show()
+        else:
+            # Enfocar la ventana existente
+            self._window_by_cid[cid].present()
+
+    def create_chat_window(self, cid):
+        """Crear una nueva ventana de chat"""
+        # Implementación para crear una ventana de chat
+        pass
+
     def _start_tray_applet(self):
         """
         Inicia el tray applet en un subproceso si no está ya en ejecución.
@@ -134,6 +168,8 @@ class LLMChatApplication(Adw.Application):
                 elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
                     if os.environ.get('APPIMAGE'):
                         debug_print('Error fatal, imposible hacer el icono')
+                        executable = os.environ.get('APPIMAGE')
+                        args = ['--legacy-applet']
         else:
             executable = sys.executable
             args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]
@@ -188,6 +224,9 @@ class LLMChatApplication(Adw.Application):
             except Exception as e:
                 debug_print(f"Excepción al terminar el applet: {e}")
                 # Los hilos daemon se terminarán cuando termine la aplicación principal
+
+        if self.dbus_service:
+            self.dbus_service.unpublish()
 
     def get_application_version(self):
         """

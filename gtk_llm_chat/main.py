@@ -4,6 +4,8 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import sys
 import time
+import os
+import subprocess
 
 # Record start time if benchmarking
 benchmark_startup = '--benchmark-startup' in sys.argv
@@ -33,6 +35,8 @@ def parse_args(argv):
                         help='Mide el tiempo hasta que la ventana se muestra y sale.')
     parser.add_argument('--applet', action='store_true',
                         help='Start applet')
+    parser.add_argument('--legacy-applet', action='store_true',
+                        help='_internal_')
 
 
     # Parsear solo nuestros argumentos
@@ -50,7 +54,8 @@ def parse_args(argv):
         'fragments': args.fragment,
         'benchmark_startup': args.benchmark_startup,
         'start_time': start_time,
-        'applet': args.applet
+        'applet': args.applet,
+        'legacy_applet': args.legacy_applet
     }
 
     return config
@@ -65,7 +70,12 @@ def main(argv=None):
 
     # Crear configuración desde argumentos
     config = parse_args(argv)
-    
+
+    if config.get('legacy_applet'):
+        from gtk_llm_applet import main
+        main()
+        return
+
     # Crear la aplicación y ejecutarla
     from chat_application import LLMChatApplication
     chat_app = LLMChatApplication(config)

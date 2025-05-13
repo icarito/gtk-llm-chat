@@ -10,7 +10,8 @@ from pystray import Icon, MenuItem, Menu
 from PIL import Image
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
+import pydbus
+import dbus
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
@@ -20,20 +21,11 @@ _ = gettext.gettext
 
 
 def open_conversation(conversation_id=None):
-    args = ['llm', 'gtk-chat']
-    if conversation_id:
-        args += ['--cid', str(conversation_id)]
-    if getattr(sys, 'frozen', False):
-        base = os.path.abspath(os.path.dirname(sys.argv[0]))
-        executable = "gtk-llm-chat"
-        if sys.platform == "win32":
-            executable += ".exe"
-        elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-            base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-            if os.environ.get('APPIMAGE'):
-                executable = 'AppRun'
-        args = [os.path.join(base, executable)] + args[2:]
-    subprocess.Popen(args)
+    """Enviar un mensaje D-Bus para abrir una nueva conversación"""
+    bus = dbus.SessionBus()
+    chat_service = bus.get_object('org.fuentelibre.ChatService', '/')
+    open_conversation_method = chat_service.get_dbus_method('OpenConversation', 'org.fuentelibre.ChatService')
+    open_conversation_method(conversation_id or "")
 
 
 def make_conv_action(cid):
