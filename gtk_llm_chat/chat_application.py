@@ -4,6 +4,7 @@ import re
 import signal
 import sys
 import subprocess
+import threading
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -32,7 +33,7 @@ class LLMChatApplication(Adw.Application):
     def __init__(self, config=None):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
-            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE  # Cambiar para permitir procesar argumentos
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE
         )
 
         self.tray_process = None  # Subproceso del tray applet
@@ -113,6 +114,18 @@ class LLMChatApplication(Adw.Application):
             
         debug_print("Iniciando tray applet...")
 
+        try:
+            from gtk_llm_applet import main
+            # Usamos el adaptador para tener un hilo con API de proceso
+            self.tray_process = ThreadToProcessAdapter(target_func=main)
+            self.tray_process.start()
+            debug_print(f"Tray applet iniciado como hilo adaptado con PID simulado: {self.tray_process.pid}")
+            return False
+        except Exception as e:
+            debug_print(f"Error al iniciar el tray applet como hilo: {e}")
+            # Si falla, continuamos con el método de proceso
+
+
         args = []
         base = os.path.abspath(os.path.dirname(sys.argv[0]))
         if getattr(sys, 'frozen', False):
@@ -128,7 +141,6 @@ class LLMChatApplication(Adw.Application):
             args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]
 
         try:
-            args += ['--applet']
             self.tray_process = subprocess.Popen(
                 [executable] + args,
                 stdout=subprocess.PIPE, 
@@ -149,12 +161,13 @@ class LLMChatApplication(Adw.Application):
         if self.tray_process is None:
             return True
             
-        # Verificar si el proceso del applet ha terminado
-        if self.tray_process.poll() is not None:
+        # Verificar si el proceso/hilo del applet ha terminado
+        poll_result = self.tray_process.poll()
+        if poll_result is not None:
             debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
             if self.tray_process.returncode != 0:
                 debug_print("Reiniciando el tray applet...")
-                GLib.idle_add( self._start_tray_applet)
+                GLib.idle_add(self._start_tray_applet)
             else:
                 debug_print("El tray applet terminó normalmente.")
                 self.quit()
@@ -164,15 +177,19 @@ class LLMChatApplication(Adw.Application):
     def on_shutdown(self, app):
         """Handles application shutdown and terminates the tray process."""
         if self.tray_process:
-            debug_print("Terminando proceso del applet...")
-            self.tray_process.terminate()
+            debug_print("Terminando proceso/hilo del applet...")
             try:
-                self.tray_process.wait(timeout=5)
-                debug_print("Proceso terminado correctamente.")
-            except subprocess.TimeoutExpired:
-                debug_print("Proceso no terminó a tiempo, matando a la fuerza.")
-                self.tray_process.kill()
-                self.tray_process.wait()
+                self.tray_process.terminate()
+                try:
+                    self.tray_process.wait(timeout=5)
+                    debug_print("Applet terminado correctamente.")
+                except subprocess.TimeoutExpired:
+                    debug_print("Applet no terminó a tiempo, intentando con kill().")
+                    self.tray_process.kill()
+                    self.tray_process.wait()
+            except Exception as e:
+                debug_print(f"Excepción al terminar el applet: {e}")
+                # Los hilos daemon se terminarán cuando termine la aplicación principal
 
     def get_application_version(self):
         """
@@ -274,8 +291,6 @@ class LLMChatApplication(Adw.Application):
             return window
         except Exception as e:
             debug_print(f"Error al crear nueva ventana: {e}")
-            import traceback
-            debug_print(traceback.format_exc())
             
             # En caso de error, activar la ventana normalmente
             self.activate()
@@ -419,4 +434,94 @@ class LLMChatApplication(Adw.Application):
                 # Crear una nueva ventana sin CID específico
                 debug_print("Creando nueva ventana sin CID específico")
                 return self._create_new_window_with_config(conversation_config)
+
+
+class ThreadToProcessAdapter:
+    """
+    Adapta un objeto Thread para que exponga una API similar a un objeto Process.
+    Esto permite usar hilos con un código que espera interactuar con procesos.
+    """
+    def __init__(self, target_func, daemon=True, **kwargs):
+        """
+        Inicializa el adaptador creando un Thread interno.
+        
+        Args:
+            target_func: La función que debe ejecutar el hilo
+            daemon: Si el hilo debe ser daemon (termina cuando el programa principal termina)
+            **kwargs: Argumentos adicionales para el constructor del Thread
+        """
+        self._thread = threading.Thread(target=target_func, daemon=daemon, **kwargs)
+        self._is_running = False
+        self._returncode = None
+        self.pid = hash(self._thread)  # Simular un ID de proceso
+    
+    def start(self):
+        """Inicia el hilo y actualiza el estado interno."""
+        self._thread.start()
+        self._is_running = True
+    
+    def poll(self):
+        """
+        Simula el comportamiento de poll() de un proceso.
+        
+        Returns:
+            None si el hilo está en ejecución, o un código de retorno si ha terminado.
+        """
+        if self._is_running and not self._thread.is_alive():
+            self._is_running = False
+            self._returncode = 0  # Asume que el hilo terminó normalmente
+            return self._returncode
+        
+        return None if self._is_running else self._returncode
+    
+    def terminate(self):
+        """
+        Simula el comportamiento de terminate() de un proceso.
+        
+        Como los hilos en Python no se pueden terminar de manera forzada,
+        esto simplemente registra la intención (los hilos daemon terminarán
+        cuando el programa principal termine).
+        """
+        debug_print("Thread no puede ser terminado directamente. Se marca para terminar.")
+        self._is_running = False
+        self._returncode = 0  # Simula una terminación "exitosa"
+    
+    def kill(self):
+        """Simula el comportamiento de kill() de un proceso. Similar a terminate()."""
+        self.terminate()
+    
+    def wait(self, timeout=None):
+        """
+        Simula el comportamiento de wait() de un proceso.
+        
+        Args:
+            timeout: Tiempo máximo de espera en segundos
+        
+        Returns:
+            El código de retorno del hilo
+        
+        Raises:
+            subprocess.TimeoutExpired: Si el timeout se alcanza
+        """
+        self._thread.join(timeout)
+        
+        if self._thread.is_alive():
+            raise subprocess.TimeoutExpired("Thread", timeout)
+        
+        self._is_running = False
+        self._returncode = 0  # Asume que el hilo terminó normalmente
+        return self._returncode
+    
+    @property
+    def returncode(self):
+        """Simula la propiedad returncode de un proceso."""
+        if self._is_running and not self._thread.is_alive():
+            self._is_running = False
+            self._returncode = 0
+        
+        return self._returncode
+    
+    def is_alive(self):
+        """Comprueba si el hilo está en ejecución."""
+        return self._thread.is_alive()
 

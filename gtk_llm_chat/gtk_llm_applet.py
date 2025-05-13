@@ -5,15 +5,16 @@ import os
 import subprocess
 import signal
 import sys
+
+ALT=False
 try:
     import gi
     gi.require_version('Gtk', '3.0')
     gi.require_version('AyatanaAppIndicator3', '0.1')
     from gi.repository import Gio, Gtk, AyatanaAppIndicator3 as AppIndicator
 except Exception as e:
-    from gtk_llm_chat.tk_llm_applet import main
-    main()
-    sys.exit(0)
+    from gtk_llm_chat.tk_llm_applet import main as main_alt
+    ALT=True
 
 import gettext
 import locale
@@ -118,6 +119,8 @@ def create_menu(chat_history):
     return menu
 
 def main():
+    if ALT:
+        return(main_alt())
     chat_history = ChatHistory()
     icon_path = os.path.join(base_path, 'hicolor/scalable/apps/', 'org.fuentelibre.gtk_llm_Chat.svg')
     indicator = AppIndicator.Indicator.new(

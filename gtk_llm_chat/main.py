@@ -2,7 +2,6 @@
 Gtk LLM Chat - A frontend for `llm`
 """
 import argparse
-import os
 import sys
 import time
 
