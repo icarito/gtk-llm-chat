@@ -60,6 +60,25 @@ def parse_args(argv):
 
     return config
 
+def _legacy_applet_lockfile():
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), 'gtk-llm-legacy-applet.lock')
+
+def _create_legacy_lock():
+    lockfile = _legacy_applet_lockfile()
+    with open(lockfile, 'w') as f:
+        f.write(str(os.getpid()))
+
+def _remove_legacy_lock():
+    lockfile = _legacy_applet_lockfile()
+    try:
+        os.remove(lockfile)
+    except FileNotFoundError:
+        pass
+
+def _is_legacy_lock_active():
+    lockfile = _legacy_applet_lockfile()
+    return os.path.exists(lockfile)
 
 def main(argv=None):
     """
@@ -72,9 +91,16 @@ def main(argv=None):
     config = parse_args(argv)
 
     if config.get('legacy_applet'):
-        from gtk_llm_applet import main
-        main(legacy=True)
-        return
+        if not _is_legacy_lock_active():
+            _create_legacy_lock()
+            try:
+                from tk_llm_applet import main
+                main(legacy=True)
+            finally:
+                _remove_legacy_lock()
+        else:
+            print("Legacy applet ya está corriendo (lockfile)")
+            return
 
     # Crear la aplicación y ejecutarla
     from chat_application import LLMChatApplication
@@ -89,9 +115,9 @@ def main(argv=None):
     if config.get('template'):
         cmd_args.append(f"--template={config['template']}")
     if config.get('applet'):
-        cmd_args.append(f"--applet")
+        cmd_args.append("--applet")
     if config.get('legacy_applet'):
-        cmd_args.append(f"--legacy-applet")
+        cmd_args.append("--legacy-applet")
     
     return chat_app.run(cmd_args)
 

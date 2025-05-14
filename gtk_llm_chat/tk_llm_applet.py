@@ -69,6 +69,12 @@ def create_menu(icon):
         MenuItem(_("Quit"), lambda icon, item: icon.stop())
     )
 
+def quit_app(icon, item):
+    """Cierra la aplicación."""
+    icon.stop()
+    # Aquí puedes agregar cualquier otra lógica de limpieza si es necesario
+    
+
 
 def load_icon():
     if getattr(sys, 'frozen', False):

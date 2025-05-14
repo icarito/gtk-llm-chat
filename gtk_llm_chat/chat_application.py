@@ -68,17 +68,40 @@ class LLMChatApplication(Adw.Application):
         debug_print(_("\nClosing application..."))
         self.quit()
 
-    # Simplificar el registro D-Bus con un enfoque más directo
-    def do_startup(self):
-        Adw.Application.do_startup(self)
+    def _should_start_tray(self):
+        # Solo iniciar tray y D-Bus en Linux
+        return sys.platform == 'linux'
 
-        # Configurar D-Bus usando Gio
+    def _should_use_legacy_applet(self):
+        # Forzar legacy en Mac
+        return sys.platform == 'darwin'
+
+    def _legacy_applet_lockfile(self):
+        # Lock file para el applet legacy
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), 'gtk-llm-legacy-applet.lock')
+
+    def _create_legacy_lock(self):
+        lockfile = self._legacy_applet_lockfile()
+        with open(lockfile, 'w') as f:
+            f.write(str(os.getpid()))
+
+    def _remove_legacy_lock(self):
+        lockfile = self._legacy_applet_lockfile()
+        try:
+            os.remove(lockfile)
+        except FileNotFoundError:
+            pass
+
+    def _is_legacy_lock_active(self):
+        lockfile = self._legacy_applet_lockfile()
+        return os.path.exists(lockfile)
+
+    def _register_dbus_interface(self):
+        # Configurar D-Bus usando Gio solo en Linux
         connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        # Obtener la información de la interfaz
         node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
         interface_info = node_info.interfaces[0]
-        
-        # Crear una función manejadora para métodos D-Bus
         def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
             if method_name == "OpenConversation":
                 cid = parameters.unpack()[0]
@@ -86,8 +109,6 @@ class LLMChatApplication(Adw.Application):
                 invocation.return_value(None)
             else:
                 invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
-        
-        # Registrar la interfaz D-Bus
         reg_id = connection.register_object(
             '/org/fuentelibre/ChatApplication',
             interface_info,
@@ -95,12 +116,17 @@ class LLMChatApplication(Adw.Application):
             None,  # get_property_handler
             None   # set_property_handler
         )
-        
         if reg_id > 0:
             self.dbus_registration_id = reg_id
             debug_print("Interfaz D-Bus registrada correctamente")
         else:
             debug_print("Error al registrar la interfaz D-Bus")
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        # Solo registrar D-Bus en Linux
+        if sys.platform=='linux':
+            self._register_dbus_interface()
 
         # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
@@ -126,11 +152,10 @@ class LLMChatApplication(Adw.Application):
         # Configure the application icon
         self._setup_icon()
 
-        # Setup system tray applet
-        GLib.idle_add(self._start_tray_applet)
-
-        # Supervisar el tray applet
-        GLib.timeout_add_seconds(1, self._handle_tray_exit)
+        # Solo iniciar tray y D-Bus en Linux
+        if self._should_start_tray():
+            GLib.idle_add(self._start_tray_applet)
+            GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
         # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
@@ -319,8 +344,21 @@ class LLMChatApplication(Adw.Application):
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
 
-        if not hasattr(self, '_applet_loaded'):
-            # Setup system tray applet
+        # En Mac forzar legacy applet y lock
+        if self._should_use_legacy_applet():
+            if not self._is_legacy_lock_active():
+                self._create_legacy_lock()
+                try:
+                    from gtk_llm_applet import main
+                    main(legacy=True)
+                finally:
+                    self._remove_legacy_lock()
+            else:
+                debug_print("Legacy applet ya está corriendo (lockfile)")
+            return
+
+        # En Linux, comportamiento normal
+        if not hasattr(self, '_applet_loaded') and self._should_start_tray():
             GLib.idle_add(self._start_tray_applet)
 
         self.open_conversation_window()
@@ -353,6 +391,11 @@ class LLMChatApplication(Adw.Application):
                     if cid in self._window_by_cid:
                         debug_print(f"Eliminando ventana del registro para CID: {cid}")
                         del self._window_by_cid[cid]
+                    # Si es la última ventana y no hay tray, salir (solo Linux)
+                    if self._should_start_tray():
+                        if len(self.get_windows()) <= 1 and (not self.tray_process or self.tray_process.poll() is not None):
+                            debug_print("Última ventana cerrada y tray no activo, saliendo de la aplicación")
+                            self.quit()
                     # Permitir el cierre de la ventana
                     return False
                 
