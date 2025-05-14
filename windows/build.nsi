@@ -162,7 +162,6 @@ Section "!${APPNAME}" sec_app
 
     CreateDirectory "$SMPROGRAMS\${APPNAME}"
     CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${FILENAME}.exe" "" "$INSTDIR\${ICON}"
-    CreateShortCut "$SMPROGRAMS\${APPNAME}\GTK LLM Applet.lnk" "$INSTDIR\gtk-llm-applet.exe" "" "$INSTDIR\${ICON}"
 
     ; Add ourselves to Add/Remove Programs
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
@@ -188,7 +187,7 @@ Section "!${APPNAME}" sec_app
     MessageBox MB_YESNO "Do you want ${APPNAME} applet to start with Windows?" IDYES add_startup
     goto skip_startup
     add_startup:
-        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "gtk-llm-applet" "$INSTDIR\gtk-llm-applet.exe"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "gtk-llm-chat --applet" "$INSTDIR\gtk-llm-applet.exe"
     skip_startup:
 
     ; Check if we need to reboot
