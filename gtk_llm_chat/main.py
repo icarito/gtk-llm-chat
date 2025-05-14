@@ -91,7 +91,7 @@ def main(argv=None):
     config = parse_args(argv)
 
     # Cambios para Mac: usar tk_llm_applet como legacy en Mac
-    if config.get('legacy_applet') or sys.platform=='darwin':
+    if config.get('legacy_applet') or sys.platform!='linux':
         if not _is_legacy_lock_active():
             _create_legacy_lock()
             from tk_llm_applet import main
