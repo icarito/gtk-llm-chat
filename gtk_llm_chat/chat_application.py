@@ -229,6 +229,7 @@ class LLMChatApplication(Adw.Application):
                 GLib.idle_add(self._start_tray_applet)
             else:
                 debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
+                self.quit()
                 
         # Mantener el timer activo solo si no estamos en proceso de cierre
         return not self._shutting_down
