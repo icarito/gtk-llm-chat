@@ -215,7 +215,7 @@ class LLMChatApplication(Adw.Application):
                     executable += ".exe"
                 elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
                     if os.environ.get('APPIMAGE'):
-                        debug_print('Error fatal, imposible hacer el icono')
+                        debug_print('Error fatal, imposible hacer el icono. *Esto debe ser un AppImage!*')
                         executable = os.environ.get('APPIMAGE')
                         args = ['--legacy-applet']
         else:
@@ -254,8 +254,9 @@ class LLMChatApplication(Adw.Application):
                 GLib.idle_add(self._start_tray_applet)
             else:
                 debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
-                return False
-                
+                if len(self.get_windows())==0:
+                    self.quit()
+        
         # Mantener el timer activo solo si no estamos en proceso de cierre
         return not self._shutting_down
 
@@ -360,6 +361,7 @@ class LLMChatApplication(Adw.Application):
         # En Linux, comportamiento normal
         if not hasattr(self, '_applet_loaded') and self._should_start_tray():
             GLib.idle_add(self._start_tray_applet)
+            GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
         self.open_conversation_window()
 
@@ -490,7 +492,6 @@ class LLMChatApplication(Adw.Application):
     def open_conversation_window(self, config=None):
         """
         Abre una ventana de conversación con la configuración dada.
-        Si no se proporciona configuración, usa la última configuración conocida.
         
         Args:
             config (dict, optional): Configuración para la ventana de conversación. 

@@ -95,7 +95,12 @@ def main(argv=None):
         if not _is_legacy_lock_active():
             _create_legacy_lock()
             from tk_llm_applet import main
-            main(legacy=True)
+            if sys.platform=='linux':
+                main(legacy=False)
+            else:
+                main(legacy=True)
+            if config.get('applet') or sys.platform=='linux':
+                return 0
         else:
             print("Legacy applet ya está corriendo (lockfile)")
 
