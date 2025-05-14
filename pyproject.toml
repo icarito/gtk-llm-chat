@@ -21,7 +21,6 @@ dependencies = [
     "llm-openrouter",
     "markdown-it-py",
     "python-ulid",
-    "dbus-next",
     "pystray",
     "watchdog"
 ]
