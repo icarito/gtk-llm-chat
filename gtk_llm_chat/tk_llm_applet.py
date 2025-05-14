@@ -61,13 +61,22 @@ def get_conversations_menu():
 
 def create_menu(icon):
     """Reconstruye todo el menú, llamando a get_conversations_menu()."""
-    return Menu(
-        MenuItem(_("New Conversation"), lambda icon, item: open_conversation()),
-        Menu.SEPARATOR,
-        *get_conversations_menu(),
-        Menu.SEPARATOR,
-        MenuItem(_("Quit"), lambda icon, item: icon.stop())
-    )
+    if sys.platform==darwin:
+        # Sorry no quit on MacOS!
+        return Menu(
+            MenuItem(_("New Conversation"), lambda icon, item: open_conversation()),
+            Menu.SEPARATOR,
+            *get_conversations_menu(),
+            Menu.SEPARATOR
+        )
+    else:
+        return Menu(
+            MenuItem(_("New Conversation"), lambda icon, item: open_conversation()),
+            Menu.SEPARATOR,
+            *get_conversations_menu(),
+            Menu.SEPARATOR,
+            MenuItem(_("Quit"), lambda icon, item: icon.stop())
+        )
 
 def quit_app(icon, item):
     """Cierra la aplicación."""
