@@ -215,21 +215,23 @@ class LLMChatApplication(Adw.Application):
         Monitorea el estado del tray applet y lo reinicia si ha terminado
         inesperadamente.
         """
-        if self.tray_process is None:
-            return True
+        # Si estamos en proceso de cierre o no hay applet, no hacer nada
+        if self._shutting_down or self.tray_process is None:
+            return False  # Detener el timer si estamos cerrando
             
         # Verificar si el proceso/hilo del applet ha terminado
         poll_result = self.tray_process.poll()
         if poll_result is not None:
             debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
             # Reiniciar solo si el código no es 0 y no estamos en proceso de cierre
-            if self.tray_process.returncode != 0 and not getattr(self, '_shutting_down', False):
+            if self.tray_process.returncode != 0 and not self._shutting_down:
                 debug_print("Reiniciando el tray applet...")
                 GLib.idle_add(self._start_tray_applet)
             else:
                 debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
                 
-        return True  # Mantener el timer activo
+        # Mantener el timer activo solo si no estamos en proceso de cierre
+        return not self._shutting_down
 
     def on_shutdown(self, app):
         """Handles application shutdown and unregisters D-Bus."""

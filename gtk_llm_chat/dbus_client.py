@@ -1,23 +1,28 @@
 """
 Cliente D-Bus común para los applets de GTK-LLM-Chat
 Proporciona funcionalidad D-Bus compartida para tk_llm_applet.py y gtk_llm_applet.py
+Utiliza GIO/GObject directamente para la comunicación
 """
 import os
 import sys
 import subprocess
 
-# Intentar importar dbus-next con manejo de errores
+# Intentar importar GIO/GObject para comunicación directa
 try:
-    import dbus_next
+    import gi
+    gi.require_version('Gio', '2.0')
+    gi.require_version('GLib', '2.0')
+    from gi.repository import Gio, GLib
+    have_gio = True
 except ImportError:
-    print("Warning: dbus_next not available, D-Bus communication will not work")
-    dbus_next = None
+    print("Warning: GIO/GObject not available, direct communication will not work")
+    have_gio = False
 
 
 def open_conversation_dbus(conversation_id=None):
     """
-    Envía un mensaje D-Bus para abrir una conversación.
-    Si D-Bus falla, usa el método de respaldo.
+    Envía un mensaje a la aplicación principal para abrir una conversación.
+    Utiliza GIO directamente a través de GApplication.
     
     Args:
         conversation_id: ID de la conversación a abrir, o None para una nueva
@@ -25,65 +30,67 @@ def open_conversation_dbus(conversation_id=None):
     Returns:
         bool: True si se envió con éxito, False si se usó el método de respaldo
     """
-    # Si dbus_next no está disponible, usar fallback inmediatamente
-    if dbus_next is None:
-        print("D-Bus no disponible, usando método alternativo")
+    # Si GIO no está disponible, usar fallback inmediatamente
+    if not have_gio:
+        print("GIO no disponible, usando método alternativo")
         fallback_open_conversation(conversation_id)
         return False
         
     try:
-        # Conectar al bus de sesión usando dbus-next
-        from dbus_next.aio import MessageBus
-        from dbus_next import Message, MessageType
-        import asyncio
-
-        # Función asíncrona para enviar el mensaje
-        async def send_dbus_message():
-            # Conexión al bus de sesión
-            bus = await MessageBus().connect()
-            
-            # Crear un mensaje D-Bus
-            message = Message(
-                destination='org.fuentelibre.ChatApplication',
-                path='/org/fuentelibre/ChatApplication',
-                interface='org.fuentelibre.ChatApplication',
-                member='OpenConversation',
-                signature='s',
-                body=[conversation_id or ""]
-            )
-            
-            # Enviar el mensaje y esperar respuesta
-            reply = await bus.call(message)
-            await bus.disconnect()
-            return reply
-
-        # Ejecutar la función asíncrona
+        # Crear una conexión D-Bus a través de GIO
+        connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        
+        # Preparar los parámetros para la llamada
+        parameters = GLib.Variant('(s)', [conversation_id or ""])
+        
+        # Llamar al método OpenConversation en la interfaz D-Bus
+        result = connection.call_sync(
+            'org.fuentelibre.ChatApplication',           # Nombre del bus
+            '/org/fuentelibre/ChatApplication',          # Ruta del objeto
+            'org.fuentelibre.ChatApplication',           # Interfaz
+            'OpenConversation',                          # Método
+            parameters,                                  # Parámetros
+            GLib.VariantType('()'),                      # Tipo de retorno (vacío)
+            Gio.DBusCallFlags.NONE,                      # Flags
+            -1,                                          # Timeout (default)
+            None                                         # Cancelable
+        )
+        
+        print("Conversación abierta con éxito mediante GIO")
+        return True
+        
+    except Exception as e:
+        print(f"Error al comunicarse mediante GIO: {e}")
+        # Intentar con una alternativa: GApplication directamente
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # Si no hay event loop activo, crear uno nuevo
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        reply = loop.run_until_complete(send_dbus_message())
-        
-        # Verificar si la respuesta indica error
-        if reply and getattr(reply, 'message_type', None) == MessageType.ERROR:
-            print(f"Error al abrir la conversación: {reply.body}")
+            print("Intentando con GApplication.open_remote...")
+            # Crear una instancia de GApplication para comunicación
+            app = Gio.Application.new('org.fuentelibre.gtk_llm_Chat', 
+                                      Gio.ApplicationFlags.IS_SERVICE)
+            
+            # Preparar los argumentos
+            args = []
+            if conversation_id:
+                args = ['--cid', str(conversation_id)]
+            
+            # Convertir argumentos a formato GVariant
+            arguments = GLib.Variant.new_strv(args)
+            
+            # Activar la aplicación remota
+            app.open_remote(arguments, None)
+            print("Aplicación activada mediante GApplication")
+            return True
+            
+        except Exception as e2:
+            print(f"Error al usar GApplication: {e2}")
+            # Usar el método de fallback como último recurso
             fallback_open_conversation(conversation_id)
             return False
-        
-        return True
-    except Exception as e:
-        print(f"Error al comunicarse con D-Bus: {e}")
-        # Usar el método de fallback si falla D-Bus
-        fallback_open_conversation(conversation_id)
-        return False
 
 
 def fallback_open_conversation(conversation_id=None):
     """
-    Método alternativo para abrir conversación si falla D-Bus.
+    Método alternativo para abrir conversación si fallan los métodos de GIO/GApplication.
     Inicia la aplicación directamente usando subprocess.
     
     Args:
@@ -92,6 +99,8 @@ def fallback_open_conversation(conversation_id=None):
     args = ['llm', 'gtk-chat']
     if conversation_id:
         args += ['--cid', str(conversation_id)]
+    
+    # Manejar caso de aplicación "congelada" (PyInstaller, etc.)
     if getattr(sys, 'frozen', False):
         base = os.path.abspath(os.path.dirname(sys.argv[0]))
         executable = "gtk-llm-chat"
@@ -104,6 +113,7 @@ def fallback_open_conversation(conversation_id=None):
         args = [os.path.join(base, executable)] + args[2:]
     
     try:
+        print(f"Iniciando aplicación con proceso: {args}")
         subprocess.Popen(args)
     except Exception as e:
         print(f"Error al iniciar la aplicación: {e}")
