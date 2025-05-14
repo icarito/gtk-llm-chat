@@ -96,12 +96,14 @@ def fallback_open_conversation(conversation_id=None):
     Args:
         conversation_id: ID de la conversación a abrir, o None para una nueva
     """
-    args = ['llm', 'gtk-chat']
+    # Preparar argumentos básicos
+    cmd_args = []
     if conversation_id:
-        args += ['--cid', str(conversation_id)]
+        cmd_args = ['--cid=' + str(conversation_id)]
     
     # Manejar caso de aplicación "congelada" (PyInstaller, etc.)
     if getattr(sys, 'frozen', False):
+        # Aplicación empaquetada (PyInstaller)
         base = os.path.abspath(os.path.dirname(sys.argv[0]))
         executable = "gtk-llm-chat"
         if sys.platform == "win32":
@@ -110,10 +112,18 @@ def fallback_open_conversation(conversation_id=None):
             base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
             if os.environ.get('APPIMAGE'):
                 executable = 'AppRun'
-        args = [os.path.join(base, executable)] + args[2:]
+        
+        full_cmd = [os.path.join(base, executable)] + cmd_args
+    else:
+        # Desarrollo - usar el intérprete Python actual
+        executable = sys.executable
+        # La ruta al módulo principal
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        main_script = os.path.join(script_dir, "main.py")
+        full_cmd = [executable, main_script] + cmd_args
     
     try:
-        print(f"Iniciando aplicación con proceso: {args}")
-        subprocess.Popen(args)
+        print(f"Iniciando aplicación con proceso: {full_cmd}")
+        subprocess.Popen(full_cmd)
     except Exception as e:
         print(f"Error al iniciar la aplicación: {e}")

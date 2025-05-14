@@ -151,7 +151,6 @@ class LLMChatApplication(Adw.Application):
             # Crear y registrar una nueva ventana
             window = self.create_chat_window(cid)
             self._window_by_cid[cid] = window
-            window.show()
         else:
             # Enfocar la ventana existente
             self._window_by_cid[cid].present()
@@ -171,6 +170,7 @@ class LLMChatApplication(Adw.Application):
             
         debug_print("Iniciando tray applet...")
 
+        """ # This may be needed on macos or in an ideal world
         try:
             from gtk_llm_applet import main
             # Usamos el adaptador para tener un hilo con API de proceso
@@ -181,7 +181,7 @@ class LLMChatApplication(Adw.Application):
         except Exception as e:
             debug_print(f"Error al iniciar el tray applet como hilo: {e}")
             # Si falla, continuamos con el método de proceso
-
+        """
 
         args = []
         if getattr(sys, 'frozen', False):
