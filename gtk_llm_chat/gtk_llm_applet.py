@@ -10,7 +10,7 @@ import locale
 
 # Importar el cliente D-Bus compartido
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from dbus_client import open_conversation_dbus
+from ipc_client import open_conversation_dbus
 
 ALT = False
 try:

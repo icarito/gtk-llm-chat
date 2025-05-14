@@ -70,7 +70,7 @@ class LLMChatApplication(Adw.Application):
 
     def _should_start_tray(self):
         # Solo iniciar tray y D-Bus en Linux
-        return sys.platform == 'linux'
+        return sys.platform != 'darwin'
 
     def _should_use_legacy_applet(self):
         # Forzar legacy en Mac

@@ -90,17 +90,14 @@ def main(argv=None):
     # Crear configuración desde argumentos
     config = parse_args(argv)
 
-    if config.get('legacy_applet'):
+    # Cambios para Mac: usar tk_llm_applet como legacy en Mac
+    if config.get('legacy_applet') or sys.platform=='darwin':
         if not _is_legacy_lock_active():
             _create_legacy_lock()
-            try:
-                from tk_llm_applet import main
-                main(legacy=True)
-            finally:
-                _remove_legacy_lock()
+            from tk_llm_applet import main
+            main(legacy=True)
         else:
             print("Legacy applet ya está corriendo (lockfile)")
-            return
 
     # Crear la aplicación y ejecutarla
     from chat_application import LLMChatApplication
@@ -122,4 +119,6 @@ def main(argv=None):
     return chat_app.run(cmd_args)
 
 if __name__ == "__main__":
-    sys.exit(main())
+    result = main()
+    _remove_legacy_lock()
+    sys.exit(result)
