@@ -61,7 +61,7 @@ def get_conversations_menu():
 
 def create_menu(icon):
     """Reconstruye todo el menú, llamando a get_conversations_menu()."""
-    if sys.platform==darwin:
+    if sys.platform=='darwin':
         # Sorry no quit on MacOS!
         return Menu(
             MenuItem(_("New Conversation"), lambda icon, item: open_conversation()),
