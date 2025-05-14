@@ -621,12 +621,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.timeout_add(50, scroll_after)
 
     def _on_close_request(self, window):
-        """Maneja el cierre de la ventana de manera elegante"""
-        debug_print("Close request received.")
-        if self.llm:
-            self.llm.cancel() # Intentar cancelar cualquier operación en curso
-        # No llamar a sys.exit() aquí
-        return False # Permitir cierre
+        # Eliminar del registro de ventanas si corresponde
+        app = self.get_application()
+        cid = getattr(self, 'cid', None)
+        if hasattr(app, '_window_by_cid') and cid and cid in app._window_by_cid:
+            debug_print(f"Eliminando ventana del registro para CID: {cid}")
+            del app._window_by_cid[cid]
+        # Lógica de cierre global: si es la última ventana y no hay tray, salir (solo Linux)
+        if hasattr(app, '_should_start_tray') and app._should_start_tray():
+            if len(app.get_windows()) <= 1 and (not getattr(app, 'tray_process', None) or app.tray_process.poll() is not None):
+                debug_print("Última ventana cerrada y tray no activo, saliendo de la aplicación (desde chat_window)")
+                app.quit()
+        # Permitir el cierre de la ventana
+        return False
 
     def _on_window_show(self, window):
         """Set focus to the input text when the window is shown."""

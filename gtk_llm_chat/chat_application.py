@@ -254,7 +254,7 @@ class LLMChatApplication(Adw.Application):
                 GLib.idle_add(self._start_tray_applet)
             else:
                 debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
-                self.quit()
+                return False
                 
         # Mantener el timer activo solo si no estamos en proceso de cierre
         return not self._shutting_down
@@ -387,20 +387,8 @@ class LLMChatApplication(Adw.Application):
                 debug_print(f"Ventana registrada para CID: {cid}")
                 
                 # Conectar señal de cierre para eliminar del registro
-                def on_window_close(window):
-                    if cid in self._window_by_cid:
-                        debug_print(f"Eliminando ventana del registro para CID: {cid}")
-                        del self._window_by_cid[cid]
-                    # Si es la última ventana y no hay tray, salir (solo Linux)
-                    if self._should_start_tray():
-                        if len(self.get_windows()) <= 1 and (not self.tray_process or self.tray_process.poll() is not None):
-                            debug_print("Última ventana cerrada y tray no activo, saliendo de la aplicación")
-                            self.quit()
-                    # Permitir el cierre de la ventana
-                    return False
-                
-                # Conectar después del manejador existente
-                window.connect_after("close-request", on_window_close)
+                # Ya no es necesario conectar un manejador de cierre aquí, la lógica está en LLMChatWindow
+
             
             # Presentar la ventana
             window.present()
