@@ -98,29 +98,35 @@ class LLMChatApplication(Adw.Application):
         return os.path.exists(lockfile)
 
     def _register_dbus_interface(self):
-        # Configurar D-Bus usando Gio solo en Linux
-        connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
-        interface_info = node_info.interfaces[0]
-        def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
-            if method_name == "OpenConversation":
-                cid = parameters.unpack()[0]
-                self.OpenConversation(cid)
-                invocation.return_value(None)
+        # Solo ejecutar en Linux
+        if sys.platform != 'linux':
+            return
+        try:
+            from gi.repository import Gio
+            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
+            interface_info = node_info.interfaces[0]
+            def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
+                if method_name == "OpenConversation":
+                    cid = parameters.unpack()[0]
+                    self.OpenConversation(cid)
+                    invocation.return_value(None)
+                else:
+                    invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
+            reg_id = connection.register_object(
+                '/org/fuentelibre/ChatApplication',
+                interface_info,
+                method_call_handler,
+                None,  # get_property_handler
+                None   # set_property_handler
+            )
+            if reg_id > 0:
+                self.dbus_registration_id = reg_id
+                debug_print("Interfaz D-Bus registrada correctamente")
             else:
-                invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
-        reg_id = connection.register_object(
-            '/org/fuentelibre/ChatApplication',
-            interface_info,
-            method_call_handler,
-            None,  # get_property_handler
-            None   # set_property_handler
-        )
-        if reg_id > 0:
-            self.dbus_registration_id = reg_id
-            debug_print("Interfaz D-Bus registrada correctamente")
-        else:
-            debug_print("Error al registrar la interfaz D-Bus")
+                debug_print("Error al registrar la interfaz D-Bus")
+        except Exception as e:
+            debug_print(f"Error al registrar D-Bus (solo debe ocurrir en Linux): {e}")
 
     def do_startup(self):
         Adw.Application.do_startup(self)
