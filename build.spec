@@ -1,8 +1,8 @@
-
 # -*- mode: python ; coding: utf-8 -*-
 
 from argparse import ArgumentParser
 from platform import system
+from PyInstaller.building.datastruct import TOC
 
 parser = ArgumentParser()
 parser.add_argument("--binary", action="store_true")
@@ -41,6 +41,9 @@ a = Analysis(
         'llm_gemini',
         'llm_openrouter',
         'llm_perplexity',
+        'llm_anthropic',
+        'llm_deepseek',
+        'llm_grok',
         'sqlite3',
         'ulid',
         'markdown_it',
@@ -54,6 +57,31 @@ a = Analysis(
         'locale',
     ]
 )
+
+# --- Inicio del código de filtrado ---
+# Filtrar libharfbuzz.0.dylib de Pillow de los binarios recolectados
+filtered_binaries = TOC()
+if hasattr(a, 'binaries') and isinstance(a.binaries, TOC):
+    for name, path, type_ in a.binaries:
+        # Comprobar si la ruta de origen contiene 'PIL' o 'Pillow' y el nombre del archivo es de HarfBuzz
+        # El nombre del archivo en el bundle podría ser simplemente 'libharfbuzz.0.dylib'
+        # o podría estar en una subcarpeta como 'PIL/__dot_dylibs/libharfbuzz.0.dylib'
+        # El path de origen es más fiable para identificar si viene de Pillow.
+        is_pillow_harfbuzz = False
+        if isinstance(path, str) and ('/PIL/' in path or '/Pillow/' in path or path.endswith('.dylibs/libharfbuzz.0.dylib')):
+            if 'libharfbuzz' in name.lower():
+                is_pillow_harfbuzz = True
+        
+        if is_pillow_harfbuzz:
+            print(f"INFO: build.spec: Excluding Pillow's HarfBuzz: name='{name}', path='{path}'")
+        else:
+            filtered_binaries.append((name, path, type_))
+    a.binaries = filtered_binaries
+else:
+    print("WARNING: build.spec: a.binaries no es una instancia de TOC o no existe, no se pudo filtrar HarfBuzz de Pillow.")
+
+# --- Fin del código de filtrado ---
+
 pyz = PYZ(a.pure)
 
 applet = Analysis(
