@@ -197,6 +197,7 @@ elif system() == "Darwin":
             exe,
             a.binaries,
             a.datas,
+	    applet_exe,
             applet.binaries,
             applet.datas,
             strip=False,
