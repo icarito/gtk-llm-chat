@@ -6,7 +6,8 @@ import os
 import sys
 import subprocess
 
-def open_conversation_dbus(conversation_id=None):
+
+def open_conversation(conversation_id=None):
     """
     Envía un mensaje a la aplicación principal para abrir una conversación.
     En Linux usa D-Bus (GIO), en otras plataformas hace fallback.
@@ -28,9 +29,9 @@ def open_conversation_dbus(conversation_id=None):
         connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         parameters = GLib.Variant('(s)', [conversation_id or ""])
         result = connection.call_sync(
-            'org.fuentelibre.ChatApplication',
-            '/org/fuentelibre/ChatApplication',
-            'org.fuentelibre.ChatApplication',
+            'org.fuentelibre.gtk_llm_Chat',
+            '/org/fuentelibre/gtk_llm_Chat',
+            'org.fuentelibre.gtk_llm_Chat',
             'OpenConversation',
             parameters,
             GLib.VariantType('()'),

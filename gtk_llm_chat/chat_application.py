@@ -30,7 +30,7 @@ def debug_print(*args, **kwargs):
 # Reemplazar la definición de la interfaz D-Bus con XML
 DBUS_INTERFACE_XML = """
 <node>
-  <interface name='org.fuentelibre.ChatApplication'>
+  <interface name='org.fuentelibre.gtk_llm_Chat'>
     <method name='OpenConversation'>
       <arg type='s' name='cid' direction='in'/>
     </method>
@@ -47,10 +47,7 @@ class LLMChatApplication(Adw.Application):
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE
         )
 
-        self.tray_process = None  # Subproceso del tray applet
         self._shutting_down = False  # Bandera para controlar proceso de cierre
-
-        # Inicializar un registro de ventanas por CID
         self._window_by_cid = {}  # Mapa de CID -> ventana
 
         # Add signal handler
@@ -68,35 +65,6 @@ class LLMChatApplication(Adw.Application):
         debug_print(_("\nClosing application..."))
         self.quit()
 
-    def _should_start_tray(self):
-        # Solo iniciar tray y D-Bus en Linux
-        return sys.platform != 'darwin'
-
-    def _should_use_legacy_applet(self):
-        # Forzar legacy en Mac
-        return sys.platform == 'darwin'
-
-    def _legacy_applet_lockfile(self):
-        # Lock file para el applet legacy
-        import tempfile
-        return os.path.join(tempfile.gettempdir(), 'gtk-llm-legacy-applet.lock')
-
-    def _create_legacy_lock(self):
-        lockfile = self._legacy_applet_lockfile()
-        with open(lockfile, 'w') as f:
-            f.write(str(os.getpid()))
-
-    def _remove_legacy_lock(self):
-        lockfile = self._legacy_applet_lockfile()
-        try:
-            os.remove(lockfile)
-        except FileNotFoundError:
-            pass
-
-    def _is_legacy_lock_active(self):
-        lockfile = self._legacy_applet_lockfile()
-        return os.path.exists(lockfile)
-
     def _register_dbus_interface(self):
         # Solo ejecutar en Linux
         if sys.platform != 'linux':
@@ -108,13 +76,19 @@ class LLMChatApplication(Adw.Application):
             interface_info = node_info.interfaces[0]
             def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
                 if method_name == "OpenConversation":
-                    cid = parameters.unpack()[0]
-                    self.OpenConversation(cid)
-                    invocation.return_value(None)
+                    try:
+                        cid = parameters.unpack()[0]
+                        debug_print(f"D-Bus: Recibida solicitud para abrir conversación CID: '{cid}'")
+                        # Usar GLib.idle_add para manejar la llamada en el hilo principal de GTK
+                        GLib.idle_add(lambda: self.OpenConversation(cid))
+                        invocation.return_value(None)
+                    except Exception as e:
+                        debug_print(f"D-Bus: Error al procesar OpenConversation: {e}")
+                        invocation.return_dbus_error("org.fuentelibre.Error.Failed", str(e))
                 else:
                     invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
             reg_id = connection.register_object(
-                '/org/fuentelibre/ChatApplication',
+                '/org/fuentelibre/gtk_llm_Chat',
                 interface_info,
                 method_call_handler,
                 None,  # get_property_handler
@@ -134,7 +108,6 @@ class LLMChatApplication(Adw.Application):
         if sys.platform=='linux':
             self._register_dbus_interface()
 
-        # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
 
         APP_NAME = "gtk-llm-chat"
@@ -155,136 +128,52 @@ class LLMChatApplication(Adw.Application):
             global _
             _ = lang_trans.gettext
 
-        # Configure the application icon
         self._setup_icon()
-
-        # Solo iniciar tray y D-Bus en Linux
-        if self._should_start_tray():
-            GLib.idle_add(self._start_tray_applet)
-            GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
         # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
         rename_action.connect("activate", self.on_rename_activate)
         self.add_action(rename_action)
 
-        delete_action = Gio.SimpleAction.new("delete", None)  # Corrected: parameter_type should be None
+        delete_action = Gio.SimpleAction.new("delete", None)
         delete_action.connect("activate", self.on_delete_activate)
         self.add_action(delete_action)
 
-        about_action = Gio.SimpleAction.new("about", None)  # Corrected: parameter_type should be None
+        about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
     def OpenConversation(self, cid):
         """Abrir una nueva conversación dado un CID"""
-        if cid not in self._window_by_cid:
+        debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
+        if not cid:
+            debug_print("D-Bus: CID vacío, abriendo nueva conversación")
+            self.open_conversation_window()
+            return
+            
+        window = self._window_by_cid.get(cid)
+        if window is None:
             # Crear y registrar una nueva ventana
-            window = self.create_chat_window(cid)
-            self._window_by_cid[cid] = window
+            debug_print(f"D-Bus: Creando nueva ventana para CID: {cid}")
+            self.open_conversation_window({'cid': cid})
         else:
-            # Enfocar la ventana existente
-            self._window_by_cid[cid].present()
+            # Verificamos si la ventana es válida antes de llamar a present()
+            if hasattr(window, 'present') and callable(window.present):
+                debug_print(f"D-Bus: Enfocando ventana existente para CID: {cid}")
+                window.present()
+            else:
+                debug_print(f"D-Bus: Error - ventana para CID {cid} no es válida, creando nueva")
+                del self._window_by_cid[cid]
+                self.open_conversation_window({'cid': cid})
 
     def create_chat_window(self, cid):
         """Crear una nueva ventana de chat"""
         # Implementación para crear una ventana de chat
         pass
 
-    def _start_tray_applet(self):
-        """
-        Inicia el tray applet en un subproceso si no está ya en ejecución.
-        """
-        if self.tray_process is not None and self.tray_process.poll() is None:
-            debug_print("El applet ya está en ejecución, no se inicia otro")
-            return False
-            
-        debug_print("Iniciando tray applet...")
-
-        """ # This may be needed on macos or in an ideal world
-        try:
-            from gtk_llm_applet import main
-            # Usamos el adaptador para tener un hilo con API de proceso
-            self.tray_process = ThreadToProcessAdapter(target_func=main)
-            self.tray_process.start()
-            debug_print(f"Tray applet iniciado como hilo adaptado con PID simulado: {self.tray_process.pid}")
-            return False
-        except Exception as e:
-            debug_print(f"Error al iniciar el tray applet como hilo: {e}")
-            # Si falla, continuamos con el método de proceso
-        """
-
-        args = []
-        if getattr(sys, 'frozen', False):
-                executable = "gtk-llm-applet"
-                if sys.platform == "win32":
-                    executable += ".exe"
-                elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-                    if os.environ.get('APPIMAGE'):
-                        debug_print('Error fatal, imposible hacer el icono. *Esto debe ser un AppImage!*')
-                        executable = os.environ.get('APPIMAGE')
-                        args = ['--legacy-applet']
-        else:
-            executable = sys.executable
-            args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]
-
-        try:
-            self.tray_process = subprocess.Popen(
-                [executable] + args,
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE
-            )
-            debug_print(f"Tray applet iniciado con PID: {self.tray_process.pid}")
-        except Exception as e:
-            debug_print(f"Error al iniciar el tray applet: {e}")
-            self.tray_process = None
-
-        return False
-
-    def _handle_tray_exit(self):
-        """
-        Monitorea el estado del tray applet y lo reinicia si ha terminado
-        inesperadamente.
-        """
-        # Si estamos en proceso de cierre o no hay applet, no hacer nada
-        if self._shutting_down or self.tray_process is None:
-            return False  # Detener el timer si estamos cerrando
-            
-        # Verificar si el proceso/hilo del applet ha terminado
-        poll_result = self.tray_process.poll()
-        if poll_result is not None:
-            debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
-            # Reiniciar solo si el código no es 0 y no estamos en proceso de cierre
-            if self.tray_process.returncode != 0 and not self._shutting_down:
-                debug_print("Reiniciando el tray applet...")
-                GLib.idle_add(self._start_tray_applet)
-            else:
-                debug_print("El tray applet terminó normalmente o estamos en proceso de cierre.")
-                if len(self.get_windows())==0:
-                    self.quit()
-        
-        # Mantener el timer activo solo si no estamos en proceso de cierre
-        return not self._shutting_down
-
     def on_shutdown(self, app):
         """Handles application shutdown and unregisters D-Bus."""
-        # Establecer bandera para evitar que se reinicie el applet durante el cierre
         self._shutting_down = True
-        
-        if self.tray_process:
-            debug_print("Terminando proceso/hilo del applet...")
-            try:
-                self.tray_process.terminate()
-                try:
-                    self.tray_process.wait(timeout=5)
-                    debug_print("Applet terminado correctamente.")
-                except subprocess.TimeoutExpired:
-                    debug_print("Applet no terminó a tiempo, intentando con kill().")
-                    self.tray_process.kill()
-                    self.tray_process.wait()
-            except Exception as e:
-                debug_print(f"Excepción al terminar el applet: {e}")
-
         if hasattr(self, 'dbus_registration_id'):
             connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             connection.unregister_object(self.dbus_registration_id)
@@ -350,24 +239,6 @@ class LLMChatApplication(Adw.Application):
         """Activa la aplicación y crea una nueva ventana utilizando la configuración actual."""
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
-
-        # En Mac forzar legacy applet y lock
-        if self._should_use_legacy_applet():
-            if not self._is_legacy_lock_active():
-                self._create_legacy_lock()
-                try:
-                    from gtk_llm_applet import main
-                    main(legacy=True)
-                finally:
-                    self._remove_legacy_lock()
-            else:
-                debug_print("Legacy applet ya está corriendo (lockfile)")
-            return
-
-        # En Linux, comportamiento normal
-        if not hasattr(self, '_applet_loaded') and self._should_start_tray():
-            GLib.idle_add(self._start_tray_applet)
-            GLib.timeout_add_seconds(1, self._handle_tray_exit)
 
         self.open_conversation_window()
 
@@ -546,94 +417,4 @@ class LLMChatApplication(Adw.Application):
                 # Crear una nueva ventana sin CID específico
                 debug_print("Creando nueva ventana sin CID específico")
                 return self._create_new_window_with_config(conversation_config)
-
-
-class ThreadToProcessAdapter:
-    """
-    Adapta un objeto Thread para que exponga una API similar a un objeto Process.
-    Esto permite usar hilos con un código que espera interactuar con procesos.
-    """
-    def __init__(self, target_func, daemon=True, **kwargs):
-        """
-        Inicializa el adaptador creando un Thread interno.
-        
-        Args:
-            target_func: La función que debe ejecutar el hilo
-            daemon: Si el hilo debe ser daemon (termina cuando el programa principal termina)
-            **kwargs: Argumentos adicionales para el constructor del Thread
-        """
-        self._thread = threading.Thread(target=target_func, daemon=daemon, **kwargs)
-        self._is_running = False
-        self._returncode = None
-        self.pid = hash(self._thread)  # Simular un ID de proceso
-    
-    def start(self):
-        """Inicia el hilo y actualiza el estado interno."""
-        self._thread.start()
-        self._is_running = True
-    
-    def poll(self):
-        """
-        Simula el comportamiento de poll() de un proceso.
-        
-        Returns:
-            None si el hilo está en ejecución, o un código de retorno si ha terminado.
-        """
-        if self._is_running and not self._thread.is_alive():
-            self._is_running = False
-            self._returncode = 0  # Asume que el hilo terminó normalmente
-            return self._returncode
-        
-        return None if self._is_running else self._returncode
-    
-    def terminate(self):
-        """
-        Simula el comportamiento de terminate() de un proceso.
-        
-        Como los hilos en Python no se pueden terminar de manera forzada,
-        esto simplemente registra la intención (los hilos daemon terminarán
-        cuando el programa principal termine).
-        """
-        debug_print("Thread no puede ser terminado directamente. Se marca para terminar.")
-        self._is_running = False
-        self._returncode = 0  # Simula una terminación "exitosa"
-    
-    def kill(self):
-        """Simula el comportamiento de kill() de un proceso. Similar a terminate()."""
-        self.terminate()
-    
-    def wait(self, timeout=None):
-        """
-        Simula el comportamiento de wait() de un proceso.
-        
-        Args:
-            timeout: Tiempo máximo de espera en segundos
-        
-        Returns:
-            El código de retorno del hilo
-        
-        Raises:
-            subprocess.TimeoutExpired: Si el timeout se alcanza
-        """
-        self._thread.join(timeout)
-        
-        if self._thread.is_alive():
-            raise subprocess.TimeoutExpired("Thread", timeout)
-        
-        self._is_running = False
-        self._returncode = 0  # Asume que el hilo terminó normalmente
-        return self._returncode
-    
-    @property
-    def returncode(self):
-        """Simula la propiedad returncode de un proceso."""
-        if self._is_running and not self._thread.is_alive():
-            self._is_running = False
-            self._returncode = 0
-        
-        return self._returncode
-    
-    def is_alive(self):
-        """Comprueba si el hilo está en ejecución."""
-        return self._thread.is_alive()
 

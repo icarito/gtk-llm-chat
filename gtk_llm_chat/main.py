@@ -4,45 +4,26 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import sys
 import time
-import os
-import subprocess
+from platform_utils import launch_tray_applet
 
-# Record start time if benchmarking
+# Benchmark
 benchmark_startup = '--benchmark-startup' in sys.argv
 start_time = time.time() if benchmark_startup else None
 
 def parse_args(argv):
     """Parsea los argumentos de la línea de comandos"""
     parser = argparse.ArgumentParser(description='GTK Frontend para LLM')
-    parser.add_argument('--cid', type=str,
-                        help='ID de la conversación a continuar')
+    parser.add_argument('--cid', type=str, help='ID de la conversación a continuar')
     parser.add_argument('-s', '--system', type=str, help='Prompt del sistema')
     parser.add_argument('-m', '--model', type=str, help='Modelo a utilizar')
-    parser.add_argument('-c', '--continue-last', action='store_true',
-                        help='Continuar última conversación')
-    parser.add_argument('-t', '--template', type=str,
-                        help='Template a utilizar')
-    parser.add_argument('-p', '--param', nargs=2, action='append',
-                        metavar=('KEY', 'VALUE'),
-                        help='Parámetros para el template')
-    parser.add_argument('-o', '--option', nargs=2, action='append',
-                        metavar=('KEY', 'VALUE'),
-                        help='Opciones para el modelo')
-    parser.add_argument('-f', '--fragment', action='append',
-                        metavar='FRAGMENT',
-                        help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
-    parser.add_argument('--benchmark-startup', action='store_true',
-                        help='Mide el tiempo hasta que la ventana se muestra y sale.')
-    parser.add_argument('--applet', action='store_true',
-                        help='Start applet')
-    parser.add_argument('--legacy-applet', action='store_true',
-                        help='_internal_')
-
-
-    # Parsear solo nuestros argumentos
+    parser.add_argument('-c', '--continue-last', action='store_true', help='Continuar última conversación')
+    parser.add_argument('-t', '--template', type=str, help='Template a utilizar')
+    parser.add_argument('-p', '--param', nargs=2, action='append', metavar=('KEY', 'VALUE'), help='Parámetros para el template')
+    parser.add_argument('-o', '--option', nargs=2, action='append', metavar=('KEY', 'VALUE'), help='Opciones para el modelo')
+    parser.add_argument('-f', '--fragment', action='append', metavar='FRAGMENT', help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
+    parser.add_argument('--benchmark-startup', action='store_true', help='Mide el tiempo hasta que la ventana se muestra y sale.')
+    parser.add_argument('--applet', action='store_true', help='Inicia el applet de bandeja')
     args = parser.parse_args(argv[1:])
-
-    # Crear diccionario de configuración
     config = {
         'cid': args.cid,
         'system': args.system,
@@ -54,61 +35,26 @@ def parse_args(argv):
         'fragments': args.fragment,
         'benchmark_startup': args.benchmark_startup,
         'start_time': start_time,
-        'applet': args.applet,
-        'legacy_applet': args.legacy_applet
+        'applet': args.applet
     }
-
     return config
-
-def _legacy_applet_lockfile():
-    import tempfile
-    return os.path.join(tempfile.gettempdir(), 'gtk-llm-legacy-applet.lock')
-
-def _create_legacy_lock():
-    lockfile = _legacy_applet_lockfile()
-    with open(lockfile, 'w') as f:
-        f.write(str(os.getpid()))
-
-def _remove_legacy_lock():
-    lockfile = _legacy_applet_lockfile()
-    try:
-        os.remove(lockfile)
-    except FileNotFoundError:
-        pass
-
-def _is_legacy_lock_active():
-    lockfile = _legacy_applet_lockfile()
-    return os.path.exists(lockfile)
 
 def main(argv=None):
     """
-    Aquí inicia todo
+    Punto de entrada principal
     """
     if argv is None:
         argv = sys.argv
-
-    # Crear configuración desde argumentos
     config = parse_args(argv)
 
-    # Cambios para Mac: usar tk_llm_applet como legacy en Mac
-    if config.get('legacy_applet') or sys.platform!='linux':
-        if not _is_legacy_lock_active():
-            _create_legacy_lock()
-            from tk_llm_applet import main
-            if sys.platform=='linux':
-                main(legacy=False)
-            else:
-                main(legacy=True)
-            if config.get('applet') or sys.platform=='linux':
-                return 0
-        else:
-            print("Legacy applet ya está corriendo (lockfile)")
+    # Si se pide el applet, lanzarlo y salir
+    if config.get('applet'):
+        launch_tray_applet(config)
+        return 0
 
-    # Crear la aplicación y ejecutarla
+    # Lanzar la aplicación principal
     from chat_application import LLMChatApplication
     chat_app = LLMChatApplication(config)
-
-    # Si hay argumentos de línea de comandos para el CID, model, etc., pasarlos explícitamente
     cmd_args = []
     if config.get('cid'):
         cmd_args.append(f"--cid={config['cid']}")
@@ -116,14 +62,8 @@ def main(argv=None):
         cmd_args.append(f"--model={config['model']}")
     if config.get('template'):
         cmd_args.append(f"--template={config['template']}")
-    if config.get('applet'):
-        cmd_args.append("--applet")
-    if config.get('legacy_applet'):
-        cmd_args.append("--legacy-applet")
-    
     return chat_app.run(cmd_args)
 
 if __name__ == "__main__":
     result = main()
-    _remove_legacy_lock()
     sys.exit(result)
