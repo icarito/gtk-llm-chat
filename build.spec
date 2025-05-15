@@ -18,7 +18,8 @@ a = Analysis(
             'icons': ['Adwaita'],
             'themes': ['Adwaita'],
             'module-versions': {
-                'Gtk': '4.0'
+                'Gtk': '4.0',
+		'HarfBuzz': '0.0'
             }
         }
     },
@@ -28,7 +29,8 @@ a = Analysis(
     optimize=2,
     datas=[
         ('po', 'po'),
-        ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor')
+        ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
+        ('windows/*.png', 'windows')
     ],
     hiddenimports=[
         'gettext',
