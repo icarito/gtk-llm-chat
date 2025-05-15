@@ -57,7 +57,6 @@ include = ["gtk_llm_chat"]
 
 [project.scripts]
 gtk-llm-chat = "gtk_llm_chat.main:main"
-gtk-llm-applet = "gtk_llm_chat.gtk_llm_applet:main"
 
 [project.entry-points."llm"]
 gui = "gtk_llm_chat.llm_gui"
