@@ -2,7 +2,6 @@
 
 from argparse import ArgumentParser
 from platform import system
-from PyInstaller.building.datastruct import TOC
 
 parser = ArgumentParser()
 parser.add_argument("--binary", action="store_true")
@@ -18,8 +17,7 @@ a = Analysis(
             'icons': ['Adwaita'],
             'themes': ['Adwaita'],
             'module-versions': {
-                'Gtk': '4.0',
-		'HarfBuzz': '0.0'
+                'Gtk': '4.0'
             }
         }
     },
@@ -55,67 +53,12 @@ a = Analysis(
         'gtk_llm_chat.llm_client',
         'gtk_llm_chat._version',
         'locale',
+	'pystray',
+	'watchdog'
     ]
 )
-
-# --- Inicio del código de filtrado ---
-# Filtrar libharfbuzz.0.dylib de Pillow de los binarios recolectados
-filtered_binaries = TOC()
-if hasattr(a, 'binaries') and isinstance(a.binaries, TOC):
-    for name, path, type_ in a.binaries:
-        # Comprobar si la ruta de origen contiene 'PIL' o 'Pillow' y el nombre del archivo es de HarfBuzz
-        # El nombre del archivo en el bundle podría ser simplemente 'libharfbuzz.0.dylib'
-        # o podría estar en una subcarpeta como 'PIL/__dot_dylibs/libharfbuzz.0.dylib'
-        # El path de origen es más fiable para identificar si viene de Pillow.
-        is_pillow_harfbuzz = False
-        if isinstance(path, str) and ('/PIL/' in path or '/Pillow/' in path or path.endswith('.dylibs/libharfbuzz.0.dylib')):
-            if 'libharfbuzz' in name.lower():
-                is_pillow_harfbuzz = True
-        
-        if is_pillow_harfbuzz:
-            print(f"INFO: build.spec: Excluding Pillow's HarfBuzz: name='{name}', path='{path}'")
-        else:
-            filtered_binaries.append((name, path, type_))
-    a.binaries = filtered_binaries
-else:
-    print("WARNING: build.spec: a.binaries no es una instancia de TOC o no existe, no se pudo filtrar HarfBuzz de Pillow.")
-
-# --- Fin del código de filtrado ---
 
 pyz = PYZ(a.pure)
-
-applet = Analysis(
-    ['gtk_llm_chat/gtk_llm_applet.py'],
-    pathex=['gtk_llm_chat'],
-    binaries=[],
-    hookspath=['hooks'],
-    hooksconfig={
-        'gi': {
-            'icons': ['Adwaita'],
-            'themes': ['Adwaita'],
-            'module-versions': {
-                'Gtk': '3.0'
-            }
-        }
-    },
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=2,
-    datas=[
-        ('po', 'po'),
-        ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
-        ('windows/*.png', 'windows')
-    ],
-    hiddenimports=[
-        'gettext',
-        'sqlite3',
-        'ulid',
-        'gtk_llm_chat.db_operations',
-        'locale',
-    ]
-)
-applet_pyz = PYZ(applet.pure)
 
 if system() == "Linux":
     if not options.binary:
@@ -136,29 +79,10 @@ if system() == "Linux":
             codesign_identity=None,
             entitlements_file=None,
         )
-        applet_exe = EXE(
-            applet_pyz,
-            applet.scripts,
-            [],
-            exclude_binaries=True,
-            name='gtk-llm-applet',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
         coll = COLLECT(
             exe,
             a.binaries,
             a.datas,
-            applet.binaries,
-            applet.datas,
             strip=False,
             upx=True,
             upx_exclude=[],
@@ -205,30 +129,10 @@ elif system() == "Darwin":
             codesign_identity=None,
             entitlements_file=None,
         )
-        applet_exe = EXE(
-            applet_pyz,
-            applet.scripts,
-            [],
-            exclude_binaries=True,
-            name='gtk-llm-applet',
-            icon='macos/org.fuentelibre.gtk_llm_Chat.icns',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
         coll = COLLECT(
             exe,
             a.binaries,
             a.datas,
-            applet.binaries,
-            applet.datas,
             strip=False,
             upx=True,
             upx_exclude=[],
@@ -283,30 +187,10 @@ elif system() == "Windows":
             codesign_identity=None,
             entitlements_file=None,
         )
-        applet_exe = EXE(
-            applet_pyz,
-            applet.scripts,
-            [],
-            exclude_binaries=True,
-            name='gtk-llm-applet',
-            icon='windows/org.fuentelibre.gtk_llm_Chat.ico',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
         coll = COLLECT(
             exe,
             a.binaries,
             a.datas,
-            applet.binaries,
-            applet.datas,
             strip=False,
             upx=True,
             upx_exclude=[],
