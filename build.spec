@@ -3,10 +3,6 @@
 from argparse import ArgumentParser
 from platform import system
 from PyInstaller.building.datastruct import TOC
-<<<<<<< HEAD
-=======
-import os
->>>>>>> 062775f (Attempt  to fix harfbuzz error on mac)
 
 parser = ArgumentParser()
 parser.add_argument("--binary", action="store_true")
@@ -63,7 +59,6 @@ a = Analysis(
 )
 
 # --- Inicio del código de filtrado ---
-<<<<<<< HEAD
 # Filtrar libharfbuzz.0.dylib de Pillow de los binarios recolectados
 filtered_binaries = TOC()
 if hasattr(a, 'binaries') and isinstance(a.binaries, TOC):
@@ -77,46 +72,14 @@ if hasattr(a, 'binaries') and isinstance(a.binaries, TOC):
             if 'libharfbuzz' in name.lower():
                 is_pillow_harfbuzz = True
         
-=======
-# Excluir la HarfBuzz de Pillow y añadir la de Homebrew (GTK) si existe en macOS
-filtered_binaries = TOC()
-harfbuzz_path = '/opt/homebrew/lib/libharfbuzz.0.dylib'  # Apple Silicon
-def _harfbuzz_exists(path):
-    try:
-        return os.path.exists(path)
-    except Exception:
-        return False
-if not _harfbuzz_exists(harfbuzz_path):
-    harfbuzz_path = '/usr/local/lib/libharfbuzz.0.dylib'  # Intel
-extra_harfbuzz = None
-if system() == "Darwin" and _harfbuzz_exists(harfbuzz_path):
-    extra_harfbuzz = (os.path.basename(harfbuzz_path), harfbuzz_path, 'BINARY')
-
-if hasattr(a, 'binaries') and isinstance(a.binaries, TOC):
-    for name, path, type_ in a.binaries:
-        # Excluir cualquier HarfBuzz que venga de Pillow
-        is_pillow_harfbuzz = False
-        if 'libharfbuzz' in name.lower() and isinstance(path, str) and ('/PIL/' in path or '/Pillow/' in path or path.endswith('.dylibs/libharfbuzz.0.dylib')):
-            is_pillow_harfbuzz = True
->>>>>>> 062775f (Attempt  to fix harfbuzz error on mac)
         if is_pillow_harfbuzz:
             print(f"INFO: build.spec: Excluding Pillow's HarfBuzz: name='{name}', path='{path}'")
         else:
             filtered_binaries.append((name, path, type_))
-<<<<<<< HEAD
     a.binaries = filtered_binaries
 else:
     print("WARNING: build.spec: a.binaries no es una instancia de TOC o no existe, no se pudo filtrar HarfBuzz de Pillow.")
 
-=======
-    # Añadir la HarfBuzz de Homebrew si existe y no está ya incluida
-    if extra_harfbuzz and not any(name == extra_harfbuzz[0] for name, _, _ in filtered_binaries):
-        filtered_binaries.append(extra_harfbuzz)
-        print(f"INFO: build.spec: Including Homebrew HarfBuzz: {extra_harfbuzz[1]}")
-    a.binaries = filtered_binaries
-else:
-    print("WARNING: build.spec: a.binaries no es una instancia de TOC o no existe, no se pudo filtrar HarfBuzz de Pillow.")
->>>>>>> 062775f (Attempt  to fix harfbuzz error on mac)
 # --- Fin del código de filtrado ---
 
 pyz = PYZ(a.pure)
