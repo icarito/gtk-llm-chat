@@ -1,1 +1,1 @@
-brew install pygobject3 gtk4 adwaita-icon-theme libadwaita
+brew install pygobject3 gtk4 adwaita-icon-theme libadwaita gtk+3 appindicator3

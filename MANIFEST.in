@@ -2,7 +2,7 @@ include LICENSE
 include README.md
 include requirements.txt
 recursive-include gtk_llm_chat *.py
-recursive-include po/**/*.mo
+recursive-include po *.mo
 include desktop/*.desktop
 global-exclude *.pyc
 global-exclude *.pyo
