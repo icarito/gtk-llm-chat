@@ -2,7 +2,6 @@ import llm
 import click
 import time
 import sys
-from platform_utils import launch_tray_applet
 
 
 @llm.hookimpl
