@@ -9,7 +9,5 @@ llm-deepseek
 llm-perplexity
 llm-anthropic
 llm-openrouter
-pystray; sys_platform == "win32"
-watchdog; sys_platform == "win32"
-pystray; sys_platform == "darwin"
-watchdog; sys_platform == "darwin"
+pystray
+watchdog

@@ -1,6 +1,7 @@
 import llm
 import click
 import time
+import sys
 
 
 @llm.hookimpl
@@ -8,11 +9,28 @@ def register_commands(cli):
 
     @cli.command(name="gtk-applet")
     def run_applet():
-        """Runs the applet"""
-        from gtk_llm_chat.chat_application import LLMChatApplication
-        # Iniciar la aplicación en modo applet
-        app = LLMChatApplication()
-        return app.run(['--applet'])
+        """Runs the system tray applet without the main window"""
+        # Lanzamos solo el applet usando nuestro nuevo sistema unificado
+        from gtk_llm_chat.platform_utils import launch_tray_applet
+        launch_tray_applet({})
+        # En Linux, necesitamos un loop para mantener el proceso vivo
+        if sys.platform.startswith('linux'):
+            try:
+                import gi
+                gi.require_version('GLib', '2.0')
+                from gi.repository import GLib
+                loop = GLib.MainLoop()
+                loop.run()
+            except ImportError:
+                # Si no hay GLib, usamos un loop simple
+                import time
+                while True:
+                    time.sleep(1)
+        else:
+            # En otras plataformas, el applet ya tiene su propio loop
+            import time
+            while True:
+                time.sleep(1)
 
     @cli.command(name="gtk-chat")
     @click.option("--cid", type=str,
@@ -66,9 +84,7 @@ def register_commands(cli):
         # Record start time if benchmarking
         start_time = time.time() if benchmark_startup else None
 
-        from gtk_llm_chat.chat_application import LLMChatApplication
-        
-        # Crear diccionario de configuración
+        # Creamos la configuración en un diccionario
         config = {
             'cid': cid,
             'system': system,
@@ -77,13 +93,22 @@ def register_commands(cli):
             'template': template,
             'params': param,
             'options': option,
-            'fragments': fragment, # Add fragments to the config
-            'benchmark_startup': benchmark_startup, # Add benchmark flag
-            'start_time': start_time, # Pass start time if benchmarking
-            'applet': applet # Indicar si debe iniciarse en modo applet
+            'fragments': fragment,
+            'benchmark_startup': benchmark_startup,
+            'start_time': start_time,
+            'applet': applet
         }
         
-        # Crear y ejecutar la aplicación
+        # Si solo se quiere el applet, lo lanzamos directamente
+        if applet and not cid and not continue_last:
+            launch_tray_applet(config)
+            # El applet se lanza en otro proceso, así que tenemos que mantener vivo este
+            import time
+            while True:
+                time.sleep(1)
+        
+        # De lo contrario, iniciamos la aplicación completa
+        from gtk_llm_chat.chat_application import LLMChatApplication
         app = LLMChatApplication(config)
         
         # Transformar la configuración en argumentos de línea de comandos

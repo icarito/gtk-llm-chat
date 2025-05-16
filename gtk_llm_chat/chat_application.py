@@ -4,6 +4,7 @@ import re
 import signal
 import sys
 import subprocess
+import threading
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -26,18 +27,27 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 
+# Reemplazar la definición de la interfaz D-Bus con XML
+DBUS_INTERFACE_XML = """
+<node>
+  <interface name='org.fuentelibre.gtk_llm_Chat'>
+    <method name='OpenConversation'>
+      <arg type='s' name='cid' direction='in'/>
+    </method>
+  </interface>
+</node>
+"""
+
 class LLMChatApplication(Adw.Application):
     """Class for a chat instance"""
 
     def __init__(self, config=None):
         super().__init__(
             application_id="org.fuentelibre.gtk_llm_Chat",
-            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE  # Cambiar para permitir procesar argumentos
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE
         )
 
-        self.tray_process = None  # Subproceso del tray applet
-
-        # Inicializar un registro de ventanas por CID
+        self._shutting_down = False  # Bandera para controlar proceso de cierre
         self._window_by_cid = {}  # Mapa de CID -> ventana
 
         # Add signal handler
@@ -50,16 +60,54 @@ class LLMChatApplication(Adw.Application):
             if settings:
                 settings.set_property('gtk-font-name', 'Segoe UI')
 
-
     def _handle_sigint(self, signum, frame):
         """Handles SIGINT signal to close the application"""
         debug_print(_("\nClosing application..."))
         self.quit()
 
+    def _register_dbus_interface(self):
+        # Solo ejecutar en Linux
+        if sys.platform != 'linux':
+            return
+        try:
+            from gi.repository import Gio
+            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
+            interface_info = node_info.interfaces[0]
+            def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
+                if method_name == "OpenConversation":
+                    try:
+                        cid = parameters.unpack()[0]
+                        debug_print(f"D-Bus: Recibida solicitud para abrir conversación CID: '{cid}'")
+                        # Usar GLib.idle_add para manejar la llamada en el hilo principal de GTK
+                        GLib.idle_add(lambda: self.OpenConversation(cid))
+                        invocation.return_value(None)
+                    except Exception as e:
+                        debug_print(f"D-Bus: Error al procesar OpenConversation: {e}")
+                        invocation.return_dbus_error("org.fuentelibre.Error.Failed", str(e))
+                else:
+                    invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
+            reg_id = connection.register_object(
+                '/org/fuentelibre/gtk_llm_Chat',
+                interface_info,
+                method_call_handler,
+                None,  # get_property_handler
+                None   # set_property_handler
+            )
+            if reg_id > 0:
+                self.dbus_registration_id = reg_id
+                debug_print("Interfaz D-Bus registrada correctamente")
+            else:
+                debug_print("Error al registrar la interfaz D-Bus")
+        except Exception as e:
+            debug_print(f"Error al registrar D-Bus (solo debe ocurrir en Linux): {e}")
+
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # Solo registrar D-Bus en Linux
+        if sys.platform=='linux':
+            self._register_dbus_interface()
 
-        # Manejar instancias múltiples
         self.hold()  # Asegura que la aplicación no termine prematuramente
 
         APP_NAME = "gtk-llm-chat"
@@ -80,99 +128,55 @@ class LLMChatApplication(Adw.Application):
             global _
             _ = lang_trans.gettext
 
-        # Configure the application icon
         self._setup_icon()
-
-        # Setup system tray applet
-        GLib.idle_add(self._start_tray_applet)
-
-        # Supervisar el tray applet
-        GLib.timeout_add_seconds(1, self._handle_tray_exit)
-
 
         # Configure actions
         rename_action = Gio.SimpleAction.new("rename", None)
         rename_action.connect("activate", self.on_rename_activate)
         self.add_action(rename_action)
 
-        delete_action = Gio.SimpleAction.new("delete", None)  # Corrected: parameter_type should be None
+        delete_action = Gio.SimpleAction.new("delete", None)
         delete_action.connect("activate", self.on_delete_activate)
         self.add_action(delete_action)
 
-        about_action = Gio.SimpleAction.new("about", None)  # Corrected: parameter_type should be None
+        about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
-    def _start_tray_applet(self):
-        """
-        Inicia el tray applet en un subproceso si no está ya en ejecución.
-        """
-        if self.tray_process is not None and self.tray_process.poll() is None:
-            debug_print("El applet ya está en ejecución, no se inicia otro")
-            return False
+    def OpenConversation(self, cid):
+        """Abrir una nueva conversación dado un CID"""
+        debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
+        if not cid:
+            debug_print("D-Bus: CID vacío, abriendo nueva conversación")
+            self.open_conversation_window()
+            return
             
-        debug_print("Iniciando tray applet...")
-
-        args = []
-        base = os.path.abspath(os.path.dirname(sys.argv[0]))
-        if getattr(sys, 'frozen', False):
-                executable = "gtk-llm-applet"
-                if sys.platform == "win32":
-                    executable += ".exe"
-                elif sys.platform == "linux" and os.environ.get('_PYI_ARCHIVE_FILE'):
-                    base = os.path.dirname(os.environ.get('_PYI_ARCHIVE_FILE'))
-                    if os.environ.get('APPIMAGE'):
-                        executable = 'AppRun'
+        window = self._window_by_cid.get(cid)
+        if window is None:
+            # Crear y registrar una nueva ventana
+            debug_print(f"D-Bus: Creando nueva ventana para CID: {cid}")
+            self.open_conversation_window({'cid': cid})
         else:
-            executable = sys.executable
-            args += [os.path.join("gtk_llm_chat", "gtk_llm_applet.py")]
-
-        try:
-            args += ['--applet']
-            self.tray_process = subprocess.Popen(
-                [executable] + args,
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE
-            )
-            debug_print(f"Tray applet iniciado con PID: {self.tray_process.pid}")
-        except Exception as e:
-            debug_print(f"Error al iniciar el tray applet: {e}")
-            self.tray_process = None
-
-        return False
-
-    def _handle_tray_exit(self):
-        """
-        Monitorea el estado del tray applet y lo reinicia si ha terminado
-        inesperadamente.
-        """
-        if self.tray_process is None:
-            return True
-            
-        # Verificar si el proceso del applet ha terminado
-        if self.tray_process.poll() is not None:
-            debug_print(f"El tray applet terminó con código: {self.tray_process.returncode}")
-            if self.tray_process.returncode != 0:
-                debug_print("Reiniciando el tray applet...")
-                GLib.idle_add( self._start_tray_applet)
+            # Verificamos si la ventana es válida antes de llamar a present()
+            if hasattr(window, 'present') and callable(window.present):
+                debug_print(f"D-Bus: Enfocando ventana existente para CID: {cid}")
+                window.present()
             else:
-                debug_print("El tray applet terminó normalmente.")
-                self.quit()
-                
-        return True  # Mantener el timer activo
+                debug_print(f"D-Bus: Error - ventana para CID {cid} no es válida, creando nueva")
+                del self._window_by_cid[cid]
+                self.open_conversation_window({'cid': cid})
+
+    def create_chat_window(self, cid):
+        """Crear una nueva ventana de chat"""
+        # Implementación para crear una ventana de chat
+        pass
 
     def on_shutdown(self, app):
-        """Handles application shutdown and terminates the tray process."""
-        if self.tray_process:
-            debug_print("Terminando proceso del applet...")
-            self.tray_process.terminate()
-            try:
-                self.tray_process.wait(timeout=5)
-                debug_print("Proceso terminado correctamente.")
-            except subprocess.TimeoutExpired:
-                debug_print("Proceso no terminó a tiempo, matando a la fuerza.")
-                self.tray_process.kill()
-                self.tray_process.wait()
+        """Handles application shutdown and unregisters D-Bus."""
+        self._shutting_down = True
+        if hasattr(self, 'dbus_registration_id'):
+            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            connection.unregister_object(self.dbus_registration_id)
 
     def get_application_version(self):
         """
@@ -206,6 +210,7 @@ class LLMChatApplication(Adw.Application):
         
         config = {}
         only_applet = False
+        legacy_applet = False
         for arg in args:
             if arg.startswith("--cid="):
                 config['cid'] = arg.split("=", 1)[1]
@@ -216,6 +221,8 @@ class LLMChatApplication(Adw.Application):
                 config['template'] = arg.split("=", 1)[1]
             elif arg.startswith("--applet"):
                 only_applet = True
+            elif arg.startswith("--legacy-applet"):
+                legacy_applet = True
         
         # Guardar esta configuración para usarla en do_activate
         debug_print(f"Configuración preparada para do_activate: {config}")
@@ -223,6 +230,8 @@ class LLMChatApplication(Adw.Application):
         # Abrir ventana de conversación con la configuración extraída
         if not only_applet:
             self.open_conversation_window(config)
+        if legacy_applet:
+            self._applet_loaded = True
         
         return 0
 
@@ -231,7 +240,6 @@ class LLMChatApplication(Adw.Application):
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
 
-        print (2)
         self.open_conversation_window()
 
     def _create_new_window_with_config(self, config):
@@ -258,15 +266,8 @@ class LLMChatApplication(Adw.Application):
                 debug_print(f"Ventana registrada para CID: {cid}")
                 
                 # Conectar señal de cierre para eliminar del registro
-                def on_window_close(window):
-                    if cid in self._window_by_cid:
-                        debug_print(f"Eliminando ventana del registro para CID: {cid}")
-                        del self._window_by_cid[cid]
-                    # Permitir el cierre de la ventana
-                    return False
-                
-                # Conectar después del manejador existente
-                window.connect_after("close-request", on_window_close)
+                # Ya no es necesario conectar un manejador de cierre aquí, la lógica está en LLMChatWindow
+
             
             # Presentar la ventana
             window.present()
@@ -274,8 +275,6 @@ class LLMChatApplication(Adw.Application):
             return window
         except Exception as e:
             debug_print(f"Error al crear nueva ventana: {e}")
-            import traceback
-            debug_print(traceback.format_exc())
             
             # En caso de error, activar la ventana normalmente
             self.activate()
@@ -370,7 +369,6 @@ class LLMChatApplication(Adw.Application):
     def open_conversation_window(self, config=None):
         """
         Abre una ventana de conversación con la configuración dada.
-        Si no se proporciona configuración, usa la última configuración conocida.
         
         Args:
             config (dict, optional): Configuración para la ventana de conversación. 

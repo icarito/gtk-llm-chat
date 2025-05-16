@@ -124,13 +124,45 @@ class LLMClient(GObject.Object):
         """Internal method to load a model. Can be called from init or set_model."""
         current_cid = self.config.get('cid') # Store current cid
         try:
+            # Asegurar que los plugins estén cargados, pero sin forzar recarga
+            try:
+                from llm.plugins import load_plugins, pm
+                if not hasattr(llm.plugins, '_loaded') or not llm.plugins._loaded:
+                    # Solo cargar si no están ya cargados
+                    load_plugins()
+                    debug_print("LLMClient: Plugins cargados correctamente en _load_model_internal")
+                else:
+                    debug_print("LLMClient: Plugins ya estaban cargados, omitiendo carga en _load_model_internal")
+            except Exception as e:
+                debug_print(f"LLMClient: Error verificando/cargando plugins en _load_model_internal: {e}")
+            
             # Determine the model_id to load
             if model_id is None:
                 # Use config or default if no specific model_id is provided (initial load)
                 model_id = self.config.get('model') or llm.get_default_model()
 
             debug_print(f"LLMClient: Attempting to load model: {model_id} (in _load_model_internal)")
-            new_model = llm.get_model(model_id)  # Load the potentially new model
+            
+            # Verificar modelos disponibles
+            available_models = llm.get_models()
+            debug_print(f"LLMClient: Hay {len(available_models)} modelos disponibles")
+            
+            # Buscar modelo por ID exacto
+            model_found = False
+            for model in available_models:
+                if getattr(model, 'model_id', None) == model_id:
+                    model_found = True
+                    break
+            
+            if not model_found and available_models:
+                # Si el modelo no se encuentra, usar el primer modelo disponible
+                fallback_model = available_models[0]
+                fallback_id = getattr(fallback_model, 'model_id', None)
+                debug_print(f"LLMClient: Modelo {model_id} no encontrado, usando alternativa: {fallback_id}")
+                model_id = fallback_id
+            
+            # Cargar el modelo
+            new_model = llm.get_model(model_id)
             self.model = new_model  # Assign the new model
             debug_print(f"LLMClient: Using model {self.model.model_id}")
             
@@ -165,6 +197,8 @@ class LLMClient(GObject.Object):
             self._init_error = str(e)
             # Don't overwrite self.model if loading fails
             GLib.idle_add(self.emit, 'error', f"Error inesperado al cargar modelo: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_stream(self, prompt: str):
         success = False
@@ -472,4 +506,18 @@ class LLMClient(GObject.Object):
 
         debug_print(f"No se encontró proveedor para el modelo: {model_id}")
         return "Unknown Provider"  # Si no se encuentra el modelo
+        
+    def get_all_models(self):
+        """Obtiene todos los modelos disponibles. Utilizado para compartir estado entre componentes."""
+        try:
+            from llm.plugins import load_plugins
+            # Asegurar que los plugins estén cargados, pero sin forzar recarga
+            if not hasattr(llm.plugins, '_loaded') or not llm.plugins._loaded:
+                load_plugins()
+                debug_print("LLMClient: Plugins cargados en get_all_models")
+            
+            return llm.get_models()
+        except Exception as e:
+            debug_print(f"LLMClient: Error obteniendo modelos: {e}")
+            return []
 GObject.type_register(LLMClient)
