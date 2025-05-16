@@ -23,26 +23,25 @@ def is_frozen():
 
 def launch_tray_applet(config):
     """
-    Lanza el applet de bandeja como subproceso.
-    Si está frozen, relanza el propio ejecutable con --applet.
-    Si no, ejecuta tray_applet.py con el intérprete.
+    Lanza el applet de bandeja
     """
-    if is_frozen():
-        # Relanzar el propio ejecutable con --applet
-        args = [sys.executable, "--applet"]
-        if config.get('cid'):
-            args += ["--cid", config['cid']]
-        print(f"[platform_utils] Lanzando applet (frozen): {args}")
-        subprocess.Popen(args)
-    else:
-        # Ejecutar tray_applet.py con el intérprete
-        applet_path = os.path.join(os.path.dirname(__file__), 'tray_applet.py')
-        args = [sys.executable, applet_path]
-        if config.get('cid'):
-            args += ['--cid', config['cid']]
-        print(f"[platform_utils] Lanzando applet (no frozen): {args}")
-        subprocess.Popen(args)
-
+    try:
+        from tray_applet import main
+        main()
+    except Exception as e:
+        if is_frozen():
+            # Relanzar el propio ejecutable con --applet
+            args = [sys.executable, "--applet"]
+            print(f"[platform_utils] Error lanzando applet (frozen): {e}")
+            # subprocess.Popen(args)
+        else:
+            # Ejecutar tray_applet.py con el intérprete
+            applet_path = os.path.join(os.path.dirname(__file__), 'tray_applet.py')
+            args = [sys.executable, applet_path]
+            if config.get('cid'):
+                args += ['--cid', config['cid']]
+            print(f"[platform_utils] Lanzando applet (no frozen): {args}")
+            subprocess.Popen(args)
 
 def send_ipc_open_conversation(cid):
     """

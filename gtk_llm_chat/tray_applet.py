@@ -41,13 +41,27 @@ else:
 
 # --- Icono ---
 def load_icon():
-    icon_path = os.path.join(os.path.dirname(__file__), 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png')
-    if os.path.exists(icon_path):
-        try:
-            return Image.open(icon_path)
-        except Exception:
-            pass
-    return Image.new('RGB', (64, 64), color=(0, 128, 255))
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.join(
+                sys._MEIPASS)
+    else:
+        base_path = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    ".."))
+    icon_path = os.path.join(
+            base_path,
+            'gtk_llm_chat',
+            'hicolor', 
+            'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png')
+    
+    # Can we have the icon in Cornflower blue?
+    # icon_path = os.path.join(
+    #    base_path,
+    #    'windows',
+    #    'org.fuentelibre.gtk_llm_Chat.png'
+    #)
+    return Image.open(icon_path)
 
 # --- Acciones ---
 def open_conversation(cid=None):
