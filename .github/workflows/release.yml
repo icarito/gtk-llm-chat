@@ -12,40 +12,63 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install dependencies
+
+      - name: Install Debian dependencies
         run: |
-          sudo apt-mark hold firefox* linux-headers* linux-image* grub* > /dev/null
+          sudo sed -i '/^#.*jammy-backports/ s/^#//' /etc/apt/sources.list
+          echo -e "Package: *\nPin: release a=jammy-backports\nPin-Priority: 500" | sudo tee /etc/apt/preferences.d/backports
           sudo apt update
-          sudo apt upgrade
-          sudo apt install desktop-file-utils
-          sudo apt-get install -y build-essential ninja-build libgtk-4-dev \
-          sassc pkg-config git cmake appstream fuse libfuse2 zsync curl python3-pip libglib2.0-dev libchafa-dev
-          wget http://ftp.gnome.org/pub/gnome/sources/pango/1.56/pango-1.56.1.tar.xz
-          tar -xf pango-1.56.1.tar.xz && cd pango-1.56.1 && ./configure && make && sudo make install
-          wget https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.gz
-          tar -xzf fontconfig-2.15.0.tar.gz && cd fontconfig-2.15.0 && ./configure && make && sudo make install
-          sudo ./linux/bootstrap.sh
+          sudo apt install -y \
+             build-essential ninja-build git \
+             libvirt-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libcairo2-dev \
+             libpango1.0-dev libepoxy-dev libwayland-dev \
+             libxkbcommon-dev libatk-bridge2.0-dev libatk1.0-dev \
+             gobject-introspection libvulkan-dev libxml2-utils \
+             python3-pip gettext sassc libjson-glib-dev \
+             libgraphene-1.0-dev libopus-dev \
+             libusbredirhost-dev apt-file libusbredirhost-dev \
+             libxslt1-dev libxcursor-dev libgraphviz-dev libflac-dev \
+             libvpx-dev libtag1-dev libwavpack-dev libavfilter-dev libavformat-dev \
+             libavcodec-dev libavutil-dev libx11-xcb-dev libv4l-dev \
+             libxkbcommon-x11-dev libpulse-dev libarchive-dev libproxy-dev \
+             libgnutls28-dev libp11-kit-dev intltool itstool xsltproc ragel \
+             libcups2-dev doxygen xmlto desktop-file-utils yasm valac-bin gperf
+          sudo apt-file update
+
       - name: Install Meson
         run: |
-          python3 -m pip install --upgrade meson
-      - name: Build GTK4 from source
+          pip install --user --upgrade meson
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install JHBuild (versión actualizada)
         run: |
-          git clone https://gitlab.gnome.org/GNOME/gtk.git --depth=1
-          cd gtk
-          meson setup build -Dbuildtype=release -Dprefix=/opt/gtk
-          ninja -C build
-          sudo ninja -C build install
-      - name: Build and install libadwaita
+          git clone --depth=1 https://gitlab.gnome.org/GNOME/jhbuild.git ~/jhbuild
+          cd ~/jhbuild
+          ./autogen.sh --simple-install
+          make
+          make install
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure JHBuild para GNOME 44
         run: |
-          git clone https://gitlab.gnome.org/GNOME/libadwaita.git
-          cd libadwaita
-          git checkout 1.3.0
-          meson setup _build -Dexamples=false -Dtests=false
-          meson compile -C _build
-          sudo meson install -C _build
-          cd ..
-      - name: Set up environment
+
+          mkdir -p $HOME/gnome
+          cat > ${HOME}/.config/jhbuildrc << EOF
+          prefix = '${HOME}/gnome'
+          skip = ['yelp-xsl', 'yelp-tools', 'gtk+-3', 'libgudev', 'gstreamer']
+          module_mesonargs['gdk-pixbuf'] = '-Dman=false'
+          EOF
+
+      - name: Bootstrap and build GNOME
         run: |
+          jhbuild bootstrap
+          jhbuild build gtk4 libadwaita
+
+      - name: Set environment for build
+        run: |
+          echo "PKG_CONFIG_PATH=$HOME/gnome/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$HOME/gnome/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "XDG_DATA_DIRS=$HOME/gnome/share:$XDG_DATA_DIRS" >> $GITHUB_ENV
           cp .env.ci .env
       - name: Build package
         run: |
