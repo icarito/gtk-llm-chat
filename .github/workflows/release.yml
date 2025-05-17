@@ -153,9 +153,49 @@ jobs:
           name: macos-arm-dist
           path: dist/
 
+  build-python:
+    name: Build Python Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install build dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install build
+      - name: Build Python package
+        run: |
+          python3 -m build
+      - name: Store Python dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build-python
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ !contains(github.ref_name, 'test') }}
+    steps:
+      - name: Download Python dist
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
   github-release:
     name: GitHub Release
-    needs: [build-linux, build-windows, build-macos, build-macos-arm]
+    needs: [build-linux, build-windows, build-macos, build-macos-arm, build-python]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -180,6 +220,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-arm-dist
+          path: dist/
+      - name: Download Python dist
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
           path: dist/
       - name: Create GitHub Pre-release
         if: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') }}
