@@ -15,12 +15,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-mark hold firefox* linux-headers* linux-image* grub* > /dev/null
-          sudo apt install -y software-properties-common
-          sudo add-apt-repository ppa:xtradeb/apps -y
           sudo apt update
           sudo apt upgrade
           sudo apt install desktop-file-utils
+          sudo apt-get install -y build-essential meson ninja-build libgtk-4-dev \
+          sassc pkg-config git cmake appstream fuse libfuse2 zsync curl
           sudo ./linux/bootstrap.sh
+    - name: Build and install libadwaita
+      run: |
+          git clone https://gitlab.gnome.org/GNOME/libadwaita.git
+          cd libadwaita
+          meson setup _build -Dexamples=false -Dtests=false
+          meson compile -C _build
+          sudo meson install -C _build
+          cd ..
       - name: Set up environment
         run: |
           cp .env.ci .env
