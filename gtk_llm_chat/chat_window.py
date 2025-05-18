@@ -253,8 +253,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         root_box.append(self.header)
         root_box.append(self.split_view) # Añadir el split_view aquí
 
-        # Establecer el contenido de la ventana
-        self.set_content(root_box) # El root_box es el nuevo contenido
+        self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_child(None)  # Se establecerá después
+        self.toast_overlay.set_child(root_box)
+        self.set_content(self.toast_overlay)
 
         # Agregar CSS provider
         self._setup_css()
@@ -267,6 +269,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window = Gtk.EventControllerFocus.new()
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
+
+        # Mostrar toast si falta API key para el modelo actual
+        GLib.idle_add(self._show_api_key_toast_if_needed)
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
@@ -731,3 +736,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Solo poner el foco si el sidebar no está visible
         if not self.split_view.get_show_sidebar():
             self.input_text.grab_focus()
+
+    def add_toast(self, message, action_label=None, action_callback=None):
+        toast = Adw.Toast(title=message)
+        if action_label and action_callback:
+            toast.set_button_label(action_label)
+            toast.connect('button-clicked', lambda *_: action_callback())
+        self.toast_overlay.add_toast(toast)
+
+    def _show_api_key_toast_if_needed(self):
+        if hasattr(self, 'model_sidebar') and hasattr(self.model_sidebar, 'needs_api_key_for_current_model'):
+            if self.model_sidebar.needs_api_key_for_current_model():
+                def open_model_selection():
+                    self.split_view.set_show_sidebar(True)
+                    self.model_sidebar.stack.set_visible_child_name('providers')
+                self.add_toast(_('API key required for this model'), action_label=_('Select Model'), action_callback=open_model_selection)
+        return False

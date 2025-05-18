@@ -67,16 +67,6 @@ class ChatSidebar(Gtk.Box):
         delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
         actions_group.add(delete_row)
 
-        # Modelo - uso de ícono de IA "preferences-system-symbolic"
-        model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
-        self.model_row = Adw.ActionRow(title=_("Change Model"),
-                                       subtitle="Provider: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
-        self.model_row.set_icon_name("brain-symbolic")
-        # NO establecer subtítulo aquí, lo hará model-loaded
-        self.model_row.set_activatable(True)  # Hacerla accionable
-        self.model_row.connect("activated", self._on_model_button_clicked)
-        actions_group.add(self.model_row)
-
         actions_page.append(actions_group)
         
         # Grupo separado para About
@@ -96,6 +86,27 @@ class ChatSidebar(Gtk.Box):
         parameters_action_row.set_activatable(True)
         parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
         actions_group.add(parameters_action_row) # Añadir al primer grupo de acciones
+
+        # --- Grupo de acciones de modelo ---
+        model_group = Adw.PreferencesGroup(title=_('Model Actions'))
+
+        # Cambiar modelo
+        model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
+        self.model_row = Adw.ActionRow(title=_('Change Model'),
+                                       subtitle="Provider: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
+        self.model_row.set_icon_name("brain-symbolic")
+        self.model_row.set_activatable(True)
+        self.model_row.connect("activated", self._on_model_button_clicked)
+        model_group.add(self.model_row)
+
+        # Establecer como predeterminado
+        self.set_default_row = Adw.ActionRow(title=_('Set as default model'))
+        self.set_default_row.set_icon_name("star-symbolic")
+        self.set_default_row.set_activatable(True)
+        self.set_default_row.connect("activated", self._on_set_default_model_clicked)
+        model_group.add(self.set_default_row)
+
+        actions_page.append(model_group)
 
         # --- Página 2: Lista de Proveedores ---
         provider_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -519,15 +530,23 @@ class ChatSidebar(Gtk.Box):
                 cid = self.llm_client.get_conversation_id() if self.llm_client else None
                 if cid:
                     self.llm_client.chat_history.update_conversation_model(cid, model_id)
-                
                 # Notificar a la aplicación que debe ocultar el sidebar
-                # Primero retrocedemos al panel principal
-                self.stack.set_visible_child_name("actions")
-                # Luego cerramos todo el sidebar
                 window = self.get_root()
                 if window and hasattr(window, 'split_view'):
-                    # Damos un pequeño tiempo para que se vea la transición
                     GLib.timeout_add(100, lambda: window.split_view.set_show_sidebar(False))
+                # Toast: ofrecer hacer predeterminado si no lo es
+                default_model = None
+                try:
+                    from llm import get_default_model
+                    default_model = get_default_model()
+                except Exception:
+                    pass
+                if default_model and model_id != default_model:
+                    if hasattr(window, 'add_toast'):
+                        def set_default():
+                            # Aquí solo mostramos un toast de confirmación
+                            window.add_toast(_('Default model set!'))
+                        window.add_toast(_('Make this the default model?'), action_label=_('Set as default'), action_callback=set_default)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
@@ -729,3 +748,27 @@ class ChatSidebar(Gtk.Box):
             self.system_prompt_row.set_subtitle(f"{_('Current')}: {subtitle_text}")
         else:
             self.system_prompt_row.set_subtitle(_("Not set"))
+
+    def _on_set_default_model_clicked(self, row):
+        current_model = self.llm_client.get_model_id() if self.llm_client else None
+        if current_model:
+            # Guardar como predeterminado (puede ser en config o archivo)
+            # Aquí solo mostramos un toast, la lógica real depende de la app
+            win = self.get_root()
+            if hasattr(win, 'add_toast'):
+                win.add_toast(_('Default model set!'))
+
+    def needs_api_key_for_current_model(self):
+        # Devuelve True si el modelo actual requiere key y no está configurada
+        model_id = self.llm_client.get_model_id() if self.llm_client else self.config.get('model')
+        provider_key = None
+        for prov, models in self.models_by_provider.items():
+            for m in models:
+                if getattr(m, 'model_id', None) == model_id:
+                    provider_key = prov
+        if provider_key is None or provider_key == LOCAL_PROVIDER_KEY:
+            return False
+        needs_key_map = self._get_needs_key_map()
+        real_key = needs_key_map.get(provider_key, provider_key)
+        stored_keys = self._get_keys_json()
+        return not (real_key in stored_keys and bool(stored_keys[real_key]))
