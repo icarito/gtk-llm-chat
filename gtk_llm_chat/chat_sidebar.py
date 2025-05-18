@@ -544,9 +544,9 @@ class ChatSidebar(Gtk.Box):
                 if default_model and model_id != default_model:
                     if hasattr(window, 'add_toast'):
                         def set_default():
-                            # Aquí solo mostramos un toast de confirmación
+                            llm.set_default_model(model_id)
                             window.add_toast(_('Default model set!'))
-                        window.add_toast(_('Make this the default model?'), action_label=_('Set as default'), action_callback=set_default)
+                        window.add_toast(_('Custom model set'), action_label=_('Make default'), action_callback=set_default)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""

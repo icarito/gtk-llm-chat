@@ -258,6 +258,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(root_box)
         self.set_content(self.toast_overlay)
 
+        # Banner para API key faltante (inicialmente oculto)
+        self.api_key_banner = Adw.Banner()
+        self.api_key_banner.set_title(_('API key required for this model'))
+        self.api_key_banner.set_button_label(_('Select Model'))
+        self.api_key_banner.set_revealed(False)
+        self.api_key_banner.connect('button-clicked', self._on_api_key_banner_button_clicked)
+        # Insertar el banner debajo del header y antes del split_view
+        root_box.insert_child_after(self.api_key_banner, self.header)
+
         # Agregar CSS provider
         self._setup_css()
 
@@ -270,8 +279,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
 
-        # Mostrar toast si falta API key para el modelo actual
-        GLib.idle_add(self._show_api_key_toast_if_needed)
+        # Mostrar banner si falta API key para el modelo actual
+        GLib.idle_add(self._show_api_key_banner_if_needed)
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
@@ -744,11 +753,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             toast.connect('button-clicked', lambda *_: action_callback())
         self.toast_overlay.add_toast(toast)
 
-    def _show_api_key_toast_if_needed(self):
+    def _show_api_key_banner_if_needed(self):
         if hasattr(self, 'model_sidebar') and hasattr(self.model_sidebar, 'needs_api_key_for_current_model'):
             if self.model_sidebar.needs_api_key_for_current_model():
-                def open_model_selection():
-                    self.split_view.set_show_sidebar(True)
-                    self.model_sidebar.stack.set_visible_child_name('providers')
-                self.add_toast(_('API key required for this model'), action_label=_('Select Model'), action_callback=open_model_selection)
+                self.api_key_banner.set_revealed(True)
+            else:
+                self.api_key_banner.set_revealed(False)
         return False
+
+    def _on_api_key_banner_button_clicked(self, banner):
+        self.split_view.set_show_sidebar(True)
+        self.model_sidebar.stack.set_visible_child_name('providers')
