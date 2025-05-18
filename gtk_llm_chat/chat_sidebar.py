@@ -66,6 +66,10 @@ class ChatSidebar(Gtk.Box):
         delete_row.set_activatable(True)  # Hacerla accionable
         delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
         actions_group.add(delete_row)
+        actions_page.append(actions_group) # Mover la adición del grupo aquí
+
+        # Nuevo grupo para acciones de modelo
+        model_actions_group = Adw.PreferencesGroup(title=_("Model"))
 
         # Modelo - uso de ícono de IA "preferences-system-symbolic"
         model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
@@ -75,9 +79,16 @@ class ChatSidebar(Gtk.Box):
         # NO establecer subtítulo aquí, lo hará model-loaded
         self.model_row.set_activatable(True)  # Hacerla accionable
         self.model_row.connect("activated", self._on_model_button_clicked)
-        actions_group.add(self.model_row)
+        model_actions_group.add(self.model_row) # Añadir al nuevo grupo
 
-        actions_page.append(actions_group)
+        # Nueva Fila para Establecer como Modelo Predeterminado
+        self.set_default_model_row = Adw.ActionRow(title=_("Set as Default Model"))
+        self.set_default_model_row.set_icon_name("bookmark-new-symbolic") # O "starred-symbolic"
+        self.set_default_model_row.set_activatable(True)
+        self.set_default_model_row.connect("activated", self._on_set_default_model_activated)
+        model_actions_group.add(self.set_default_model_row) # Añadir al nuevo grupo
+
+        actions_page.append(model_actions_group) # Añadir el nuevo grupo a la página
         
         # Grupo separado para About
         about_group = Adw.PreferencesGroup()
@@ -520,6 +531,16 @@ class ChatSidebar(Gtk.Box):
                 if cid:
                     self.llm_client.chat_history.update_conversation_model(cid, model_id)
                 
+                # Ofrecer establecer como predeterminado si no es el predeterminado actual
+                try:
+                    default_model = llm.get_default_model()
+                    if model_id != default_model:
+                        window = self.get_root()
+                        if window and hasattr(window, 'show_set_default_model_toast'):
+                            window.show_set_default_model_toast(model_id)
+                except Exception as e:
+                    debug_print(f"Error al verificar el modelo predeterminado: {e}")
+
                 # Notificar a la aplicación que debe ocultar el sidebar
                 # Primero retrocedemos al panel principal
                 self.stack.set_visible_child_name("actions")
@@ -605,6 +626,12 @@ class ChatSidebar(Gtk.Box):
                     self._populate_providers_and_group_models()
                     self._populate_model_list(provider_key)
 
+                    # Comprobar si la ventana principal tiene el banner de API key y ocultarlo si la clave se acaba de establecer
+                    window = self.get_root()
+                    if window and hasattr(window, 'api_key_banner') and window.api_key_banner.get_revealed():
+                        if self.llm_client and self.llm_client.model and self.llm_client.model.needs_key == real_key:
+                            window.api_key_banner.set_revealed(False)
+
                 except Exception as e:
                     print(f"Error saving API key for {provider_key} to {keys_path}: {e!r}")
             else:
@@ -660,6 +687,13 @@ class ChatSidebar(Gtk.Box):
             provider_name = self.llm_client.get_provider_for_model(model_id) or "Unknown Provider"
         
         self.model_row.set_subtitle(f"Provider: {provider_name}")
+        # Actualizar la sensibilidad de la fila "Set as Default Model"
+        try:
+            default_model = llm.get_default_model()
+            self.set_default_model_row.set_sensitive(model_id != default_model)
+        except Exception as e:
+            debug_print(f"Error al obtener el modelo predeterminado para la sensibilidad de la fila: {e}")
+            self.set_default_model_row.set_sensitive(True) # Habilitar en caso de error
 
     def _on_model_parameters_button_clicked(self, row):
         self.stack.set_visible_child_name("parameters")
@@ -729,3 +763,13 @@ class ChatSidebar(Gtk.Box):
             self.system_prompt_row.set_subtitle(f"{_('Current')}: {subtitle_text}")
         else:
             self.system_prompt_row.set_subtitle(_("Not set"))
+
+    def _on_set_default_model_activated(self, row):
+        """Manejador para cuando se activa la fila 'Set as Default Model'."""
+        current_model_id = self.llm_client.get_model_id() if self.llm_client else None
+        if current_model_id:
+            window = self.get_root()
+            if window and hasattr(window, '_set_as_default_model'): # Usar el método de la ventana
+                window._set_as_default_model(current_model_id)
+                # Desactivar la fila después de establecer como predeterminado
+                self.set_default_model_row.set_sensitive(False)

@@ -15,7 +15,7 @@ from widgets import Message, MessageWidget, ErrorWidget
 from db_operations import ChatHistory
 from chat_application import _
 from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
-from llm import get_default_model
+from llm import get_default_model, set_default_model # Modified import
 
 DEBUG = os.environ.get('DEBUG') or False
 
@@ -64,6 +64,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Inicializar LLMClient con la configuración
         # self.llm will be initialized later, after UI setup potentially
         self.llm = None
+
+        # --- Banner para API Key ---
+        self.api_key_banner = Adw.Banner(revealed=False)
+        self.api_key_banner.set_button_label(_("Go to Settings"))
+        self.api_key_banner.connect("button-clicked", self._on_api_key_banner_clicked)
+        # --- Fin Banner para API Key ---
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -137,6 +143,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_max_sidebar_width(400)
         self.split_view.set_sidebar_position(Gtk.PackType.END)
 
+        # --- Toast para modelo predeterminado ---
+        self.toast_overlay = Adw.ToastOverlay()
+        # --- Fin Toast para modelo predeterminado --- 
+
         # Conectar la propiedad 'show-sidebar' del split_view al estado del botón
         self.split_view.bind_property(
             "show-sidebar", self.sidebar_button, "active",
@@ -188,12 +198,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Ensamblar la interfaz de chat
         input_box.append(self.input_text)
         input_box.append(self.send_button)
+        chat_content_box.append(self.api_key_banner) # Añadir banner aquí
         chat_content_box.append(scroll)
         chat_content_box.append(input_box)
 
 
+        # Envolver chat_content_box con el ToastOverlay
+        self.toast_overlay.set_child(chat_content_box)
+
         # Establecer el contenido principal en el split_view
-        self.split_view.set_content(chat_content_box)
+        self.split_view.set_content(self.toast_overlay) # Usar toast_overlay aquí
 
         # --- Panel Lateral (Sidebar) ---
         # Initialize LLMClient *after* basic UI setup
@@ -242,10 +256,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.title_widget.set_subtitle(self.config['model'])
 
-        # Crear el sidebar con el modelo actual
-        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
-        # Establecer el panel lateral en el split_view
-        self.split_view.set_sidebar(self.model_sidebar)
+        # Crear el sidebar con el modelo actual de forma segura
+        try:
+            model_id = self.config.get('model')
+            if not model_id and self.llm and hasattr(self.llm, 'get_model_id'):
+                model_id = self.llm.get_model_id()
+            # Si aún no hay model_id, usar un valor seguro
+            model_id = model_id or "default"
+            self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
+            self.split_view.set_sidebar(self.model_sidebar)
+        except Exception as e:
+            debug_print(f"Error al crear el sidebar: {e}")
+            import traceback
+            debug_print(traceback.format_exc())
+            self.model_sidebar = None
+            # Mostrar un error en la UI, pero no abortar la ventana
+            error_widget = ErrorWidget(_("Error loading sidebar. Some functionality may be limited."))
+            self.messages_box.append(error_widget)
 
         # --- Ensamblado Final ---
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
@@ -456,7 +483,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         
         # Actualizar el título de la ventana con el nombre del modelo
         self.title_widget.set_subtitle(model_id)
-        
+
+        # Verificar si el modelo necesita una clave API y si está configurada
+        if self.llm and self.llm.model and hasattr(self.llm.model, 'needs_key') and self.llm.model.needs_key:
+            provider_key = self.llm.model.needs_key
+            keys = self.model_sidebar._get_keys_json() # Acceder a través del sidebar
+            if not keys.get(provider_key):
+                self.api_key_banner.set_title(_("API Key Required for {}").format(self.llm.model.model_id))
+                self.api_key_banner.set_revealed(True)
+            else:
+                self.api_key_banner.set_revealed(False)
+        else:
+            self.api_key_banner.set_revealed(False)
+
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
             debug_print(f"Verificando conversación existente para CID: {self.cid}")
@@ -731,3 +770,34 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Solo poner el foco si el sidebar no está visible
         if not self.split_view.get_show_sidebar():
             self.input_text.grab_focus()
+
+    def _on_api_key_banner_clicked(self, banner):
+        """Maneja el clic en el botón del banner de la clave API."""
+        self.split_view.set_show_sidebar(True)
+        # Navegar a la página de selección de modelo/proveedor en el sidebar
+        # Esto podría necesitar una función en ChatSidebar para navegar directamente
+        # o asegurar que la navegación por defecto lleve al lugar correcto.
+        # Por ahora, solo abrimos el sidebar.
+        # Si ChatSidebar tiene un stack llamado 'stack' y una página 'providers':
+        if hasattr(self.model_sidebar, 'stack'):
+            self.model_sidebar.stack.set_visible_child_name("providers")
+
+    def show_set_default_model_toast(self, model_id):
+        """Muestra un toast para establecer el modelo como predeterminado."""
+        toast = Adw.Toast(title=_('Set {} as default model?').format(model_id))
+        toast.set_button_label(_('Set Default'))
+        toast.connect('button-clicked', lambda t: self._set_as_default_model(model_id))
+        toast.connect('dismissed', lambda t: None) # Hacer algo si se descarta?
+        self.toast_overlay.add_toast(toast)
+
+    def _set_as_default_model(self, model_id):
+        try:
+            set_default_model(model_id)
+            debug_print(f"Modelo {model_id} establecido como predeterminado.")
+            # Opcional: mostrar otro toast de confirmación
+            confirm_toast = Adw.Toast(title=_('{} is now the default model.').format(model_id), timeout=3)
+            self.toast_overlay.add_toast(confirm_toast)
+        except Exception as e:
+            debug_print(f"Error al establecer el modelo predeterminado: {e}")
+            error_toast = Adw.Toast(title=_('Error setting default model.'), timeout=3)
+            self.toast_overlay.add_toast(error_toast)
