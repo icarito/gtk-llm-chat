@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
 
 from chat_application import _
+from .utils import debug_print, get_default_model, get_api_key_for_model, list_available_models, get_model_config
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
 DEBUG = os.environ.get('DEBUG') or False
@@ -67,138 +68,121 @@ class LLMClient(GObject.Object):
         self._stream_thread.start()
 
     def set_model(self, model_id):
-        """Establece el modelo actual y actualiza el proveedor."""
-        debug_print(f"LLMClient: Request to set model to: {model_id}, current cid: {self.config.get('cid')}")
-        # Mantener el modelo actual en la config
-        self.config['model'] = model_id
+        debug_print(f"LLMClient.set_model: Solicitud para cambiar al modelo: {model_id}")
+        if self.model and self.model.id == model_id:
+            debug_print(f"LLMClient.set_model: El modelo {model_id} ya está activo. No se requiere cambio.")
+            # Aunque el modelo sea el mismo, si no hay CID, es una nueva conversación.
+            # Si hay CID, load_history se encargará de cargar los mensajes correctos.
+            if not self.config.get('cid'):
+                debug_print("LLMClient.set_model: No hay CID, asegurando nueva conversación para el modelo actual.")
+                self.conversation = self.model.conversation() # Nueva conversación para el mismo modelo
+                self.load_history() # Esto limpiará las respuestas si no hay CID
+            else:
+                # Si hay un CID, y el modelo es el mismo, _load_model_internal ya se habrá encargado
+                # o set_conversation lo hará. load_history se llamará después de que el modelo esté confirmado.
+                debug_print(f"LLMClient.set_model: Modelo {model_id} ya activo y CID {self.config.get('cid')} presente. Se espera que set_conversation o la carga inicial manejen el historial.")
+            self.emit('model-loaded', model_id) # Emitir incluso si es el mismo, para que la UI reaccione si es necesario
+            return
 
-        # Guardar cid antiguo
-        old_cid = self.config.get('cid')
+        previous_model_id = self.model.id if self.model else "ninguno"
+        loaded_model_id = self._load_model_internal(model_id_override=model_id)
 
-        # Si hay una conversación previa, actualizar el modelo en la BD antes de recargar
-        if old_cid:
-            self.chat_history.update_conversation_model(old_cid, model_id)
-            debug_print(f"LLMClient: Modelo en BD actualizado para cid={old_cid} -> {model_id}")
-
-        # Reiniciar referencias previas para evitar estados residuales
-        self.model = None
-        self.conversation = None
-
-        # Buscar el modelo en la lista de modelos disponibles
-        all_models = llm.get_models()
-        self.model = next((model for model in all_models if getattr(model, 'model_id', None) == model_id), None)
-        if not self.model:
-            debug_print(f"LLMClient: No se pudo encontrar el modelo con ID: {model_id}")
-            return False
-
-        # Actualizar el proveedor basado en el atributo needs_key del modelo
-        self.provider = getattr(self.model, 'needs_key', None) or "Local/Other"
-        debug_print(f"LLMClient: Proveedor actualizado a: {self.provider}")
-
-        # Crear una nueva conversación para el modelo
-        debug_print(f"LLMClient: Creando nueva instancia de conversación para el modelo {self.model.model_id}")
-        self.conversation = self.model.conversation()
-
-        # Recargar historial si había cid previo
-        if old_cid:
-            debug_print(f"LLMClient: Recargando historial para cid={old_cid} tras cambio de modelo.")
-            history_entries = self.chat_history.get_conversation_history(old_cid)
-            self.load_history(history_entries)
-            debug_print(f"LLMClient: Historial recargado ({len(history_entries)} entradas) para cid={old_cid} tras cambio de modelo.")
-            # Restaurar el cid en config
-            self.config['cid'] = old_cid
+        if loaded_model_id:
+            debug_print(f"LLMClient.set_model: Modelo cambiado de '{previous_model_id}' a '{loaded_model_id}'.")
+            self.config['model'] = loaded_model_id # Asegurar que config esté actualizado
+            
+            # Si hay un CID, actualizar el modelo en la base de datos para esta conversación
+            current_cid = self.config.get('cid')
+            if current_cid:
+                try:
+                    self.chat_history.update_conversation_model(current_cid, loaded_model_id)
+                    debug_print(f"LLMClient.set_model: Modelo actualizado a '{loaded_model_id}' en BD para CID {current_cid}.")
+                except Exception as e:
+                    debug_print(f"LLMClient.set_model: Error al actualizar modelo en BD para CID {current_cid}: {e}")
+            
+            self.load_history() # Cargar historial (o limpiar si no hay CID)
+            self.emit('model-loaded', loaded_model_id)
         else:
-            # Nuevo cid para conversación sin historial previo
-            new_cid = self.conversation.id
-            self.config['cid'] = new_cid
-            debug_print(f"LLMClient: Nuevo cid asignado: {new_cid}")
-            # Crear conversación en BD
-            self.chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME(), model_id)
+            debug_print(f"LLMClient.set_model: No se pudo cargar el nuevo modelo {model_id}. Se revirtió o falló la carga.")
+            # La señal de error ya debería haber sido emitida por _load_model_internal
+            # Si self.model es None, la UI debería reflejar un estado de error.
+            # Si se revirtió al modelo anterior, emitir model-loaded para ese modelo.
+            if self.model:
+                self.emit('model-loaded', self.model.id)
+            else:
+                # No hay modelo cargado, podría ser útil una señal específica o la UI debe manejar 'error'
+                pass 
 
-        # Emitir la señal model-loaded para que la UI se actualice
-        self.emit('model-loaded', model_id)
-        debug_print(f"LLMClient: Modelo {model_id} cargado y conversación reinicializada.")
-        return True
+    def _load_model_internal(self, model_id_override=None):
+        """Carga el modelo. Prioriza el override, luego el modelo de la conversación actual (CID),
+           luego el modelo de configuración, y finalmente el predeterminado."""
+        target_model_id = None
+        source_of_model_id = "desconocido"
 
-    def _load_model_internal(self, model_id=None):
-        """Internal method to load a model. Can be called from init or set_model."""
-        current_cid = self.config.get('cid') # Store current cid
-        try:
-            # Asegurar que los plugins estén cargados, pero sin forzar recarga
+        if model_id_override:
+            target_model_id = model_id_override
+            source_of_model_id = "override"
+        elif self.config.get('cid'):
             try:
-                from llm.plugins import load_plugins, pm
-                if not hasattr(llm.plugins, '_loaded') or not llm.plugins._loaded:
-                    # Solo cargar si no están ya cargados
-                    load_plugins()
-                    debug_print("LLMClient: Plugins cargados correctamente en _load_model_internal")
+                conversation_details = self.chat_history.get_conversation(self.config.get('cid'))
+                if conversation_details and conversation_details.get('model_id'):
+                    target_model_id = conversation_details['model_id']
+                    source_of_model_id = f"CID {self.config.get('cid')}"
                 else:
-                    debug_print("LLMClient: Plugins ya estaban cargados, omitiendo carga en _load_model_internal")
+                    debug_print(f"CID {self.config.get('cid')} presente, pero no se encontró model_id en la BD o la conversación no existe.")
             except Exception as e:
-                debug_print(f"LLMClient: Error verificando/cargando plugins en _load_model_internal: {e}")
-            
-            # Determine the model_id to load
-            if model_id is None:
-                # Use config or default if no specific model_id is provided (initial load)
-                model_id = self.config.get('model') or llm.get_default_model()
+                debug_print(f"Error al obtener model_id de la BD para CID {self.config.get('cid')}: {e}")
+        
+        if not target_model_id and self.config.get('model'):
+            target_model_id = self.config.get('model')
+            source_of_model_id = "configuración"
+        
+        if not target_model_id:
+            target_model_id = get_default_model()
+            source_of_model_id = "predeterminado"
 
-            debug_print(f"LLMClient: Attempting to load model: {model_id} (in _load_model_internal)")
-            
-            # Verificar modelos disponibles
-            available_models = llm.get_models()
-            debug_print(f"LLMClient: Hay {len(available_models)} modelos disponibles")
-            
-            # Buscar modelo por ID exacto
-            model_found = False
-            for model in available_models:
-                if getattr(model, 'model_id', None) == model_id:
-                    model_found = True
-                    break
-            
-            if not model_found and available_models:
-                # Si el modelo no se encuentra, usar el primer modelo disponible
-                fallback_model = available_models[0]
-                fallback_id = getattr(fallback_model, 'model_id', None)
-                debug_print(f"LLMClient: Modelo {model_id} no encontrado, usando alternativa: {fallback_id}")
-                model_id = fallback_id
-            
-            # Cargar el modelo
-            new_model = llm.get_model(model_id)
-            self.model = new_model  # Assign the new model
-            debug_print(f"LLMClient: Using model {self.model.model_id}")
-            
-            # Siempre crear una nueva conversación
-            conversation_recreated_or_model_changed = False
-            debug_print(f"LLMClient: Creating new conversation object for model {new_model.model_id} in _load_model_internal.")
-            self.conversation = new_model.conversation()
-            conversation_recreated_or_model_changed = True
-                
-            self._init_error = None
+        debug_print(f"_load_model_internal: Intentando cargar el modelo '{target_model_id}' (fuente: {source_of_model_id}). Modelo actual: {self.model.id if self.model else 'Ninguno'}")
 
-            # If model setup was successful and a cid exists (especially for initial load with a persisted session)
-            if current_cid and conversation_recreated_or_model_changed:
-                debug_print(f"LLMClient: Attempting to reload history for cid '{current_cid}' during model initialization.")
-                history_entries = self.chat_history.get_conversation_history(current_cid) # Corrected method name
-                if history_entries:
-                    self.load_history(history_entries)
-                    debug_print(f"LLMClient: Successfully reloaded {len(history_entries)} entries for cid '{current_cid}' (initial load).")
-                else:
-                    debug_print(f"LLMClient: No history entries found for cid '{current_cid}' to reload (initial load).")
-            elif not current_cid and conversation_recreated_or_model_changed:
-                 debug_print("LLMClient: New conversation created, no prior cid to reload history from.")
+        if self.model and self.model.id == target_model_id:
+            debug_print(f"_load_model_internal: El modelo '{target_model_id}' ya está cargado.")
+            # Asegurar que self.conversation esté configurado para este modelo si no lo está
+            if not self.conversation or self.conversation.model.id != target_model_id:
+                debug_print(f"_load_model_internal: Creando nuevo objeto llm.Conversation para el modelo {target_model_id} ya cargado.")
+                self.conversation = self.model.conversation()
+            return target_model_id # Devuelve el ID del modelo cargado/confirmado
 
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
-        except llm.UnknownModelError as e:
-            debug_print(f"LLMClient: Error - Unknown model: {e}")
-            self._init_error = str(e)
-            # Don't overwrite self.model if loading fails, keep the old one if any
-            GLib.idle_add(self.emit, 'error', f"Modelo desconocido: {e}")
+        try:
+            model_instance = llm.get_model(target_model_id)
+            if not model_instance:
+                raise ValueError(f"No se pudo obtener la instancia del modelo para {target_model_id}")
+            self.model = model_instance
+            self.conversation = self.model.conversation() # Crear nueva conversación para el modelo
+            self.config['model'] = self.model.id # Actualizar config con el modelo realmente cargado
+            debug_print(f"_load_model_internal: Modelo '{self.model.id}' cargado y nueva conversación creada.")
+            return self.model.id
         except Exception as e:
-            debug_print(f"LLMClient: Unexpected error loading model: {e}")
-            self._init_error = str(e)
-            # Don't overwrite self.model if loading fails
-            GLib.idle_add(self.emit, 'error', f"Error inesperado al cargar modelo: {e}")
-            import traceback
-            traceback.print_exc()
+            debug_print(f"Error crítico al cargar el modelo '{target_model_id}': {e}", exc_info=True)
+            # Intentar cargar el modelo predeterminado como último recurso si el fallido no era el predeterminado
+            default_model_id = get_default_model()
+            if target_model_id != default_model_id:
+                debug_print(f"_load_model_internal: Intentando recurrir al modelo predeterminado '{default_model_id}'.")
+                try:
+                    self.model = llm.get_model(default_model_id)
+                    self.conversation = self.model.conversation()
+                    self.config['model'] = self.model.id
+                    debug_print(f"_load_model_internal: Modelo predeterminado '{self.model.id}' cargado como fallback.")
+                    return self.model.id
+                except Exception as e_fallback:
+                    debug_print(f"Error crítico al cargar el modelo predeterminado '{default_model_id}' como fallback: {e_fallback}", exc_info=True)
+                    self.model = None
+                    self.conversation = None
+                    self.emit('error', f"No se pudo cargar el modelo: {target_model_id} ni el predeterminado.")
+                    return None # No se pudo cargar ningún modelo
+            else:
+                self.model = None
+                self.conversation = None
+                self.emit('error', f"No se pudo cargar el modelo predeterminado: {target_model_id}.")
+                return None # No se pudo cargar el modelo predeterminado
 
     def _process_stream(self, prompt: str):
         success = False
@@ -383,106 +367,117 @@ class LLMClient(GObject.Object):
 
     def load_history(self, history_entries):
         """
-        Carga el historial de mensajes en la conversación actual.
-        Solo recrea el modelo/conversación si es necesario.
+        Carga entradas de historial en el objeto self.conversation actual.
+        Asume que self.model y self.conversation ya están correctamente inicializados
+        para el contexto/modelo deseado.
         """
-        if not history_entries:
-            debug_print("LLMClient: No hay historial para cargar.")
+        if not self.model or not self.conversation:
+            debug_print("LLMClient: load_history - Error: Modelo o conversación no inicializados.")
+            # Podríamos emitir un error o intentar una carga de emergencia, pero es mejor que la lógica previa lo asegure.
+            # self._ensure_model_loaded() # Podría ser una opción, pero puede tener efectos secundarios.
+            # if not self.model or not self.conversation: # Comprobar de nuevo
+            #     GLib.idle_add(self.emit, 'error', "No se puede cargar el historial: modelo no listo.")
+            #     return
+            # Considerar si es mejor fallar ruidosamente si se llega aquí en un estado inesperado.
+            # Por ahora, solo advertir y retornar si no hay modelo/conversación.
+            GLib.idle_add(self.emit, 'error', "No se puede cargar el historial: modelo o conversación no están listos.")
             return
 
-        # Determinar el modelo a usar (de config o del historial)
-        model_id = self.config.get('model')
-        if not model_id:
-            # Try to get the model from the conversation details in the database
-            conversation_id = self.config.get('cid')
-            if conversation_id:
-                conv_details = self.chat_history.get_conversation(conversation_id)
-                if conv_details and conv_details.get('model'):
-                    model_id = conv_details['model']
-            # Fallback to extracting from history entries if not found in conversation details
-            if not model_id:
-                for entry in history_entries:
-                    if entry.get('model'):
-                        model_id = entry['model']
-                        break
+        debug_print(f"LLMClient: load_history - Cargando {len(history_entries)} entradas en la conversación del modelo {self.model.model_id}")
 
-        # Si el modelo actual no corresponde, cargarlo
-        if not self.model or self.model.model_id != model_id:
-            try:
-                self.model = llm.get_model(model_id)
-                debug_print(f"LLMClient: load_history - Modelo cargado: {model_id}")
-            except Exception as e:
-                debug_print(f"LLMClient: Error cargando modelo '{model_id}' para historial: {e}")
-                return
-
-        # Si la conversación no existe o es de otro modelo, crearla
-        if not self.conversation or getattr(self.conversation, 'model', None) != self.model:
-            self.conversation = self.model.conversation()
-            debug_print(f"LLMClient: load_history - Conversación creada para modelo: {self.model.model_id}")
-
-        # Limpiar respuestas previas
+        # Limpiar respuestas previas del objeto de conversación actual
         self.conversation.responses = []
 
         # Cargar pares válidos de prompt/respuesta
         for entry in history_entries:
             user_prompt = entry.get('prompt')
             assistant_response = entry.get('response')
+
+            # Asegurarse de que tanto el prompt como la respuesta existan y no sean solo espacios.
             if not (user_prompt and str(user_prompt).strip() and assistant_response and str(assistant_response).strip()):
+                debug_print(f"LLMClient: load_history - Saltando entrada de historial inválida o incompleta: P='{user_prompt}', R='{assistant_response}'")
                 continue
 
-            # Crear prompt y respuestas
-            prompt_obj = llm.Prompt(user_prompt, self.model)
-            resp_user = llm.Response(prompt_obj, self.model, stream=False, conversation=self.conversation)
-            resp_user._prompt_json = {'prompt': user_prompt}
-            resp_user._done = True
-            resp_user._chunks = []
-            self.conversation.responses.append(resp_user)
+            # Crear objetos Prompt y Response de la biblioteca llm
+            # El objeto Prompt se crea con el modelo actual (self.model)
+            try:
+                prompt_obj = llm.Prompt(user_prompt, model=self.model)
 
-            resp_assistant = llm.Response(prompt_obj, self.model, stream=False, conversation=self.conversation)
-            resp_assistant._done = True
-            resp_assistant._chunks = [str(assistant_response).strip()]
-            self.conversation.responses.append(resp_assistant)
+                # Simular la estructura que llm.py usa para los prompts de usuario
+                user_resp_obj = llm.Response(prompt_obj, model=self.model, stream=False, conversation=self.conversation)
+                user_resp_obj._prompt_json = {'prompt': user_prompt} # Simular cómo llm podría almacenar esto
+                user_resp_obj.text = "" # El prompt del usuario no tiene "texto de respuesta"
+                user_resp_obj._done = True 
+                self.conversation.responses.append(user_resp_obj)
+                
+                # Simular la estructura para las respuestas del asistente
+                assistant_resp_obj = llm.Response(prompt_obj, model=self.model, stream=False, conversation=self.conversation)
+                assistant_resp_obj.text = assistant_response # El texto de la respuesta del asistente
+                # Aquí podríamos intentar reconstruir _response_json si lo tuviéramos, pero text es lo principal.
+                assistant_resp_obj._done = True
+                self.conversation.responses.append(assistant_resp_obj)
 
-        debug_print(f"LLMClient: Historial cargado. Total de respuestas: {len(self.conversation.responses)}")
+            except Exception as e:
+                debug_print(f"LLMClient: load_history - Error al procesar entrada de historial: P='{user_prompt}', R='{assistant_response}'. Error: {e}")
+                # Continuar con las siguientes entradas si una falla
 
-    def set_conversation(self, conversation_id: str):
-        """
-        Sets the active conversation ID and loads the associated model and history.
-        """
-        if not conversation_id:
-            debug_print("LLMClient: Error - No conversation ID provided")
-            return False
-        
-        # First, get the conversation details including the model
-        conv_details = self.chat_history.get_conversation(conversation_id)
-        if not conv_details:
-            debug_print(f"LLMClient: Error - Conversation {conversation_id} not found")
-            return False
-        
-        # Get the model associated with this conversation
-        model_id = conv_details.get('model')
-        
-        # Store the conversation ID in the config
-        self.config['cid'] = conversation_id
-        
-        # Load the appropriate model if it differs from current model
-        if model_id and (not self.model or self.model.model_id != model_id):
-            debug_print(f"LLMClient: Changing model to {model_id} as per conversation {conversation_id}")
-            success = self.set_model(model_id)
-            if not success:
-                debug_print(f"LLMClient: Failed to set model {model_id} for conversation {conversation_id}")
-                # Continue anyway, will try to use default or current model
-        
-        # Load the conversation history
-        history_entries = self.chat_history.get_conversation_history(conversation_id)
-        if history_entries:
-            self.load_history(history_entries)
-            debug_print(f"LLMClient: Loaded {len(history_entries)} entries for conversation {conversation_id}")
-            return True
-        else:
-            debug_print(f"LLMClient: No history found for conversation {conversation_id}")
-            # We still consider this a success even if there's no history
-            return True
+        debug_print(f"LLMClient: load_history - Historial cargado. Total de respuestas en self.conversation: {len(self.conversation.responses)}")
+
+    def set_conversation(self, cid):
+        debug_print(f"LLMClient.set_conversation: Cambiando a CID: {cid}")
+        if not cid:
+            debug_print("LLMClient.set_conversation: CID es None. Iniciando nueva conversación.")
+            self.config['cid'] = None
+            # _load_model_internal sin override usará config['model'] o el predeterminado.
+            # Esto efectivamente inicia una nueva conversación con el modelo actual o predeterminado.
+            loaded_model_id = self._load_model_internal() 
+            if loaded_model_id:
+                self.load_history() # Limpiará el historial para la nueva conversación
+                self.emit('model-loaded', loaded_model_id)
+            else:
+                debug_print("LLMClient.set_conversation: No se pudo cargar el modelo para nueva conversación.")
+            return
+
+        try:
+            conversation_details = self.chat_history.get_conversation(cid)
+            if not conversation_details:
+                debug_print(f"LLMClient.set_conversation: No se encontró la conversación con CID {cid}. No se puede cambiar.")
+                self.emit('error', f"Conversación {cid} no encontrada.")
+                return
+
+            self.config['cid'] = cid
+            model_id_for_cid = conversation_details.get('model_id')
+            
+            debug_print(f"LLMClient.set_conversation: CID {cid} usa el modelo '{model_id_for_cid if model_id_for_cid else 'no especificado en BD'}'.")
+
+            # _load_model_internal priorizará el modelo del CID si está disponible.
+            # Si model_id_for_cid es None, _load_model_internal usará config['model'] o el predeterminado,
+            # y luego actualizaremos la BD si es necesario.
+            loaded_model_id = self._load_model_internal() # Esto ahora debería recoger el modelo del CID
+
+            if not loaded_model_id:
+                debug_print(f"LLMClient.set_conversation: No se pudo cargar el modelo para CID {cid}. Error emitido por _load_model_internal.")
+                return
+
+            # Si la conversación no tenía un model_id en la BD, o si _load_model_internal
+            # terminó usando un modelo diferente (ej. el predeterminado porque el del CID falló),
+            # actualizamos la BD con el modelo que *realmente* se cargó.
+            if model_id_for_cid != loaded_model_id:
+                debug_print(f"LLMClient.set_conversation: Actualizando modelo en BD para CID {cid} de '{model_id_for_cid}' a '{loaded_model_id}'.")
+                try:
+                    self.chat_history.update_conversation_model(cid, loaded_model_id)
+                except Exception as e:
+                    debug_print(f"LLMClient.set_conversation: Error al actualizar modelo en BD para CID {cid}: {e}")
+            
+            # Actualizar self.config['model'] para que coincida con el modelo cargado para este CID
+            self.config['model'] = loaded_model_id
+
+            self.load_history() # Cargar el historial de la conversación seleccionada
+            self.emit('model-loaded', loaded_model_id) # Notificar a la UI que el modelo (y la conversación) están listos
+
+        except Exception as e:
+            debug_print(f"LLMClient.set_conversation: Error al establecer conversación {cid}: {e}", exc_info=True)
+            self.emit('error', f"Error al cambiar a conversación {cid}.")
 
     def get_provider_for_model(self, model_id):
         """Obtiene el proveedor asociado a un modelo dado su ID."""

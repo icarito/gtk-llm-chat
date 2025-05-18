@@ -244,6 +244,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear el sidebar con el modelo actual
         self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
+        # Conectar la señal model-changed del sidebar a un manejador en la ventana
+        self.model_sidebar.connect('model-changed', self._on_sidebar_model_changed)
         # Establecer el panel lateral en el split_view
         self.split_view.set_sidebar(self.model_sidebar)
 
@@ -280,14 +282,50 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.add_controller(focus_controller_window)
 
         # Mostrar banner si falta API key para el modelo actual
-        GLib.idle_add(self._show_api_key_banner_if_needed)
+        self._update_api_key_banner_visibility()
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
         show_sidebar = split_view.get_show_sidebar()
+        # Actualizar visibilidad del banner cuando cambia la visibilidad del sidebar
+        self._update_api_key_banner_visibility() 
         if not show_sidebar:
-            self.model_sidebar.stack.set_visible_child_name("actions")
-            self.input_text.grab_focus()
+            if hasattr(self.model_sidebar, 'stack'): # Check if model_sidebar and stack exist
+                self.model_sidebar.stack.set_visible_child_name("actions")
+            if hasattr(self, 'input_text'): # Check if input_text exists
+                self.input_text.grab_focus()
+
+    def _on_sidebar_model_changed(self, sidebar, model_id):
+        """Manejador para cuando el modelo cambia desde el sidebar."""
+        debug_print(f"Solicitud de cambio de modelo desde sidebar a: {model_id}")
+
+        if self.llm.model and self.llm.model.id == model_id:
+            debug_print(f"Modelo {model_id} ya está activo.")
+            # self.split_view.set_show_sidebar(False) # Opcional: cerrar sidebar
+            return
+
+        # Informar a LLMClient para que cambie el modelo.
+        # Esto activará la señal 'model-loaded', que actualizará la UI.
+        self.llm.set_model(model_id) 
+
+        # La notificación de Toast para la selección de un modelo no predeterminado puede permanecer aquí.
+        try:
+            # Asumiendo que get_default_model está importado o disponible globalmente.
+            # Si está en llm_client, podría ser self.llm.get_default_model_id() o similar.
+            # Por ahora, se asume que get_default_model() es accesible.
+            default_model = get_default_model() 
+            if model_id != default_model:
+                self.add_toast(
+                    _(f"Modelo cambiado a {model_id}."),
+                    action_label=_("Establecer como predeterminado"),
+                    action_callback=lambda *args: self.model_sidebar._on_set_default_model_clicked(None)
+                )
+        except NameError: # Si get_default_model no está definido
+            debug_print("get_default_model no encontrado para la notificación de toast.")
+            # Considerar importar get_default_model de llm_client si es necesario
+            # from .llm_client import get_default_model
+        except Exception as e:
+            debug_print(f"Error al mostrar toast de cambio de modelo: {e}")
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
@@ -362,6 +400,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+        self._update_api_key_banner_visibility()
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""
@@ -465,72 +505,85 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return message_widget
 
     def _on_model_loaded(self, llm_client, model_id):
-        """Maneja el evento cuando se carga un modelo."""
-        debug_print(f"Modelo cargado correctamente: {model_id}")
-        
-        # Actualizar el título de la ventana con el nombre del modelo
+        """Maneja el evento cuando se carga un modelo en LLMClient."""
+        debug_print(f"LLMChatWindow._on_model_loaded: Modelo '{model_id}' cargado en LLMClient.")
         self.title_widget.set_subtitle(model_id)
         
-        # Verificar si necesitamos cargar una conversación existente basada en CID
+        # Sincronizar self.config['model'] por si acaso.
+        if self.config.get('model') != model_id:
+            debug_print(f"Sincronizando self.config['model'] a '{model_id}' en _on_model_loaded.")
+            self.config['model'] = model_id
+
         if self.cid:
-            debug_print(f"Verificando conversación existente para CID: {self.cid}")
-            try:
-                conversation = self.chat_history.get_conversation(self.cid)
-                if conversation:
-                    debug_print(f"Conversación encontrada en BD: {conversation}")
-                    # Usar el título de la conversación si existe
-                    if conversation.get('title'):
-                        title = conversation['title']
-                        self.set_conversation_name(title)
-                        debug_print(f"Título actualizado para conversación: {title}")
-                    elif conversation.get('name'):  # En algunas BD puede estar como 'name' en lugar de 'title'
-                        title = conversation['name']
-                        self.set_conversation_name(title)
-                        debug_print(f"Título actualizado para conversación (name): {title}")
-                    
-                    # Cargar explícitamente los mensajes de la conversación
-                    history_entries = self.chat_history.get_conversation_history(self.cid)
-                    
-                    if history_entries:
-                        debug_print(f"Se encontraron {len(history_entries)} mensajes para mostrar")
-                        # Asegurarse de que este método se ejecute solo una vez
-                        # Agregar una flag para evitar cargas duplicadas
-                        if not hasattr(self, '_history_loaded') or not self._history_loaded:
-                            self._history_loaded = True
-                            # Usar idle_add con prioridad alta para asegurar que la UI esté lista
-                            GLib.idle_add(self._load_and_display_history, history_entries, GLib.PRIORITY_HIGH)
+            debug_print(f"Contexto de conversación CID: {self.cid}. Verificando historial.")
+            # Usar un indicador para asegurar que la visualización del historial se inicie solo una vez
+            # por contexto de CID relevante. Se reinicia si el CID cambia o la ventana se reutiliza.
+            if getattr(self, '_history_display_initiated_for_cid', None) != self.cid:
+                try:
+                    conversation = self.chat_history.get_conversation(self.cid)
+                    if conversation:
+                        debug_print(f"Conversación encontrada en BD: {conversation.get('title', 'Sin título')}")
+                        title_to_set = conversation.get('title') or conversation.get('name')
+                        if title_to_set:
+                            self.set_conversation_name(title_to_set)
+                        
+                        history_entries = self.chat_history.get_conversation_history(self.cid)
+                        if history_entries:
+                            debug_print(f"Se encontraron {len(history_entries)} mensajes. Programando visualización.")
+                            self._history_display_initiated_for_cid = self.cid 
+                            GLib.idle_add(self._load_and_display_history, history_entries)
+                        else:
+                            debug_print("No se encontraron mensajes en el historial. Limpiando área de mensajes.")
+                            self._clear_messages_box() 
+                            self._history_display_initiated_for_cid = self.cid # Marcar como "manejado"
                     else:
-                        debug_print("No se encontraron mensajes en el historial")
-                else:
-                    debug_print(f"No se encontró la conversación con CID: {self.cid}")
-            except Exception as e:
-                debug_print(f"Error al recuperar conversación en _on_model_loaded: {e}")
-                import traceback
-                debug_print(traceback.format_exc())
+                        debug_print(f"No se encontró la conversación con CID: {self.cid}. Limpiando área de mensajes.")
+                        self._clear_messages_box()
+                        self._history_display_initiated_for_cid = self.cid # Marcar como "manejado"
+                except Exception as e:
+                    debug_print(f"Error al procesar conversación en _on_model_loaded: {e}", exc_info=True)
+            else:
+                debug_print(f"Visualización de historial para CID {self.cid} ya fue iniciada o está en proceso.")
         else:
-            debug_print("Sin CID específico, no se carga ninguna conversación")
+            debug_print("Sin CID específico. Limpiando área de mensajes para nueva conversación.")
+            self._clear_messages_box()
+            if hasattr(self, '_history_display_initiated_for_cid'):
+                delattr(self, '_history_display_initiated_for_cid')
             
+        self._update_api_key_banner_visibility()
+
+    def _clear_messages_box(self):
+        """Limpia todos los mensajes del messages_box y reinicia indicadores de historial."""
+        debug_print("Limpiando messages_box.")
+        while child := self.messages_box.get_first_child():
+            self.messages_box.remove(child)
+        
+        # Reiniciar el indicador en _load_and_display_history para permitir que nuevo historial se muestre.
+        if hasattr(self, '_history_displayed'):
+            self._history_displayed = False
+        # No reiniciar _history_display_initiated_for_cid aquí directamente, 
+        # _on_model_loaded lo maneja basado en si hay un self.cid.
+
     def _load_and_display_history(self, history_entries):
-        """Método auxiliar para cargar y mostrar el historial después de que la UI esté lista."""
+        """Carga y muestra el historial. Evita la re-ejecución si ya se mostró."""
         try:
-            debug_print("Cargando y mostrando historial de conversación...")
-            # Verificar que no se haya cargado ya el historial (doble verificación)
+            debug_print("Solicitud para cargar y mostrar historial de conversación...")
+            # Este indicador previene re-mostrar si la función es llamada accidentalmente de nuevo
+            # para el mismo "evento de carga lógico". Se reinicia por _clear_messages_box.
             if hasattr(self, '_history_displayed') and self._history_displayed:
-                debug_print("El historial ya ha sido mostrado, evitando duplicación")
-                return False
+                debug_print("El historial ya ha sido procesado por _load_and_display_history, evitando duplicación.")
+                return GLib.SOURCE_REMOVE
                 
-            self._history_displayed = True
-            self._display_conversation_history(history_entries)
+            self._history_displayed = True # Marcar que este evento de carga ha procesado la visualización.
+            self._display_conversation_history(history_entries) # Llama a la lógica de visualización real
             
-            # Asegurarse de que se haga scroll al final
-            GLib.timeout_add(100, self._scroll_to_bottom)
+            # Asegurar scroll al final después de que los widgets se hayan mapeado.
+            GLib.timeout_add(150, lambda: self._scroll_to_bottom(force=True))
             
-            return False  # Ejecutar solo una vez
+            return GLib.SOURCE_REMOVE # Ejecutar solo una vez por llamada a GLib.idle_add
         except Exception as e:
-            debug_print(f"Error al cargar historial: {e}")
-            import traceback
-            debug_print(traceback.format_exc())
-            return False  # Ejecutar solo una vez
+            debug_print(f"Error en _load_and_display_history: {e}", exc_info=True)
+            return GLib.SOURCE_REMOVE # Asegurar que no se reintente en caso de error aquí
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()
@@ -695,17 +748,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _display_conversation_history(self, history_entries):
         """Muestra el historial de conversación en la UI."""
-        # Limpiar contenedor de mensajes existentes
-        for child in self.messages_box:
-            self.messages_box.remove(child)
-            
-        # Verificar que tengamos entradas válidas
+        self._clear_messages_box() # Limpiar mensajes existentes primero
+
         if not history_entries:
-            debug_print("No hay entradas de historial para mostrar")
+            debug_print("No hay entradas de historial para mostrar después de limpiar.")
             return
             
         debug_print(f"Mostrando {len(history_entries)} mensajes de historial")
-        debug_print(f"Detalle de las entradas: {history_entries}")
         
         # Mostrar cada mensaje en la UI
         for entry in history_entries:
@@ -753,14 +802,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             toast.connect('button-clicked', lambda *_: action_callback())
         self.toast_overlay.add_toast(toast)
 
-    def _show_api_key_banner_if_needed(self):
-        if hasattr(self, 'model_sidebar') and hasattr(self.model_sidebar, 'needs_api_key_for_current_model'):
-            if self.model_sidebar.needs_api_key_for_current_model():
-                self.api_key_banner.set_revealed(True)
-            else:
-                self.api_key_banner.set_revealed(False)
-        return False
-
     def _on_api_key_banner_button_clicked(self, banner):
+        """Manejador para el clic del botón en el banner de API key."""
         self.split_view.set_show_sidebar(True)
-        self.model_sidebar.stack.set_visible_child_name('providers')
+        # Asegurarse de que la sección de selección de modelo esté visible en el sidebar
+        if hasattr(self.model_sidebar, 'stack'):
+            self.model_sidebar.stack.set_visible_child_name("model_selection")
+
+    def _update_api_key_banner_visibility(self):
+        """Actualiza la visibilidad del banner de API key."""
+        if not hasattr(self, 'model_sidebar') or not hasattr(self.model_sidebar, 'needs_api_key_for_current_model'):
+            self.api_key_banner.set_revealed(False)
+            return
+
+        sidebar_visible = self.split_view.get_show_sidebar()
+        needs_key = self.model_sidebar.needs_api_key_for_current_model()
+
+        if needs_key and not sidebar_visible:
+            self.api_key_banner.set_revealed(True)
+        else:
+            self.api_key_banner.set_revealed(False)

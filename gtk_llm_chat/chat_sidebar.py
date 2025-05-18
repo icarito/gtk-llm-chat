@@ -22,6 +22,11 @@ MODEL_LIST_NAME = "models"
 DEBUG = os.environ.get('DEBUG') or False
 
 class ChatSidebar(Gtk.Box):
+    __gsignals__ = {
+        'model-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # No es necesario definir 'destroy' aquí, es una señal estándar de GObject
+    }
+
     """
     Sidebar widget for model selection using a two-step navigation
     (Providers -> Models) with Adw.ViewStack and API key management via Adw.Banner.
@@ -547,6 +552,8 @@ class ChatSidebar(Gtk.Box):
                             llm.set_default_model(model_id)
                             window.add_toast(_('Default model set!'))
                         window.add_toast(_('Custom model set'), action_label=_('Make default'), action_callback=set_default)
+                # Emitir la señal model-changed para que la ventana principal reaccione
+                self.emit('model-changed', model_id)
 
     def _on_banner_button_clicked(self, banner):
         """Manejador para el clic del botón en el Adw.Banner."""
