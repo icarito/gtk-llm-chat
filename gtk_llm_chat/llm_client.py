@@ -128,70 +128,91 @@ class LLMClient(GObject.Object):
             try:
                 from llm.plugins import load_plugins, pm
                 if not hasattr(llm.plugins, '_loaded') or not llm.plugins._loaded:
-                    # Solo cargar si no están ya cargados
                     load_plugins()
-                    debug_print("LLMClient: Plugins cargados correctamente en _load_model_internal")
+                    llm.plugins._loaded = True
                 else:
-                    debug_print("LLMClient: Plugins ya estaban cargados, omitiendo carga en _load_model_internal")
+                    debug_print("LLMClient: Plugins ya cargados")
             except Exception as e:
                 debug_print(f"LLMClient: Error verificando/cargando plugins en _load_model_internal: {e}")
             
-            # Determine the model_id to load
+            # Determine the model_id to load - dar prioridad al modelo configurado
             if model_id is None:
-                # Use config or default if no specific model_id is provided (initial load)
-                model_id = self.config.get('model') or llm.get_default_model()
+                model_id = self.config.get('model')  # Primero intentar usar el modelo configurado
+                debug_print(f"LLMClient: Intentando usar modelo configurado: {model_id}")
+                
+                if not model_id:
+                    model_id = llm.get_default_model()  # Solo usar default si no hay modelo configurado
+                    debug_print(f"LLMClient: No hay modelo configurado, usando default: {model_id}")
 
             debug_print(f"LLMClient: Attempting to load model: {model_id} (in _load_model_internal)")
             
-            # Verificar modelos disponibles
-            available_models = llm.get_models()
-            debug_print(f"LLMClient: Hay {len(available_models)} modelos disponibles")
-            
-            # Buscar modelo por ID exacto
-            model_found = False
-            for model in available_models:
-                if getattr(model, 'model_id', None) == model_id:
-                    model_found = True
-                    break
-            
-            if not model_found and available_models:
-                # Si el modelo no se encuentra, usar el primer modelo disponible
-                fallback_model = available_models[0]
-                fallback_id = getattr(fallback_model, 'model_id', None)
-                debug_print(f"LLMClient: Modelo {model_id} no encontrado, usando alternativa: {fallback_id}")
-                model_id = fallback_id
-            
-            # Cargar el modelo
-            new_model = llm.get_model(model_id)
-            self.model = new_model  # Assign the new model
-            debug_print(f"LLMClient: Using model {self.model.model_id}")
-            
-            # Siempre crear una nueva conversación
-            conversation_recreated_or_model_changed = False
-            debug_print(f"LLMClient: Creating new conversation object for model {new_model.model_id} in _load_model_internal.")
-            self.conversation = new_model.conversation()
-            conversation_recreated_or_model_changed = True
+            # Verificar modelos disponibles y cargar el modelo
+            try:
+                available_models = llm.get_models()
+                debug_print(f"LLMClient: Hay {len(available_models)} modelos disponibles")
                 
-            self._init_error = None
-
-            # If model setup was successful and a cid exists (especially for initial load with a persisted session)
-            if current_cid and conversation_recreated_or_model_changed:
-                debug_print(f"LLMClient: Attempting to reload history for cid '{current_cid}' during model initialization.")
-                history_entries = self.chat_history.get_conversation_history(current_cid) # Corrected method name
-                if history_entries:
-                    self.load_history(history_entries)
-                    debug_print(f"LLMClient: Successfully reloaded {len(history_entries)} entries for cid '{current_cid}' (initial load).")
+                # Buscar modelo por ID exacto
+                model_found = None
+                for model in available_models:
+                    if getattr(model, 'model_id', None) == model_id:
+                        model_found = model
+                        break
+                
+                if model_found is None and available_models:
+                    # Solo usar fallback si no se encuentra el modelo Y no hay modelo configurado
+                    if not self.config.get('model'):
+                        fallback_model = available_models[0]
+                        fallback_id = getattr(fallback_model, 'model_id', None)
+                        debug_print(f"LLMClient: Modelo {model_id} no encontrado y no hay modelo configurado, usando alternativa: {fallback_id}")
+                        model_id = fallback_id
+                        model_found = fallback_model
+                    else:
+                        debug_print(f"LLMClient: Modelo {model_id} no encontrado, pero hay modelo configurado. No usando fallback.")
+                        raise llm.UnknownModelError(f"Modelo no encontrado: {model_id}")
+                
+                # Asignar el modelo encontrado
+                if model_found:
+                    self.model = model_found
+                    debug_print(f"LLMClient: Using model {self.model.model_id}")
                 else:
-                    debug_print(f"LLMClient: No history entries found for cid '{current_cid}' to reload (initial load).")
-            elif not current_cid and conversation_recreated_or_model_changed:
-                 debug_print("LLMClient: New conversation created, no prior cid to reload history from.")
+                    raise llm.UnknownModelError(f"No se pudo cargar el modelo: {model_id}")
+                
+                # Siempre crear una nueva conversación
+                conversation_recreated_or_model_changed = False
+                debug_print(f"LLMClient: Creating new conversation object for model {self.model.model_id} in _load_model_internal.")
+                self.conversation = self.model.conversation()
+                conversation_recreated_or_model_changed = True
+                
+                self._init_error = None
 
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
+                # If model setup was successful and a cid exists (especially for initial load with a persisted session)
+                if current_cid and conversation_recreated_or_model_changed:
+                    debug_print(f"LLMClient: Attempting to reload history for cid '{current_cid}' during model initialization.")
+                    history_entries = self.chat_history.get_conversation_history(current_cid)
+                    if history_entries:
+                        self.load_history(history_entries)
+                        debug_print(f"LLMClient: Successfully reloaded {len(history_entries)} entries for cid '{current_cid}' (initial load).")
+                    else:
+                        debug_print(f"LLMClient: No history entries found for cid '{current_cid}' to reload (initial load).")
+                elif not current_cid and conversation_recreated_or_model_changed:
+                    debug_print("LLMClient: New conversation created, no prior cid to reload history from.")
+
+                GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
+                
+            except llm.UnknownModelError as e:
+                debug_print(f"LLMClient: Error - Unknown model: {e}")
+                raise  # Re-raise para ser manejado en el catch exterior
+                
+            except Exception as e:
+                debug_print(f"LLMClient: Error loading model: {e}")
+                raise  # Re-raise para ser manejado en el catch exterior
+                
         except llm.UnknownModelError as e:
             debug_print(f"LLMClient: Error - Unknown model: {e}")
             self._init_error = str(e)
             # Don't overwrite self.model if loading fails, keep the old one if any
             GLib.idle_add(self.emit, 'error', f"Modelo desconocido: {e}")
+            
         except Exception as e:
             debug_print(f"LLMClient: Unexpected error loading model: {e}")
             self._init_error = str(e)

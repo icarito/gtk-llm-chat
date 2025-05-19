@@ -61,6 +61,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
+        # --- CORRECCIÓN: Si hay CID, obtener el modelo de la BD y ponerlo en config antes de crear LLMClient ---
+        if self.cid:
+            try:
+                conversation = self.chat_history.get_conversation(self.cid)
+                if conversation and conversation.get('model'):
+                    self.config['model'] = conversation['model']
+                    debug_print(f"Modelo de la conversación desde BD: {conversation['model']}")
+            except Exception as e:
+                debug_print(f"Error al obtener modelo de la conversación: {e}")
+
         # Inicializar LLMClient con la configuración
         # self.llm will be initialized later, after UI setup potentially
         self.llm = None
@@ -454,9 +464,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja el evento cuando se carga un modelo."""
         debug_print(f"Modelo cargado correctamente: {model_id}")
         
-        # Actualizar el título de la ventana con el nombre del modelo
+        # Actualizar la configuración y el subtítulo de la ventana con el modelo cargado
+        self.config['model'] = model_id
         self.title_widget.set_subtitle(model_id)
-        
+
+        # Forzar actualización del sidebar para reflejar el modelo correcto
+        if hasattr(self, 'model_sidebar') and self.model_sidebar:
+            self.model_sidebar.update_model_button()
+
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
             debug_print(f"Verificando conversación existente para CID: {self.cid}")
