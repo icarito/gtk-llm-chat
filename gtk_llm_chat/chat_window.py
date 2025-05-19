@@ -256,23 +256,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.title_widget.set_subtitle(self.config['model'])
 
-        # Crear el sidebar con el modelo actual de forma segura
-        try:
-            model_id = self.config.get('model')
-            if not model_id and self.llm and hasattr(self.llm, 'get_model_id'):
-                model_id = self.llm.get_model_id()
-            # Si aún no hay model_id, usar un valor seguro
-            model_id = model_id or "default"
-            self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
-            self.split_view.set_sidebar(self.model_sidebar)
-        except Exception as e:
-            debug_print(f"Error al crear el sidebar: {e}")
-            import traceback
-            debug_print(traceback.format_exc())
-            self.model_sidebar = None
-            # Mostrar un error en la UI, pero no abortar la ventana
-            error_widget = ErrorWidget(_("Error loading sidebar. Some functionality may be limited."))
-            self.messages_box.append(error_widget)
+        # Crear el sidebar con el modelo actual
+        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
+        # Establecer el panel lateral en el split_view
+        self.split_view.set_sidebar(self.model_sidebar)
 
         # --- Ensamblado Final ---
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
@@ -784,10 +771,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def show_set_default_model_toast(self, model_id):
         """Muestra un toast para establecer el modelo como predeterminado."""
-        toast = Adw.Toast(title=_('Set {} as default model?').format(model_id))
-        toast.set_button_label(_('Set Default'))
-        toast.connect('button-clicked', lambda t: self._set_as_default_model(model_id))
-        toast.connect('dismissed', lambda t: None) # Hacer algo si se descarta?
+        toast = Adw.Toast(title=_(\"Set {} as default model?\").format(model_id))
+        toast.set_button_label(_(\"Set Default\"))
+        toast.connect(\"button-clicked\", lambda t: self._set_as_default_model(model_id))
+        toast.connect(\"dismissed\", lambda t: None) # Hacer algo si se descarta?
         self.toast_overlay.add_toast(toast)
 
     def _set_as_default_model(self, model_id):
@@ -795,9 +782,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             set_default_model(model_id)
             debug_print(f"Modelo {model_id} establecido como predeterminado.")
             # Opcional: mostrar otro toast de confirmación
-            confirm_toast = Adw.Toast(title=_('{} is now the default model.').format(model_id), timeout=3)
+            confirm_toast = Adw.Toast(title=_(\"{} is now the default model.\").format(model_id), timeout=3)
             self.toast_overlay.add_toast(confirm_toast)
         except Exception as e:
             debug_print(f"Error al establecer el modelo predeterminado: {e}")
-            error_toast = Adw.Toast(title=_('Error setting default model.'), timeout=3)
+            error_toast = Adw.Toast(title=_(\"Error setting default model.\"), timeout=3)
             self.toast_overlay.add_toast(error_toast)

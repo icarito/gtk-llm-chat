@@ -186,7 +186,7 @@ class LLMClient(GObject.Object):
             elif not current_cid and conversation_recreated_or_model_changed:
                  debug_print("LLMClient: New conversation created, no prior cid to reload history from.")
 
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
+            self.emit('model-loaded', self.model.model_id)
         except llm.UnknownModelError as e:
             debug_print(f"LLMClient: Error - Unknown model: {e}")
             self._init_error = str(e)

@@ -275,23 +275,9 @@ class LLMChatApplication(Adw.Application):
             return window
         except Exception as e:
             debug_print(f"Error al crear nueva ventana: {e}")
-            import traceback
-            debug_print(traceback.format_exc())
-            # No volver a llamar a self.activate() aquí para evitar bucles infinitos
-            # Mostrar un error de ventana simple si es posible
-            try:
-                from chat_window import ErrorWidget
-                # Crear ventana de error simple
-                error_win = Gtk.Window()
-                error_win.set_title("Error")
-                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-                label = Gtk.Label(label=str(e))
-                box.append(label)
-                error_win.set_child(box)
-                error_win.set_default_size(400, 100)
-                error_win.present()
-            except Exception as e2:
-                debug_print(f"Error mostrando ventana de error: {e2}")
+            
+            # En caso de error, activar la ventana normalmente
+            self.activate()
             return None
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
