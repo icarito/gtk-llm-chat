@@ -374,7 +374,7 @@ class LLMClient(GObject.Object):
         pass
 
     def get_model_id(self):
-        # self._ensure_model_loaded()
+        self._ensure_model_loaded()
         return self.model.model_id if self.model else llm.get_default_model()
 
     def get_conversation_id(self):

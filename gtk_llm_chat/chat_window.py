@@ -483,8 +483,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                         # Agregar una flag para evitar cargas duplicadas
                         if not hasattr(self, '_history_loaded') or not self._history_loaded:
                             self._history_loaded = True
-                            # Usar idle_add con prioridad alta para asegurar que la UI esté lista
-                            GLib.idle_add(self._load_and_display_history, history_entries, GLib.PRIORITY_HIGH)
+                            GLib.idle_add(self._load_and_display_history, history_entries)
                     else:
                         debug_print("No se encontraron mensajes en el historial")
                 else:
