@@ -29,7 +29,18 @@ jobs:
             linux-headers-$(uname -r) libcurl4-nss-dev libxcursor-dev \
             libxkbcommon-dev libxml2-utils libxrandr-dev libxi-dev \
             libwayland-dev libxinerama-dev \
-            gperf libappstream-dev libxmlb-dev libxdamage-dev gettext valac
+            gperf libappstream-dev libxmlb-dev libxdamage-dev gettext valac \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            gir1.2-gtk-3.0 \
+            gir1.2-ayatanaappindicator3-0.1 \
+            libglib2.0-0 \
+            libgirepository-1.0-1 \
+            libdbus-1-dev \
+            libdbus-glib-1-dev \
+            gir1.2-dbusmenu-glib-0.4 \
+            gir1.2-dbusmenu-gtk3-0.4 \
+            gir1.2-glib-2.0
 
           sudo pip install --upgrade pip meson
 
