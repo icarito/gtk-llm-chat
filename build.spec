@@ -22,6 +22,8 @@ typelibs = []
 for name in ('Adw-1.typelib',
         'Atk-1.0.typelib',
         'AyatanaAppIndicator3-0.1.typelib',
+	'DBus-1.0.typelib',
+	'DBusGLib-1.0.typelib',
         'GLib-2.0.typelib',
         'GModule-2.0.typelib',
         'GObject-2.0.typelib',
@@ -90,8 +92,10 @@ a = Analysis(
         'gtk_llm_chat.widgets',
         'gtk_llm_chat.markdownview',
         'gtk_llm_chat.llm_client',
+        'gtk_llm_chat.tray_applet',
         'gtk_llm_chat._version',
         'locale',
+	'gi.repository.DBus',
     ]
 )
 
