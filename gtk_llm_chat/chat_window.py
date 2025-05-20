@@ -341,7 +341,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             /* Estilos opcionales para el sidebar */
             /* .sidebar-title { ... } */
         """
-        css_provider.load_from_data(data.encode('UTF-8'), -1) # Usar -1
+        css_provider.load_from_data(data, -1) # Usar -1
 
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
