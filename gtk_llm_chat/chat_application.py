@@ -246,39 +246,32 @@ class LLMChatApplication(Adw.Application):
         """Crea una nueva ventana con la configuración dada."""
         debug_print(f"Creando nueva ventana con configuración: {config}")
         
-        try:
-            from chat_window import LLMChatWindow
-            chat_history = ChatHistory()
-            
-            # Crear la nueva ventana con la configuración
-            window = LLMChatWindow(application=self, config=config, chat_history=chat_history)
-            window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
-            
-            # Configurar el manejador de eventos de teclado
-            key_controller = Gtk.EventControllerKey()
-            key_controller.connect("key-pressed", self._on_key_pressed)
-            window.add_controller(key_controller)
-            
-            # Registrar la ventana por CID si existe
-            if 'cid' in config and config['cid']:
-                cid = config['cid']
-                self._window_by_cid[cid] = window
-                debug_print(f"Ventana registrada para CID: {cid}")
-                
-                # Conectar señal de cierre para eliminar del registro
-                # Ya no es necesario conectar un manejador de cierre aquí, la lógica está en LLMChatWindow
-
-            
-            # Presentar la ventana
-            window.present()
-            
-            return window
-        except Exception as e:
-            debug_print(f"Error al crear nueva ventana: {e}")
-            
-            # En caso de error, activar la ventana normalmente
-            self.activate()
-            return None
+        #try:
+        from chat_window import LLMChatWindow
+        chat_history = ChatHistory()
+        
+        # Crear la nueva ventana con la configuración
+        window = LLMChatWindow(application=self, config=config, chat_history=chat_history)
+        window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
+        
+        # Configurar el manejador de eventos de teclado
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        window.add_controller(key_controller)
+        
+        # Registrar la ventana por CID si existe
+        if 'cid' in config and config['cid']:
+            cid = config['cid']
+            self._window_by_cid[cid] = window
+            debug_print(f"Ventana registrada para CID: {cid}")
+        
+        # Presentar la ventana
+        window.present()
+        
+        return window
+        #except Exception as e:
+        #    debug_print(f"Error al crear nueva ventana: {e}")
+        #    return None
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Maneja eventos de teclado a nivel de aplicación."""

@@ -8,18 +8,125 @@ on:
 jobs:
   build-linux:
     name: Build for Linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+#    env:
+#      VULKAN_SDK: ${{ github.workspace }}/1.4.309.0/x86_64
+#      VK_LAYER_PATH: ${{ github.workspace }}/1.4.309.0/x86_64/share/vulkan/explicit_layer.d
+#      VK_ADD_LAYER_PATH: ${{ github.workspace }}/1.4.309.0/x86_64/share/vulkan/explicit_layer.d
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install dependencies
+
+      - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt-mark hold firefox* linux-headers* linux-image* grub*
-          sudo apt upgrade
-          sudo apt install desktop-file-utils
-          sudo ./linux/bootstrap.sh
-      - name: Set up environment
+          sudo add-apt-repository -y ppa:kubuntu-ppa/backports-extra
+          sudo apt-get update
+          sudo apt-get install -y build-essential ninja-build git \
+            libxft-dev libepoxy-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libpolkit-agent-1-dev libpolkit-gobject-1-dev libunwind-dev \
+            libx11-dev libxext-dev libdrm-dev libcups2-dev libsass-dev \
+            linux-headers-$(uname -r) libcurl4-nss-dev libxcursor-dev \
+            libxkbcommon-dev libxml2-utils libxrandr-dev libxi-dev \
+            libwayland-dev libxinerama-dev \
+            gperf libappstream-dev libxmlb-dev libxdamage-dev gettext valac \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            gir1.2-gtk-3.0 \
+            gir1.2-ayatanaappindicator3-0.1 \
+            libglib2.0-0 \
+            libgirepository-1.0-1 \
+            libdbus-1-dev \
+            libdbus-glib-1-dev \
+            gir1.2-dbusmenu-glib-0.4 \
+            gir1.2-dbusmenu-gtk3-0.4 \
+            gir1.2-glib-2.0
+
+          sudo pip install --upgrade pip meson
+
+# Couldn't get this to work:
+#      - name: Instalar Vulkan SDK (para glslc)
+#        run: |
+#          wget -qO- https://sdk.lunarg.com/sdk/download/1.4.309.0/linux/vulkansdk-linux-x86_64-1.4.309.0.tar.xz | tar xJ
+#          export VULKAN_SDK=$(pwd)/1.4.309.0/x86_64
+#          export PATH=$VULKAN_SDK/bin:$PATH
+#          echo "PATH actualizado: $PATH"
+#          glslc --version
+#          echo "LD_LIBRARY_PATH=${{ github.workspace }}/1.4.309.0/x86_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+#          echo $VULKAN_SDK/bin >> $GITHUB_PATH
+
+      - name: Compila Gtk and friends
+        run: |
+          echo "Compiling gobject-introspection into /usr"
+          echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH" # Debería encontrar tu glib-2.0.pc
+          GOBJECT_INTROSPECTION_VERSION="1.80.0" # Elige una versión compatible con tu GLib y GTK4
+                                               # GLib 2.82 podría necesitar una versión reciente.
+                                               # 1.80.0 es una versión relativamente nueva. Revisa compatibilidades.
+          wget "https://download.gnome.org/sources/gobject-introspection/${GOBJECT_INTROSPECTION_VERSION%.*}/gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
+          tar -xf "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
+          cd "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}"
+          # Configura Meson para instalar en /usr.
+          # Necesita encontrar Python3 y tu GLib.
+          meson setup _build --prefix=/usr \
+            --buildtype=release \
+            -Ddoctool=disabled # Si no necesitas las herramientas de documentación
+          ninja -C _build
+          sudo ninja -C _build install # Instala en /usr
+          cd ..
+          git clone https://gitlab.gnome.org/GNOME/glib.git --branch glib-2-82 --depth 1
+          cd glib
+          meson setup _build --prefix=/usr \
+            -Dintrospection=enabled \
+            --buildtype=release -Ddocumentation=false -Dtests=false -Dman=false
+          ninja -C _build
+          sudo ninja -C _build install
+          cd ..
+          git clone https://gitlab.gnome.org/GNOME/pango.git --branch 1.52.2 --depth 1
+          cd pango
+          meson setup _build --prefix=/usr \
+            --buildtype=release -Dintrospection=enabled \
+            -Dfontconfig=enabled -Dfreetype=enabled
+          ninja -C _build
+          sudo ninja -C _build install
+          cd ..
+          wget "https://download.gnome.org/sources/graphene/1.8/graphene-1.8.6.tar.xz"
+          tar -xf "graphene-1.8.6.tar.xz"
+          cd "graphene-1.8.6"
+          meson setup _build --prefix=/usr \
+            --buildtype=release \
+            -Dtests=false
+          ninja -C _build
+          sudo ninja -C _build install
+          cd ..
+          git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git --branch 2.15.0 --depth 1
+          cd fontconfig
+          meson setup _build --prefix=/usr \
+            --buildtype=release -Ddoc=disabled -Dtests=disabled -Dtools=disabled
+          ninja -C _build
+          sudo ninja -C _build install
+          cd ..
+          git clone https://gitlab.gnome.org/GNOME/gtk.git --branch gtk-4-18 --depth 1
+          cd gtk
+          meson setup _build --prefix=/usr \
+            --buildtype=release \
+            -Dmedia-gstreamer=disabled \
+            -Dbuild-tests=false \
+            -Dbuild-examples=false \
+            -Dbuild-demos=false \
+            -Dintrospection=enabled \
+            -Dvulkan=disabled
+          ninja -C _build
+          sudo ninja -C _build install
+          cd ..
+          git clone https://gitlab.gnome.org/GNOME/libadwaita.git --branch libadwaita-1-7 --depth 1
+          cd libadwaita
+          meson setup _build --prefix=/usr \
+            -Dintrospection=enabled \
+            --buildtype=release
+          ninja -C _build
+          sudo ninja -C _build install
+
+      - name: Set environment for build
         run: |
           cp .env.ci .env
       - name: Build package
@@ -72,6 +179,7 @@ jobs:
           ./macos/bootstrap.sh
           python3 -m pip install pycairo
           python3 -m pip install PyGObject
+
       - name: Set up environment
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
