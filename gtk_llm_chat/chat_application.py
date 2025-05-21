@@ -60,6 +60,10 @@ class LLMChatApplication(Adw.Application):
             if settings:
                 settings.set_property('gtk-font-name', 'Segoe UI')
 
+        # Force dark mode until we've tested / liked light mode (issue #25)
+        style_manager = Adw.StyleManager.get_default()
+        style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+
     def _handle_sigint(self, signum, frame):
         """Handles SIGINT signal to close the application"""
         debug_print(_("\nClosing application..."))
@@ -150,7 +154,7 @@ class LLMChatApplication(Adw.Application):
             debug_print("D-Bus: CID vacío, abriendo nueva conversación")
             self.open_conversation_window()
             return
-            
+
         window = self._window_by_cid.get(cid)
         if window is None:
             # Crear y registrar una nueva ventana
@@ -203,11 +207,11 @@ class LLMChatApplication(Adw.Application):
     def do_command_line(self, command_line):
         """Procesa los argumentos de la línea de comandos."""
         debug_print("do_command_line invocado")
-        
+
         # Extraer configuración de los argumentos
         args = command_line.get_arguments()
         debug_print(f"Argumentos recibidos: {args}")
-        
+
         config = {}
         only_applet = False
         legacy_applet = False
@@ -223,16 +227,16 @@ class LLMChatApplication(Adw.Application):
                 only_applet = True
             elif arg.startswith("--legacy-applet"):
                 legacy_applet = True
-        
+
         # Guardar esta configuración para usarla en do_activate
         debug_print(f"Configuración preparada para do_activate: {config}")
-        
+
         # Abrir ventana de conversación con la configuración extraída
         if not only_applet:
             self.open_conversation_window(config)
         if legacy_applet:
             self._applet_loaded = True
-        
+
         return 0
 
     def do_activate(self):
@@ -245,51 +249,47 @@ class LLMChatApplication(Adw.Application):
     def _create_new_window_with_config(self, config):
         """Crea una nueva ventana con la configuración dada."""
         debug_print(f"Creando nueva ventana con configuración: {config}")
-        
-        #try:
+
         from chat_window import LLMChatWindow
         chat_history = ChatHistory()
-        
+
         # Crear la nueva ventana con la configuración
         window = LLMChatWindow(application=self, config=config, chat_history=chat_history)
         window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
-        
+
         # Configurar el manejador de eventos de teclado
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self._on_key_pressed)
         window.add_controller(key_controller)
-        
+
         # Registrar la ventana por CID si existe
         if 'cid' in config and config['cid']:
             cid = config['cid']
             self._window_by_cid[cid] = window
             debug_print(f"Ventana registrada para CID: {cid}")
-        
+
         # Presentar la ventana
         window.present()
-        
+
         return window
-        #except Exception as e:
-        #    debug_print(f"Error al crear nueva ventana: {e}")
-        #    return None
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Maneja eventos de teclado a nivel de aplicación."""
         window = self.get_active_window()
-        
+
         # F10: Toggle del sidebar
         if keyval == Gdk.KEY_F10:
             if window and hasattr(window, 'split_view'):
                 is_visible = window.split_view.get_show_sidebar()
                 window.split_view.set_show_sidebar(not is_visible)
                 return True
-        
+
         # F2: Renombrar conversación
         if keyval == Gdk.KEY_F2:
             if window:
                 self.on_rename_activate(None, None)
                 return True
-        
+
         # Escape: Cerrar ventana solo si el input tiene el foco
         if keyval == Gdk.KEY_Escape:
             if window:
@@ -297,7 +297,7 @@ class LLMChatApplication(Adw.Application):
                 if hasattr(window, 'input_text') and window.input_text.has_focus():
                     window.close()
                     return True
-                
+
         # Permitir que otros controles procesen otros eventos de teclado
         return False
 
@@ -310,12 +310,12 @@ class LLMChatApplication(Adw.Application):
     def on_delete_activate(self, action, param):
         """Deletes the current conversation"""
         window = self.get_active_window()
-        
+
         # Verificar que tenemos una ventana y acceder a su configuración
         if not window or not hasattr(window, 'config'):
             debug_print("No se puede eliminar: ventana inválida o sin configuración")
             return
-            
+
         dialog = Gtk.MessageDialog(
             transient_for=window,
             modal=True,
@@ -330,13 +330,13 @@ class LLMChatApplication(Adw.Application):
                 debug_print(f"Eliminando conversación con CID: {cid}")
                 if cid:
                     window.chat_history.delete_conversation(cid)
-                    
+
                     # Verificar si hay más ventanas abiertas
                     other_windows = [w for w in self.get_windows() if w != window]
-                    
+
                     # Cerrar solo la ventana actual en lugar de toda la aplicación
                     window.close()
-            
+
             dialog.destroy()
 
         dialog.connect("response", on_delete_response)
@@ -362,27 +362,27 @@ class LLMChatApplication(Adw.Application):
     def open_conversation_window(self, config=None):
         """
         Abre una ventana de conversación con la configuración dada.
-        
+
         Args:
             config (dict, optional): Configuración para la ventana de conversación. 
                                     Puede incluir 'cid', 'model', etc.
-        
+
         Returns:
             LLMChatWindow: La ventana creada o enfocada
         """
         # Asegurar que tenemos una configuración
         config = config or {}
-        
+
         # Evitar que se abra una ventana de applet
         conversation_config = dict(config)
         if 'applet' in conversation_config:
             conversation_config.pop('applet')
-        
+
         # Si hay un CID específico en la configuración
         if 'cid' in conversation_config:
             cid = conversation_config['cid']
             debug_print(f"Abriendo ventana con CID específico: {cid}")
-            
+
             # Verificar si ya existe una ventana registrada para este CID
             if cid in self._window_by_cid:
                 window = self._window_by_cid[cid]
@@ -394,11 +394,11 @@ class LLMChatApplication(Adw.Application):
                     # Si la ventana existe pero no es visible, eliminarla del registro
                     debug_print(f"La ventana para CID {cid} no es visible, eliminando del registro")
                     del self._window_by_cid[cid]
-            
+
             # Si no existe una ventana para este CID o no es visible, crear una nueva
             debug_print(f"Creando nueva ventana para CID: {cid}")
             return self._create_new_window_with_config(conversation_config)
-            
+
         else:
             # Si no hay CID específico, verificar si hay ventanas abiertas
             active_window = self.get_active_window()
