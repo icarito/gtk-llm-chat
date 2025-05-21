@@ -341,6 +341,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
             /* Estilos opcionales para el sidebar */
             /* .sidebar-title { ... } */
         """
+        if sys.platform.startswith('win'):
+            # Windows-specific CSS
+            data += """
+                window {
+                    box-shadow: none;
+                    margin: -12px;
+                    border-radius: 0px;
+                }
+            """
+            # Cambiar el esquema de color a oscuro (could happen!)
+            # style_manager = Adw.StyleManager.get_default()
+            # style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            
+        
         css_provider.load_from_data(data, -1) # Usar -1
 
         Gtk.StyleContext.add_provider_for_display(
