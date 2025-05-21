@@ -288,8 +288,16 @@ jobs:
     name: Publish to PyPI
     needs: build-python
     runs-on: ubuntu-latest
+    # Publica solo si el tag es v#.#.# (release) o v#.#.#dev/alpha/beta (prerelease)
     if: >-
-      if: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'test') }}
+      ${{ startsWith(github.ref_name, 'v') && (
+        (
+          contains(github.ref_name, 'dev') ||
+          contains(github.ref_name, 'alpha') ||
+          contains(github.ref_name, 'beta') ||
+          (!contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta'))
+        )
+      ) }}
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
