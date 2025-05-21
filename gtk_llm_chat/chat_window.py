@@ -352,6 +352,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
             """
         elif sys.platform.startswith('darwin'):
             self.header.set_decoration_layout('close,minimize,maximize:')
+            def find_window_controls(parent):
+                if not parent:
+                    return None
+                child = parent.get_first_child()
+                while child:
+                    if isinstance(child, Gtk.WindowControls):
+                        return child
+                    found_in_child = find_window_controls(child)
+                    if found_in_child:
+                        return found_in_child
+                    hijo = hijo.get_next_sibling()
+                return None
+            controls = find_window_controls(self.header)
+            controls.set_use_native_controls(True)
             data += """
                 window {
                     border-radius: 10px;
