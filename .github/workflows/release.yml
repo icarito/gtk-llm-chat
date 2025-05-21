@@ -288,8 +288,16 @@ jobs:
     name: Publish to PyPI
     needs: build-python
     runs-on: ubuntu-latest
+    # Publica solo si el tag es v#.#.# (release) o v#.#.#dev/alpha/beta (prerelease)
     if: >-
-      if: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'test') }}
+      ${{ startsWith(github.ref_name, 'v') && (
+        (
+          contains(github.ref_name, 'dev') ||
+          contains(github.ref_name, 'alpha') ||
+          contains(github.ref_name, 'beta') ||
+          (!contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta'))
+        )
+      ) }}
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
@@ -300,6 +308,41 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-pypi-release:
+    name: Publish to PyPI (Release)
+    needs: build-python
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ startsWith(github.ref_name, 'v') && !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') && !contains(github.ref_name, 'test') }}
+    steps:
+      - name: Download Python dist
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - name: Publish package to PyPI (Release)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-pypi-prerelease:
+    name: Publish to PyPI (Prerelease)
+    needs: build-python
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ startsWith(github.ref_name, 'v') && (contains(github.ref_name, 'dev') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta')) }}
+    steps:
+      - name: Download Python dist
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - name: Publish package to PyPI (Prerelease)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          # No se requiere flag extra, PyPI detecta prerelease por el nombre de la versión
 
   github-release:
     name: GitHub Release
