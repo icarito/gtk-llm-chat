@@ -53,9 +53,6 @@ def main(argv=None):
     # Lógica multiplataforma para lanzar el applet
     if not maybe_fork_or_spawn_applet(config):
         return 0
-    if config.get('applet'):
-        launch_tray_applet(config)
-        return 0
 
     # Lanzar la aplicación principal
     from chat_application import LLMChatApplication
