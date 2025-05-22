@@ -5,7 +5,7 @@ import argparse
 import os
 import sys
 import time
-from platform_utils import launch_tray_applet
+from platform_utils import launch_tray_applet, maybe_fork_or_spawn_applet
 
 # Benchmark
 benchmark_startup = '--benchmark-startup' in sys.argv
@@ -50,15 +50,12 @@ def main(argv=None):
         argv = sys.argv
     config = parse_args(argv)
 
-    if not config.get('no_applet'):
-        # Here we do a classic fork
-        # to create a new process for the tray applet
-        pid = os.fork()
-        if pid != 0:
-            launch_tray_applet(config)
-        if config.get('applet'):
-            # If we are in the applet, we don't want to run the GUI
-            return 0
+    # Lógica multiplataforma para lanzar el applet
+    if not maybe_fork_or_spawn_applet(config):
+        return 0
+    if config.get('applet'):
+        launch_tray_applet(config)
+        return 0
 
     # Lanzar la aplicación principal
     from chat_application import LLMChatApplication

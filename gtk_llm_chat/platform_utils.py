@@ -5,7 +5,7 @@ import sys
 import subprocess
 import os
 import tempfile
-import portalocker
+import atexit
 
 PLATFORM = sys.platform
 
@@ -32,6 +32,7 @@ def launch_tray_applet(config):
     try:
         from gtk_llm_chat.tray_applet import main
         main()
+        sys.exit(0)
     except Exception as e:
         if is_frozen():
             # Relanzar el propio ejecutable con --applet
@@ -107,13 +108,92 @@ def send_ipc_open_conversation(cid):
         subprocess.Popen(args)
 
 def ensure_single_instance(lock_file=None):
-    """Ensure only a single instance of the applet is running using a lock file."""
+    """Evita múltiples instancias usando un pidfile (multiplataforma)."""
     if lock_file is None:
-        lock_file = os.path.join(tempfile.gettempdir(), 'gtk_llm_chat_applet.lock')
-    lock = open(lock_file, 'w')
-    try:
-        portalocker.lock(lock, portalocker.LOCK_EX | portalocker.LOCK_NB)
-    except portalocker.LockException:
-        print("Another instance of the applet is already running.")
-        sys.exit(1)
-    return lock
+        lock_file = os.path.join(tempfile.gettempdir(), 'gtk_llm_chat_applet.pid')
+    print(f"[platform_utils] ensure_single_instance: pidfile={lock_file}", flush=True)
+    pid = os.getpid()
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, 'r') as f:
+                existing_pid = int(f.read().strip())
+            if existing_pid != pid:
+                if is_windows():
+                    # En Windows, comprobamos si el proceso existe usando ctypes
+                    import ctypes
+                    PROCESS_QUERY_INFORMATION = 0x1000
+                    process = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 0, existing_pid)
+                    if process != 0:
+                        ctypes.windll.kernel32.CloseHandle(process)
+                        print(f"[platform_utils] Otra instancia activa con PID {existing_pid}", flush=True)
+                        print("Another instance of the applet is already running.")
+                        sys.exit(1)
+                    else:
+                        print(f"[platform_utils] PID {existing_pid} no está activo (Windows), sobreescribiendo pidfile", flush=True)
+                else:
+                    # Unix: comprobamos con os.kill
+                    try:
+                        os.kill(existing_pid, 0)
+                        print(f"[platform_utils] Otra instancia activa con PID {existing_pid}", flush=True)
+                        print("Another instance of the applet is already running.")
+                        sys.exit(1)
+                    except OSError:
+                        print(f"[platform_utils] PID {existing_pid} no está activo, sobreescribiendo pidfile", flush=True)
+        except Exception as e:
+            print(f"[platform_utils] Error leyendo pidfile: {e}", flush=True)
+    # Escribimos nuestro PID
+    with open(lock_file, 'w') as f:
+        f.write(str(pid))
+    def cleanup():
+        try:
+            if os.path.exists(lock_file):
+                with open(lock_file, 'r') as f:
+                    if f.read().strip() == str(pid):
+                        os.remove(lock_file)
+                        print(f"[platform_utils] pidfile {lock_file} eliminado", flush=True)
+        except Exception as e:
+            print(f"[platform_utils] Error eliminando pidfile: {e}", flush=True)
+    atexit.register(cleanup)
+    print(f"[platform_utils] Instancia registrada con PID {pid}", flush=True)
+    return lock_file
+
+def maybe_fork_or_spawn_applet(config):
+    """Lanza el applet como proceso hijo (fork) en Unix, en un hilo en Windows, o como subproceso en Mac. Devuelve True si el proceso actual debe continuar con la app principal."""
+    if config.get('no_applet'):
+        return True
+    import threading
+    # Solo fork en sistemas tipo Unix
+    if is_linux() or is_mac():
+        if hasattr(os, 'fork'):
+            pid = os.fork()
+            if pid == 0:
+                # Proceso hijo: applet
+                launch_tray_applet(config)
+                sys.exit(0)
+            # Proceso padre: sigue con la app principal
+            return True
+        else:
+            # Mac sin fork: subproceso
+            import subprocess
+            subprocess.Popen([sys.executable, os.path.abspath(__file__), '--applet'])
+            if config.get('applet'):
+                return False
+            return True
+    elif is_windows():
+        # En Windows, lanzar el applet en un hilo
+        def tray_thread():
+            launch_tray_applet(config)
+        t = threading.Thread(target=tray_thread, daemon=True)
+        t.start()
+        if config.get('applet'):
+            # Si solo se pidió el applet, el hilo principal debe esperar
+            t.join()
+            return False
+        return True
+    else:
+        # Fallback: subproceso
+        import subprocess
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), '--applet'])
+        if config.get('applet'):
+            return False
+        return True
