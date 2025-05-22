@@ -55,10 +55,8 @@ def spawn_tray_applet(config):
         # subprocess.Popen(args)
     else:
         # Ejecutar tray_applet.py con el intérprete
-        applet_path = os.path.join(os.path.dirname(__file__), 'tray_applet.py')
-        args = [sys.executable, applet_path]
-        if config.get('cid'):
-            args += ['--cid', config['cid']]
+        applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
+        args = [sys.executable, applet_path, '--applet']
         print(f"[platform_utils] Lanzando applet (no frozen): {args}")
         subprocess.Popen(args)
 
