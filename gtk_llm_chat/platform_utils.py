@@ -45,19 +45,22 @@ def launch_tray_applet(config):
         from gtk_llm_chat.tray_applet import main
         main()
     except Exception as e:
-        if is_frozen():
-            # Relanzar el propio ejecutable con --applet
-            args = [sys.executable, "--applet"]
-            print(f"[platform_utils] Error lanzando applet (frozen): {e}")
-            # subprocess.Popen(args)
-        else:
-            # Ejecutar tray_applet.py con el intérprete
-            applet_path = os.path.join(os.path.dirname(__file__), 'tray_applet.py')
-            args = [sys.executable, applet_path]
-            if config.get('cid'):
-                args += ['--cid', config['cid']]
-            print(f"[platform_utils] Lanzando applet (no frozen): {args}")
-            subprocess.Popen(args)
+        spawn_tray_applet(config)
+
+def spawn_tray_applet(config):
+    if is_frozen():
+        # Relanzar el propio ejecutable con --applet
+        args = [sys.executable, "--applet"]
+        print(f"[platform_utils] Error lanzando applet (frozen): {e}")
+        # subprocess.Popen(args)
+    else:
+        # Ejecutar tray_applet.py con el intérprete
+        applet_path = os.path.join(os.path.dirname(__file__), 'tray_applet.py')
+        args = [sys.executable, applet_path]
+        if config.get('cid'):
+            args += ['--cid', config['cid']]
+        print(f"[platform_utils] Lanzando applet (no frozen): {args}")
+        subprocess.Popen(args)
 
 def send_ipc_open_conversation(cid):
     """
@@ -117,3 +120,20 @@ def send_ipc_open_conversation(cid):
             args.append(f"--cid={cid}")
         print(f"Ejecutando fallback (no frozen): {args}")
         subprocess.Popen(args)
+
+def fork_or_spawn_applet(config):
+    """Lanza el applet como proceso hijo (fork) en Unix si está disponible, o como subproceso en cualquier plataforma. Devuelve True si el proceso actual debe continuar con la app principal."""
+    if config.get('no_applet'):
+        return True
+    # Solo fork en sistemas tipo Unix si está disponible
+    if (is_linux() or is_mac()) and hasattr(os, 'fork'):
+        pid = os.fork()
+        if pid == 0:
+            # Proceso hijo: applet
+            launch_tray_applet(config)
+            sys.exit(0)
+        # Proceso padre: sigue con la app principal
+        return True
+    else:
+        spawn_tray_applet(config)
+        return True

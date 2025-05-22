@@ -4,7 +4,7 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import sys
 import time
-from platform_utils import launch_tray_applet
+from platform_utils import launch_tray_applet, fork_or_spawn_applet
 
 # Benchmark
 benchmark_startup = '--benchmark-startup' in sys.argv
@@ -51,6 +51,8 @@ def main(argv=None):
     if config.get('applet'):
         launch_tray_applet(config)
         return 0
+    else:
+        fork_or_spawn_applet(config)
 
     # Lanzar la aplicación principal
     from chat_application import LLMChatApplication
