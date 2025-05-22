@@ -50,6 +50,10 @@ def main(argv=None):
         argv = sys.argv
     config = parse_args(argv)
 
+    if config.get('applet'):
+        launch_tray_applet(config)
+        return 0
+
     # Lógica multiplataforma para lanzar el applet
     if not maybe_fork_or_spawn_applet(config):
         return 0

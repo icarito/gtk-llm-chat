@@ -126,26 +126,32 @@ signal.signal(signal.SIGINT, on_quit_signal)
 
 # --- Main ---
 def main():
-    icon = pystray.Icon("LLMChatApplet", load_icon(), _(u"LLM Conversations"))
-    # Menú inicial
-    icon.menu = create_menu()
-
-    # Monitorizar la base de datos con Gio
-    chat_history = ChatHistory()
-    db_path = getattr(chat_history, 'db_path', None)
-    chat_history.close_connection()
-    if db_path and os.path.exists(db_path):
-        def reload_menu():
-            icon.menu = create_menu()
-        # Gio requiere loop GLib, así que lo corremos en un hilo aparte
-        def gio_loop():
-            DBMonitor(db_path, reload_menu)
-            from gi.repository import GLib
-            GLib.MainLoop().run()
-        t = threading.Thread(target=gio_loop, daemon=True)
-        t.start()
-
-    icon.run()
+    print("[tray_applet] Iniciando applet de bandeja...")
+    try:
+        icon = pystray.Icon("LLMChatApplet", load_icon(), _(u"LLM Conversations"))
+        icon.menu = create_menu()
+        chat_history = ChatHistory()
+        db_path = getattr(chat_history, 'db_path', None)
+        chat_history.close_connection()
+        if db_path and os.path.exists(db_path):
+            def reload_menu():
+                print("[tray_applet] Recargando menú de conversaciones...")
+                icon.menu = create_menu()
+            def gio_loop():
+                print("[tray_applet] Iniciando monitor de base de datos...")
+                DBMonitor(db_path, reload_menu)
+                from gi.repository import GLib
+                GLib.MainLoop().run()
+            t = threading.Thread(target=gio_loop, daemon=True)
+            t.start()
+        print("[tray_applet] Ejecutando icon.run() (bloqueante)...")
+        icon.run()
+        print("[tray_applet] icon.run() terminó (la bandeja fue cerrada)")
+    except Exception as e:
+        print(f"[tray_applet] ERROR al iniciar el applet: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
