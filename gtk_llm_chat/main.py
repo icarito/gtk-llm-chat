@@ -2,6 +2,7 @@
 Gtk LLM Chat - A frontend for `llm`
 """
 import argparse
+import os
 import sys
 import time
 from platform_utils import launch_tray_applet
@@ -23,6 +24,7 @@ def parse_args(argv):
     parser.add_argument('-f', '--fragment', action='append', metavar='FRAGMENT', help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
     parser.add_argument('--benchmark-startup', action='store_true', help='Mide el tiempo hasta que la ventana se muestra y sale.')
     parser.add_argument('--applet', action='store_true', help='Inicia el applet de bandeja')
+    parser.add_argument('--no-applet', action='store_true', help='No iniciar el applet de bandeja')
     args = parser.parse_args(argv[1:])
     config = {
         'cid': args.cid,
@@ -35,7 +37,8 @@ def parse_args(argv):
         'fragments': args.fragment,
         'benchmark_startup': args.benchmark_startup,
         'start_time': start_time,
-        'applet': args.applet
+        'applet': args.applet,
+        'no_applet': args.no_applet
     }
     return config
 
@@ -47,10 +50,15 @@ def main(argv=None):
         argv = sys.argv
     config = parse_args(argv)
 
-    # Si se pide el applet, lanzarlo y salir
-    if config.get('applet'):
-        launch_tray_applet(config)
-        return 0
+    if not config.get('no_applet'):
+        # Here we do a classic fork
+        # to create a new process for the tray applet
+        pid = os.fork()
+        if pid != 0:
+            launch_tray_applet(config)
+        if config.get('applet'):
+            # If we are in the applet, we don't want to run the GUI
+            return 0
 
     # Lanzar la aplicación principal
     from chat_application import LLMChatApplication

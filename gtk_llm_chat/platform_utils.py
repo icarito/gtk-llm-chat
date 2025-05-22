@@ -4,6 +4,8 @@ platform_utils.py - utilidades multiplataforma para gtk-llm-chat
 import sys
 import subprocess
 import os
+import tempfile
+import portalocker
 
 PLATFORM = sys.platform
 
@@ -25,6 +27,8 @@ def launch_tray_applet(config):
     """
     Lanza el applet de bandeja
     """
+    # Asegurar instancia única del applet
+    ensure_single_instance()
     try:
         from gtk_llm_chat.tray_applet import main
         main()
@@ -101,3 +105,15 @@ def send_ipc_open_conversation(cid):
             args.append(f"--cid={cid}")
         print(f"Ejecutando fallback (no frozen): {args}")
         subprocess.Popen(args)
+
+def ensure_single_instance(lock_file=None):
+    """Ensure only a single instance of the applet is running using a lock file."""
+    if lock_file is None:
+        lock_file = os.path.join(tempfile.gettempdir(), 'gtk_llm_chat_applet.lock')
+    lock = open(lock_file, 'w')
+    try:
+        portalocker.lock(lock, portalocker.LOCK_EX | portalocker.LOCK_NB)
+    except portalocker.LockException:
+        print("Another instance of the applet is already running.")
+        sys.exit(1)
+    return lock

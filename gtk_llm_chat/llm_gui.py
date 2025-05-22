@@ -79,7 +79,12 @@ def register_commands(cli):
         is_flag=True,
         help="Iniciar como applet en bandeja del sistema sin ventana principal",
     )
-    def run_gui(cid, system, model, continue_last, template, param, option, fragment, benchmark_startup, applet):
+    @click.option(
+        "--no-applet",
+        is_flag=True,
+        help="No iniciar el applet de bandeja del sistema",
+    )
+    def run_gui(cid, system, model, continue_last, template, param, option, fragment, benchmark_startup, applet, no_applet):
         """Runs a GUI for the chatbot"""
         # Record start time if benchmarking
         start_time = time.time() if benchmark_startup else None
@@ -96,7 +101,8 @@ def register_commands(cli):
             'fragments': fragment,
             'benchmark_startup': benchmark_startup,
             'start_time': start_time,
-            'applet': applet
+            'applet': applet,
+            'no_applet': no_applet
         }
         
         # Si solo se quiere el applet, lo lanzamos directamente
@@ -107,6 +113,10 @@ def register_commands(cli):
             while True:
                 time.sleep(1)
         
+        # Si no se permite el applet, no lanzarlo
+        if not no_applet and not applet:
+            launch_tray_applet(config)
+
         # De lo contrario, iniciamos la aplicación completa
         from gtk_llm_chat.chat_application import LLMChatApplication
         app = LLMChatApplication(config)

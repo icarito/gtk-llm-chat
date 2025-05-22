@@ -1,10 +1,6 @@
-import json
 import os
-import re
 import signal
 import sys
-import subprocess
-import threading
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
