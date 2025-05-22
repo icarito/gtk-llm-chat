@@ -4,9 +4,24 @@ platform_utils.py - utilidades multiplataforma para gtk-llm-chat
 import sys
 import subprocess
 import os
+import tempfile
+from single_instance import SingleInstance
 
 PLATFORM = sys.platform
 
+def ensure_single_instance(lockfile=None):
+    """
+    Asegura que solo haya una instancia de la aplicación en ejecución.
+    """
+    if not lockfile:
+        lockdir = tempfile.gettempdir()
+        lockfile = os.path.join(lockdir, 'gtk_llm_applet.lock')
+    try:
+        single_instance = SingleInstance(lockfile)
+        return single_instance
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 def is_linux():
     return PLATFORM.startswith('linux')
@@ -25,6 +40,7 @@ def launch_tray_applet(config):
     """
     Lanza el applet de bandeja
     """
+    ensure_single_instance()
     try:
         from gtk_llm_chat.tray_applet import main
         main()
