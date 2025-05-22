@@ -108,18 +108,21 @@ def send_ipc_open_conversation(cid):
         subprocess.Popen(args)
 
 def ensure_single_instance(lock_file=None):
-    """Evita múltiples instancias usando un pidfile (multiplataforma)."""
+    """Evita múltiples instancias usando un pidfile (multiplataforma, thread-safe en Windows)."""
+    import threading
     if lock_file is None:
         lock_file = os.path.join(tempfile.gettempdir(), 'gtk_llm_chat_applet.pid')
     print(f"[platform_utils] ensure_single_instance: pidfile={lock_file}", flush=True)
     pid = os.getpid()
+    tid = threading.get_ident() if is_windows() else None
+    # En Windows, el pidfile debe incluir el thread id para distinguir hilos
     if os.path.exists(lock_file):
         try:
             with open(lock_file, 'r') as f:
-                existing_pid = int(f.read().strip())
-            if existing_pid != pid:
+                content = f.read().strip()
                 if is_windows():
-                    # En Windows, comprobamos si el proceso existe usando ctypes
+                    existing_pid, existing_tid = map(int, content.split(':'))
+                    # Solo bloquear si el proceso sigue vivo
                     import ctypes
                     PROCESS_QUERY_INFORMATION = 0x1000
                     process = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 0, existing_pid)
@@ -131,30 +134,41 @@ def ensure_single_instance(lock_file=None):
                     else:
                         print(f"[platform_utils] PID {existing_pid} no está activo (Windows), sobreescribiendo pidfile", flush=True)
                 else:
-                    # Unix: comprobamos con os.kill
-                    try:
-                        os.kill(existing_pid, 0)
-                        print(f"[platform_utils] Otra instancia activa con PID {existing_pid}", flush=True)
-                        print("Another instance of the applet is already running.")
-                        sys.exit(1)
-                    except OSError:
-                        print(f"[platform_utils] PID {existing_pid} no está activo, sobreescribiendo pidfile", flush=True)
+                    existing_pid = int(content)
+                    if existing_pid != pid:
+                        try:
+                            os.kill(existing_pid, 0)
+                            print(f"[platform_utils] Otra instancia activa con PID {existing_pid}", flush=True)
+                            print("Another instance of the applet is already running.")
+                            sys.exit(1)
+                        except OSError:
+                            print(f"[platform_utils] PID {existing_pid} no está activo, sobreescribiendo pidfile", flush=True)
         except Exception as e:
             print(f"[platform_utils] Error leyendo pidfile: {e}", flush=True)
-    # Escribimos nuestro PID
+    # Escribimos nuestro PID (y TID en Windows)
     with open(lock_file, 'w') as f:
-        f.write(str(pid))
+        if is_windows():
+            f.write(f"{pid}:{tid}")
+        else:
+            f.write(str(pid))
     def cleanup():
         try:
             if os.path.exists(lock_file):
                 with open(lock_file, 'r') as f:
-                    if f.read().strip() == str(pid):
-                        os.remove(lock_file)
-                        print(f"[platform_utils] pidfile {lock_file} eliminado", flush=True)
+                    content = f.read().strip()
+                    if is_windows():
+                        file_pid, file_tid = map(int, content.split(':'))
+                        if file_pid == pid and file_tid == tid:
+                            os.remove(lock_file)
+                            print(f"[platform_utils] pidfile {lock_file} eliminado", flush=True)
+                    else:
+                        if content == str(pid):
+                            os.remove(lock_file)
+                            print(f"[platform_utils] pidfile {lock_file} eliminado", flush=True)
         except Exception as e:
             print(f"[platform_utils] Error eliminando pidfile: {e}", flush=True)
     atexit.register(cleanup)
-    print(f"[platform_utils] Instancia registrada con PID {pid}", flush=True)
+    print(f"[platform_utils] Instancia registrada con PID {pid} TID {tid if is_windows() else ''}", flush=True)
     return lock_file
 
 def maybe_fork_or_spawn_applet(config):
