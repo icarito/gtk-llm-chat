@@ -58,7 +58,7 @@ def spawn_tray_applet(config):
         applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
         args = [sys.executable, applet_path, '--applet']
         print(f"[platform_utils] Lanzando applet (no frozen): {args}")
-        subprocess.Popen(args)
+    subprocess.Popen(args)
 
 def send_ipc_open_conversation(cid):
     """
