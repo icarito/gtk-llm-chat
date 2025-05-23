@@ -24,8 +24,6 @@ dependencies = [
     "pystray",
 ]
 
-[project.optional-dependencies]
-windows = ["watchdog"]
 requires-python = ">=3.8"
 dynamic = ["version"]
 
