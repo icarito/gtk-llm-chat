@@ -149,8 +149,9 @@ class LLMChatApplication(Adw.Application):
         """Abrir una nueva conversación dado un CID"""
         debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
         if not cid:
-            debug_print("D-Bus: CID vacío, abriendo nueva conversación")
-            self.open_conversation_window()
+            debug_print("D-Bus: CID vacío, creando nueva conversación")
+            # Siempre crear una nueva ventana cuando el CID está vacío
+            self.open_conversation_window({})
             return
 
         window = self._window_by_cid.get(cid)
@@ -213,7 +214,15 @@ class LLMChatApplication(Adw.Application):
         config = {}
         only_applet = False
         legacy_applet = False
+        has_args = False  # Flag para saber si se recibieron argumentos relevantes
+        
         for arg in args:
+            # Skip the executable path (first argument)
+            if arg == args[0] and arg.endswith(("gtk-llm-chat", "gtk-llm-chat.exe", "python", "python.exe")):
+                continue
+                
+            has_args = True  # Se recibió al menos un argumento válido
+                
             if arg.startswith("--cid="):
                 config['cid'] = arg.split("=", 1)[1]
                 debug_print(f"CID encontrado en argumentos: {config['cid']}")
@@ -225,13 +234,22 @@ class LLMChatApplication(Adw.Application):
                 only_applet = True
             elif arg.startswith("--legacy-applet"):
                 legacy_applet = True
+            # Puedes añadir más parámetros según sea necesario
 
-        # Guardar esta configuración para usarla en do_activate
-        debug_print(f"Configuración preparada para do_activate: {config}")
+        # Guardar esta configuración para usarla
+        debug_print(f"Configuración preparada: {config}")
 
         # Abrir ventana de conversación con la configuración extraída
         if not only_applet:
-            self.open_conversation_window(config)
+            # Si no hay argumentos relevantes y la app ya está corriendo, 
+            # crear una nueva ventana vacía. Esto asegura que al invocar la app 
+            # sin argumentos siempre se cree una nueva ventana.
+            if not has_args and self.get_active_window():
+                debug_print("Aplicación ya en ejecución sin argumentos, creando nueva ventana")
+                self.open_conversation_window({})
+            else:
+                self.open_conversation_window(config)
+                
         if legacy_applet:
             self._applet_loaded = True
 
@@ -398,14 +416,7 @@ class LLMChatApplication(Adw.Application):
             return self._create_new_window_with_config(conversation_config)
 
         else:
-            # Si no hay CID específico, verificar si hay ventanas abiertas
-            active_window = self.get_active_window()
-            if active_window and active_window.is_visible():
-                debug_print("Presentando ventana activa existente (sin CID específico)")
-                active_window.present()
-                return active_window
-            else:
-                # Crear una nueva ventana sin CID específico
-                debug_print("Creando nueva ventana sin CID específico")
-                return self._create_new_window_with_config(conversation_config)
+            # Si no hay CID específico, crear siempre una nueva ventana de conversación
+            debug_print("Creando nueva ventana sin CID específico")
+            return self._create_new_window_with_config(conversation_config)
 
