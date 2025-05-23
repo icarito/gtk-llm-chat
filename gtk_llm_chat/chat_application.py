@@ -20,8 +20,6 @@ _ = gettext.gettext
 
 DEBUG = os.environ.get('DEBUG') or False
 
-TRAY_PROCESS = None
-
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)

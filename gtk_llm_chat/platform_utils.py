@@ -9,6 +9,12 @@ from single_instance import SingleInstance
 
 PLATFORM = sys.platform
 
+DEBUG = os.environ.get('DEBUG') or False
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
 def ensure_single_instance(lockfile=None):
     """
     Asegura que solo haya una instancia de la aplicación en ejecución.
@@ -20,7 +26,7 @@ def ensure_single_instance(lockfile=None):
         single_instance = SingleInstance(lockfile)
         return single_instance
     except RuntimeError as e:
-        print(f"Error: {e}")
+        debug_print(f"{e}")
         sys.exit(1)
 
 def is_linux():
