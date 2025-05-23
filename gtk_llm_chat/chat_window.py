@@ -348,6 +348,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     box-shadow: none;
                     margin: -12px;
                     border-radius: 0px;
+                    padding: 6px;
                 }
             """
         elif sys.platform.startswith('darwin'):
