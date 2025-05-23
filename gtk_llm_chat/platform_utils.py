@@ -51,7 +51,8 @@ def launch_tray_applet(config):
         from gtk_llm_chat.tray_applet import main
         main()
     except Exception as e:
-        spawn_tray_applet(config)
+        debug_print(f"Can't start tray app: {e}")
+        # spawn_tray_applet(config)
 
 def spawn_tray_applet(config):
     if is_frozen():
