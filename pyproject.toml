@@ -22,8 +22,10 @@ dependencies = [
     "markdown-it-py",
     "python-ulid",
     "pystray",
-    "watchdog"
 ]
+
+[project.optional-dependencies]
+windows = ["watchdog"]
 requires-python = ">=3.8"
 dynamic = ["version"]
 

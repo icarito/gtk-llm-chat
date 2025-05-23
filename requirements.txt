@@ -10,4 +10,5 @@ llm-perplexity
 llm-anthropic
 llm-openrouter
 pystray
-watchdog
+# Opcional para Windows - usado por tray_applet.py
+watchdog; sys_platform == 'win32'
