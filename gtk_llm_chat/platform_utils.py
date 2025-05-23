@@ -49,9 +49,10 @@ def launch_tray_applet(config):
 
 def spawn_tray_applet(config):
     if is_frozen():
-        # Relanzar el propio ejecutable con --applet
-        args = [sys.executable, "--applet"]
-        print(f"[platform_utils] Lanzando applet (frozen): {args}")
+        if not config.get('applet'):
+            # Relanzar el propio ejecutable con --applet
+            args = [sys.executable, "--applet"]
+            print(f"[platform_utils] Lanzando applet (frozen): {args}")
     else:
         # Ejecutar tray_applet.py con el intérprete
         applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
