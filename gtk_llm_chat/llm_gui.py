@@ -83,6 +83,7 @@ def register_commands(cli):
         
         # Si solo se quiere el applet, lo lanzamos directamente
         if applet and not cid and not continue_last:
+            from gtk_llm_chat.platform_utils import launch_tray_applet
             launch_tray_applet(config)
             # El applet se lanza en otro proceso, así que tenemos que mantener vivo este
             import time

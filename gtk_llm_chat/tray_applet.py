@@ -8,8 +8,8 @@ import locale
 import gettext
 import threading
 
-from platform_utils import send_ipc_open_conversation, is_linux
-from db_operations import ChatHistory
+from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux
+from gtk_llm_chat.db_operations import ChatHistory
 
 try:
     import pystray
