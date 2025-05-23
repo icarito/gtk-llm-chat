@@ -132,7 +132,7 @@ if not is_linux():
             self.on_change = on_change
 
         def on_modified(self, event):
-            if os.path.abspath(event.src_path) == self.db_path:
+            if not event.is_directory:
                 self.on_change()
 
         def on_created(self, event):
