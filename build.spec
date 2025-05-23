@@ -181,10 +181,13 @@ elif system() == "Darwin":
         )
         app = BUNDLE(
             coll,
-            name='gtk-llm-chat.app',
+            name='Gtk LLM Chat.app',
             icon='macos/org.fuentelibre.gtk_llm_Chat.icns',
             bundle_identifier=None,
             version=None,
+            info_plist={
+                'LSUIElement': True,  # Esta opción oculta el ícono en el Dock
+            },
         )
     else:
         exe = EXE(
@@ -207,6 +210,9 @@ elif system() == "Darwin":
             target_arch=None,
             codesign_identity=None,
             entitlements_file=None,
+            info_plist={
+                'LSUIElement': True,  # Esta opción oculta el ícono en el Dock
+            },
         )
 elif system() == "Windows":
     if not options.binary:
