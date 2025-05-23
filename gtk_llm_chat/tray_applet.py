@@ -8,6 +8,9 @@ import locale
 import gettext
 import threading
 
+from platform_utils import send_ipc_open_conversation, is_linux
+from db_operations import ChatHistory
+
 try:
     import pystray
     from PIL import Image
@@ -15,24 +18,18 @@ except ImportError:
     print("pystray y pillow son requeridos para el applet de bandeja.")
     sys.exit(1)
 
-try:
+if is_linux():
     import gi
     gi.require_version('Gio', '2.0')
     from gi.repository import Gio
-except ImportError:
-    print("PyGObject (gi) y Gio son requeridos para la monitorización de la base de datos.")
-    sys.exit(1)
+else:
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+    except ImportError:
+        print("Watchdog is reaquired for tray applet.")
+        sys.exit(1)
 
-# Intentar importar watchdog para Windows como fallback
-try:
-    from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    WATCHDOG_AVAILABLE = False
-
-from platform_utils import send_ipc_open_conversation, is_windows
-from db_operations import ChatHistory
 
 # --- i18n ---
 APP_NAME = "gtk-llm-chat"
@@ -125,21 +122,22 @@ class DBMonitor:
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
             self.on_change()
 
-# --- Watchdog para Windows ---
-class DBChangeHandler(FileSystemEventHandler):
-    """Maneja eventos de modificación/contenido en el fichero de base de datos."""
-    def __init__(self, db_path, on_change):
-        super().__init__()
-        self.db_path = os.path.abspath(db_path)
-        self.on_change = on_change
+if not is_linux():
+    # --- Watchdog para Windows ---
+    class DBChangeHandler(FileSystemEventHandler):
+        """Maneja eventos de modificación/contenido en el fichero de base de datos."""
+        def __init__(self, db_path, on_change):
+            super().__init__()
+            self.db_path = os.path.abspath(db_path)
+            self.on_change = on_change
 
-    def on_modified(self, event):
-        if os.path.abspath(event.src_path) == self.db_path:
-            self.on_change()
+        def on_modified(self, event):
+            if os.path.abspath(event.src_path) == self.db_path:
+                self.on_change()
 
-    def on_created(self, event):
-        if os.path.abspath(event.src_path) == self.db_path:
-            self.on_change()
+        def on_created(self, event):
+            if os.path.abspath(event.src_path) == self.db_path:
+                self.on_change()
 
 # --- Señal para salir limpio ---
 def on_quit_signal(sig, frame):
@@ -164,7 +162,7 @@ def main():
             icon.menu = create_menu()
         
         # Usar watchdog en Windows, Gio.FileMonitor en otras plataformas
-        if is_windows() and WATCHDOG_AVAILABLE:
+        if not is_linux():
             print("[tray_applet] Usando watchdog para monitorización en Windows")
             event_handler = DBChangeHandler(db_path, reload_menu)
             observer = Observer()
