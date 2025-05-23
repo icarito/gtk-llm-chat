@@ -13,24 +13,6 @@ def register_commands(cli):
         # Lanzamos solo el applet usando nuestro nuevo sistema unificado
         from gtk_llm_chat.platform_utils import launch_tray_applet
         launch_tray_applet({})
-        # En Linux, necesitamos un loop para mantener el proceso vivo
-        if sys.platform.startswith('linux'):
-            try:
-                import gi
-                gi.require_version('GLib', '2.0')
-                from gi.repository import GLib
-                loop = GLib.MainLoop()
-                loop.run()
-            except ImportError:
-                # Si no hay GLib, usamos un loop simple
-                import time
-                while True:
-                    time.sleep(1)
-        else:
-            # En otras plataformas, el applet ya tiene su propio loop
-            import time
-            while True:
-                time.sleep(1)
 
     @cli.command(name="gtk-chat")
     @click.option("--cid", type=str,

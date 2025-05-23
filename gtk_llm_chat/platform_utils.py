@@ -5,7 +5,7 @@ import sys
 import subprocess
 import os
 import tempfile
-from single_instance import SingleInstance
+from gtk_llm_chat.single_instance import SingleInstance
 
 PLATFORM = sys.platform
 
