@@ -23,7 +23,15 @@ except ImportError:
     print("PyGObject (gi) y Gio son requeridos para la monitorización de la base de datos.")
     sys.exit(1)
 
-from platform_utils import send_ipc_open_conversation
+# Intentar importar watchdog para Windows como fallback
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    WATCHDOG_AVAILABLE = False
+
+from platform_utils import send_ipc_open_conversation, is_windows
 from db_operations import ChatHistory
 
 # --- i18n ---
@@ -117,6 +125,22 @@ class DBMonitor:
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
             self.on_change()
 
+# --- Watchdog para Windows ---
+class DBChangeHandler(FileSystemEventHandler):
+    """Maneja eventos de modificación/contenido en el fichero de base de datos."""
+    def __init__(self, db_path, on_change):
+        super().__init__()
+        self.db_path = os.path.abspath(db_path)
+        self.on_change = on_change
+
+    def on_modified(self, event):
+        if os.path.abspath(event.src_path) == self.db_path:
+            self.on_change()
+
+    def on_created(self, event):
+        if os.path.abspath(event.src_path) == self.db_path:
+            self.on_change()
+
 # --- Señal para salir limpio ---
 def on_quit_signal(sig, frame):
     print(_("\nClosing application..."))
@@ -130,20 +154,32 @@ def main():
     # Menú inicial
     icon.menu = create_menu()
 
-    # Monitorizar la base de datos con Gio
+    # Monitorizar la base de datos
     chat_history = ChatHistory()
     db_path = getattr(chat_history, 'db_path', None)
     chat_history.close_connection()
+    
     if db_path and os.path.exists(db_path):
         def reload_menu():
             icon.menu = create_menu()
-        # Gio requiere loop GLib, así que lo corremos en un hilo aparte
-        def gio_loop():
-            DBMonitor(db_path, reload_menu)
-            from gi.repository import GLib
-            GLib.MainLoop().run()
-        t = threading.Thread(target=gio_loop, daemon=True)
-        t.start()
+        
+        # Usar watchdog en Windows, Gio.FileMonitor en otras plataformas
+        if is_windows() and WATCHDOG_AVAILABLE:
+            print("[tray_applet] Usando watchdog para monitorización en Windows")
+            event_handler = DBChangeHandler(db_path, reload_menu)
+            observer = Observer()
+            observer.schedule(event_handler, os.path.dirname(db_path), recursive=False)
+            observer.daemon = True
+            observer.start()
+        else:
+            print("[tray_applet] Usando Gio.FileMonitor para monitorización")
+            # Gio requiere loop GLib, así que lo corremos en un hilo aparte
+            def gio_loop():
+                DBMonitor(db_path, reload_menu)
+                from gi.repository import GLib
+                GLib.MainLoop().run()
+            t = threading.Thread(target=gio_loop, daemon=True)
+            t.start()
 
     icon.run()
 
