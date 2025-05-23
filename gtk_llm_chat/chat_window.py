@@ -612,7 +612,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
             conversation_id = self.llm.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
+                self.cid = conversation_id
                 debug_print(f"Conversation ID updated in config: {conversation_id}")
+                # Registrar la ventana en el mapa global de ventanas por CID
+                app = self.get_application()
+                if hasattr(app, '_window_by_cid'):
+                    # Elimina el registro anterior si existe
+                    for key, win in list(app._window_by_cid.items()):
+                        if win is self and key != conversation_id:
+                            del app._window_by_cid[key]
+                    app._window_by_cid[conversation_id] = self
 
     def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del LLM"""
@@ -624,7 +633,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
             conversation_id = self.llm.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
+                self.cid = conversation_id
                 debug_print(f"Conversation ID updated early in config: {conversation_id}")
+                # Registrar la ventana en el mapa global de ventanas por CID
+                app = self.get_application()
+                if hasattr(app, '_window_by_cid'):
+                    for key, win in list(app._window_by_cid.items()):
+                        if win is self and key != conversation_id:
+                            del app._window_by_cid[key]
+                    app._window_by_cid[conversation_id] = self
 
         self.accumulated_response += response
         GLib.idle_add(self.current_message_widget.update_content,

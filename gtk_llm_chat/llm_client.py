@@ -238,31 +238,6 @@ class LLMClient(GObject.Object):
                 # Último elemento es un prompt de usuario sin respuesta, lo eliminamos
                 filtered_responses.pop()
             
-            # Mostrar el historial después de filtrar (solo para depuración)
-            if self.conversation.responses:
-                valid_responses = []
-                for idx, response in enumerate(self.conversation.responses):
-                    if idx % 2 == 0:  # Usuario
-                        # Verificar que el prompt sea válido
-                        user_text = response.prompt.prompt
-                        # Buscar la siguiente respuesta (asistente)
-                        if idx + 1 < len(self.conversation.responses):
-                            assistant_response = self.conversation.responses[idx + 1]
-                            if hasattr(assistant_response, '_chunks') and assistant_response._chunks and any(chunk.strip() for chunk in assistant_response._chunks):
-                                # Par válido: usuario con prompt y asistente con chunks
-                                valid_responses.append(response)
-                                valid_responses.append(assistant_response)
-                                debug_print(f"  [{len(valid_responses)-2}] User: '{user_text[:50]}'")
-                                assistant_text = "".join(assistant_response._chunks)
-                                debug_print(f"  [{len(valid_responses)-1}] Assistant: '{assistant_text[:50]}'")
-                
-                # Reemplazar con respuestas filtradas
-                if len(valid_responses) != len(self.conversation.responses):
-                    debug_print(f"LLMClient: Se filtraron {len(self.conversation.responses) - len(valid_responses)} respuestas inválidas")
-                    self.conversation.responses = valid_responses
-            else:
-                debug_print("  [No conversation history available]")
-
             if prompt is None or str(prompt).strip() == "":
                 debug_print("LLMClient: ERROR: prompt vacío o None detectado en _process_stream. Abortando.")
                 GLib.idle_add(self.emit, 'error', "No se puede enviar un prompt vacío al modelo.")
