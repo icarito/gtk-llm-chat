@@ -657,11 +657,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if hasattr(app, '_window_by_cid') and cid and cid in app._window_by_cid:
             debug_print(f"Eliminando ventana del registro para CID: {cid}")
             del app._window_by_cid[cid]
-        # Lógica de cierre global: si es la última ventana y no hay tray, salir (solo Linux)
-        if hasattr(app, '_should_start_tray') and app._should_start_tray():
-            if len(app.get_windows()) <= 1 and (not getattr(app, 'tray_process', None) or app.tray_process.poll() is not None):
-                debug_print("Última ventana cerrada y tray no activo, saliendo de la aplicación (desde chat_window)")
-                app.quit()
+        # Lógica de cierre global: si es la última ventana
+        if len(app.get_windows()) <= 1:
+            debug_print("Última ventana cerrada saliendo de la aplicación (desde chat_window)")
+            app.quit()
         # Permitir el cierre de la ventana
         return False
 
