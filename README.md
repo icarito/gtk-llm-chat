@@ -4,8 +4,6 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 
 ![screenshot](./docs/screenshot01.png)
 
-<a href="https://www.buymeacoffee.com/icarito" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a> if you find this project useful.
-
 
 ## Key Features
 
@@ -15,7 +13,7 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
 - Modern interface using libadwaita
 - Support for real-time streaming responses
 - Message history with automatic scrolling
-- Windows installer and Linux AppImage available
+- Windows installer, Linux AppImage, and Macos bundles available!
 - Markdown rendering of the responses
 
 - **Sidebar Navigation:** Modern sidebar for model/provider selection, parameters, and settings.
@@ -29,47 +27,47 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
     - `Shift+Enter`: New line in input
     - `Ctrl+W`: Delete the current conversation
 - **Conversation Management:** Rename and delete conversations.
-- **Applet Mode:** Run a system tray applet for quick access to recent conversations.
-- **Model Selection:** Choose from different LLM models.
-- **System Prompt:** Set a custom system prompt for each conversation.
+- **Tray aooket:** Use a system tray applet for quick access to recent conversations.
 - **Error Handling:** Clear error messages displayed in the chat.
 - **Dynamic Input:** The input area dynamically adjusts its height.
 
+**Gtk-LLM-Chat** is a graphical frontend for the command-line llm utility. Just as `llm` integrates large language models into the [command line interface](https://llm.datasette.io/en/stable/usage.html), Gtk-LLM-Chat aims to bring that same power to the desktop environment. Its goal is to provide intuitive affordances and seamless integration for using LLMs in everyday tasks — all while remaining convenient, lightweight, and transparent in its behavior.
+
 ## Installation
+
+### Downloadable application bundles
+
+While the command line is fun in every operating system, **Gtk-LLM-Chat** also offers prepackaged binary application bundles for all three major operating sytems: Windows installers, Linux Appimages and Macos Application Bundles are available in our [_releases_](https://github.com/icarito/gtk-llm-chat/releases) section.
+
+An effort has been made to support desktop integration across systems but _your mileage may vary_ - as the Gtk tools are still maturing outside of the GNU/Linux ecosystem.
+
+### As an `llm` plugin
+
+Playing with LLMs in the command line is fun! I recommend you to install `llm` and play around with it to size up the possibilities. Gtk-LLM-Chat can be installed as a plugin extension for `llm` itself, thus extending the possibilities of `llm` with some graphical features. Not all features of `llm` are exposed yet.
 
 ```
 pipx install llm               # required by gtk-llm-chat
 llm install gtk-llm-chat
 ```
 
-You may want to manually copy the .desktop files to `~/.local/share/applications/` to make them available in your application menu.
+You may want to copy the provided .desktop files to your ~/.local/share/applications/ folder. A welcome assistant will do this in the future for you.
 
-### Downloadable packages
-
-Windows installers and Linux Appimages are available in our _releases_ section.
-
-While they are fully functional, there is no mechanism provided thru the GUI for adding plugins or API keys <s>and no system tray applet support either</s>.
-
-While in the future the UI will be complete, for now, you'll have to manually add your API keys to your `keys.json` file.
-
-In order to invoke the applet from the AppImage, you can use the --applet command argument.
-
-### Dependencies
-
-These are collected here for reference only, let me know if the list needs adjusting.
-
-```
- # fedora: # sudo dnf install cairo-devel object-introspection-devel gtk4-devel pkgconf-pkg-config gcc redhat-rpm-config
- # debian: # sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0
-```
 
 ### System Requirements
 
-- [llm](https://llm.datasette.io/en/stable/)
+- [llm](https://llm.datasette.io/en/stable/) (when installing as an llm plugin)
 - Python 3.8 or higher
 - GTK 4.0
 - libadwaita
-- libayatana-appindicator (optional)
+- libayatana-appindicator (on linux)
+
+These dependency installation instructions are collected here for reference only:
+
+```
+ # fedora: # sudo dnf install cairo-devel object-introspection-devel gtk4-devel pkgconf-pkg-config gcc redhat-rpm-config
+ # debian: # sudo apt install libgtk-4-1 python3-gi python3-gi-cairo libadwaita-1-0 libayatana-appindicator3
+ # arch: # sudo pacman -S python-gobject gtk4 
+```
 
 ## Usage
 
@@ -93,13 +91,6 @@ llm gtk-chat -s "System prompt"      # Set system prompt
 llm gtk-chat -m model_name           # Select specific model
 llm gtk-chat -c                      # Continue last conversation
 ```
-
-### Features Overview
-
-- Use the sidebar to select providers/models, adjust parameters, and manage API keys.
-- API key banner will appear when a provider requires a key. Use the button with the key or open-lock icon to set or change your key.
-- Model parameters (temperature, system prompt) are per conversation and accessible from the sidebar.
-- Keyboard shortcuts for sidebar, rename, minimize, and more (see above).
 
 ## Development
 
