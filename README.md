@@ -100,7 +100,7 @@ git clone https://github.com/icarito/gtk-llm-chat.git
 cd gtk-llm-chat
 python -m venv venv
 source venv/bin/activate
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 ## Shoulders of giants
