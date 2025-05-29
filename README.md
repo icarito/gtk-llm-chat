@@ -66,11 +66,11 @@ These dependency installation instructions are collected here for reference only
 ```
  # fedora: # sudo dnf install cairo-devel object-introspection-devel gtk4-devel pkgconf-pkg-config gcc redhat-rpm-config
  # debian: # sudo apt install libgtk-4-1 python3-gi python3-gi-cairo libadwaita-1-0 libayatana-appindicator3
- # arch: # sudo pacman -S python-gobject gtk4 
+ # arch: # sudo pacman -S python-gobject gtk4
+ # windows (msys2): # pacman -S mingw-w64-$(uname -m)-gtk4 mingw-w64-$(uname -m)-python-pip mingw-w64-$(uname -m)-python3-gobject mingw-w64-$(uname -m)-libadwaita mingw-w64-x86_64-python3-pillow
 ```
 
 ## Usage
-
 
 ### Running the Application
 
