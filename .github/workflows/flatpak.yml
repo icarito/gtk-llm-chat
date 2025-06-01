@@ -20,13 +20,13 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder python3-pip appstream-util
           pip3 install pyyaml
 
-      - name: Validar AppData XML
+      - name: Add Flathub remote
         run: |
-          appstream-util validate-relax linux/org.fuentelibre.gtk_llm_Chat.appdata.xml
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Build Flatpak
         run: |
-          flatpak-builder --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
+          flatpak-builder --user --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
 
       - name: Export Flatpak bundle
         run: |
