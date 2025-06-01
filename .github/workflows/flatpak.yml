@@ -14,11 +14,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder python3-pip appstream-util
-          pip3 install pyyaml
+          sudo apt install flatpak flatpak-builder python3-pip appstream-util
+          pip3 install setuptools wheel build
+          pip3 install .
 
       - name: Add Flathub remote
         run: |
