@@ -32,7 +32,7 @@ jobs:
       - name: Test Flatpak (versión)
         run: |
           flatpak install --user --noninteractive gtk-llm-chat.flatpak
-          flatpak run org.fuentelibre.gtk_llm_Chat --version || true
+          flatpak run org.fuentelibre.gtk_llm_Chat --help || true
 
       - name: Upload Flatpak bundle
         uses: actions/upload-artifact@v4

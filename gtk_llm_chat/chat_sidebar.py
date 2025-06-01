@@ -8,7 +8,7 @@ import os
 import pathlib
 import json
 
-from chat_application import _
+from .chat_application import _
 
 def debug_print(*args):
     if DEBUG:

@@ -14,7 +14,7 @@ import locale
 import gettext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from db_operations import ChatHistory
+from .db_operations import ChatHistory
 
 _ = gettext.gettext
 
@@ -266,7 +266,7 @@ class LLMChatApplication(Adw.Application):
         """Crea una nueva ventana con la configuración dada."""
         debug_print(f"Creando nueva ventana con configuración: {config}")
 
-        from chat_window import LLMChatWindow
+        from .chat_window import LLMChatWindow
         chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración

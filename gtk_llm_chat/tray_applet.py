@@ -182,6 +182,6 @@ def main():
     icon.run()
 
 if __name__ == '__main__':
-    from platform_utils import ensure_single_instance
+    from .platform_utils import ensure_single_instance
     ensure_single_instance()
     main()

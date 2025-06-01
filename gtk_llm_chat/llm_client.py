@@ -14,9 +14,9 @@ import llm
 import threading
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from db_operations import ChatHistory
+from .db_operations import ChatHistory
 
-from chat_application import _
+from .chat_application import _
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
 DEBUG = os.environ.get('DEBUG') or False
