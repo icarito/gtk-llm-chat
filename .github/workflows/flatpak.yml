@@ -24,13 +24,10 @@ jobs:
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: Build Flatpak
+      - name: Build Flatpak and create bundle
         run: |
-          flatpak-builder --user --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
-
-      - name: Export Flatpak bundle
-        run: |
-          flatpak build-bundle build-dir gtk-llm-chat.flatpak org.fuentelibre.gtk_llm_Chat
+          flatpak-builder --user --repo=repo --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
+          flatpak build-bundle repo gtk-llm-chat.flatpak org.fuentelibre.gtk_llm_Chat
 
       - name: Test Flatpak (versión)
         run: |

@@ -13,8 +13,16 @@ finish-args:
 modules:
   - name: gtk-llm-chat
     buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
     build-commands:
+      - pip3 install --prefix=/app -r requirements.txt
       - pip3 install --prefix=/app .
+      - mkdir -p /app/share/icons/hicolor/scalable/apps
+      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/share/icons/hicolor/scalable/apps/
+      - mkdir -p /app/share/applications
+      - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
     sources:
       - type: dir
         path: ..
