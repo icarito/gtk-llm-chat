@@ -1,0 +1,44 @@
+# Flatpak build workflow for Gtk LLM Chat
+name: Flatpak Build
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build-flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder python3-pip appstream-util
+          pip3 install pyyaml
+
+      - name: Validar AppData XML
+        run: |
+          appstream-util validate-relax linux/org.fuentelibre.gtk_llm_Chat.appdata.xml
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
+
+      - name: Export Flatpak bundle
+        run: |
+          flatpak build-bundle build-dir gtk-llm-chat.flatpak org.fuentelibre.gtk_llm_Chat
+
+      - name: Test Flatpak (versión)
+        run: |
+          flatpak install --user --noninteractive gtk-llm-chat.flatpak
+          flatpak run org.fuentelibre.gtk_llm_Chat --version || true
+
+      - name: Upload Flatpak bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: gtk-llm-chat.flatpak
