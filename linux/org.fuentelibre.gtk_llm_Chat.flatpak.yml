@@ -1,0 +1,26 @@
+# Flatpak manifest for Gtk LLM Chat
+app-id: org.fuentelibre.gtk_llm_Chat
+runtime: org.gnome.Platform
+runtime-version: '45'
+sdk: org.gnome.Sdk
+command: gtk-llm-chat
+finish-args:
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+modules:
+  - name: gtk-llm-chat
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app -r requirements.txt .
+    sources:
+      - type: dir
+        path: ../..
+
+# Metadatos
+desktop-file-name-suffix: ''
+rename-icon: org.fuentelibre.gtk_llm_Chat
+tags:
+  - Utility
