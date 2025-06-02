@@ -1,12 +1,13 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
+import time
+import_time = time.time()  # Medir tiempo de creación de la ventana
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
+print(f"Time to import Gtk and Adw: {time.time() - import_time:.2f} seconds")
 import os
+import threading
 
-# from gtk_llm_chat.model_selector import ModelSelectorWidget # Ya no se usa
-from gtk_llm_chat.wide_model_selector import CompactModelSelector, NO_SELECTION_KEY # Importar el nuevo widget
-from gtk_llm_chat.model_selection import ModelSelectionManager
 
 class WelcomeWindow(Adw.ApplicationWindow):
     def __init__(self, app, on_start_callback=None):
@@ -55,6 +56,11 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.api_key_button.connect('clicked', self._on_api_key_button_clicked)
         # Se añadirá/quitará del header_bar dinámicamente
         self.api_key_button_packed = False
+        
+        # Spinner para mostrar mientras cargan los modelos
+        self.loading_spinner = Adw.Spinner()
+        self.loading_spinner.set_size_request(16, 16)
+        self.loading_spinner_packed = False
         
         root_vbox.append(self.header_bar)
         self.set_content(root_vbox)
@@ -188,20 +194,26 @@ class WelcomeWindow(Adw.ApplicationWindow):
         # El CompactModelSelector ya tiene su propio icono "brain-augmented-symbolic"
         # en su estado inicial (página "No Selection").
 
-        self.model_manager = ModelSelectionManager(self.config_data, app.llm_client if hasattr(app, 'llm_client') else None)
-        # Crear y configurar widget de selección
-        self.model_selector = CompactModelSelector(manager=self.model_manager) # Usar CompactModelSelector
-        self.model_selector.set_vexpand(True) # Hacer que el selector ocupe el espacio vertical
-        self.model_selector.set_hexpand(True) # Hacer que el selector ocupe el espacio horizontal
-        self.model_selector.set_valign(Gtk.Align.FILL)
-        self.model_selector.set_halign(Gtk.Align.FILL)
-
-        self.model_selector.connect('model-selected', self._on_model_selected)
-        self.model_selector.connect('api-key-status-changed', self._on_api_key_status_changed)
+        # Lazy loading: crear objetos solo cuando sea necesario
+        self.model_manager = None
+        self.model_selector = None
+        self._models_loaded = False
+        self._model_selector_created = False
+        self.app = app  # Guardar referencia para crear objetos más tarde
         
-        # Cargar lista de proveedores
-        self.model_selector.load_providers_and_models() # Usar el nuevo método de carga
-        panel3_inner_vbox.append(self.model_selector) # model_selector ya se expande
+        # Crear un placeholder temporal para el panel 3
+        self.panel3_placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.panel3_placeholder.set_vexpand(True)
+        self.panel3_placeholder.set_hexpand(True)
+        self.panel3_placeholder.set_valign(Gtk.Align.CENTER)
+        self.panel3_placeholder.set_halign(Gtk.Align.CENTER)
+        
+        # Mostrar un spinner o mensaje temporal
+        placeholder_label = Gtk.Label(label="Loading model selection...")
+        placeholder_label.add_css_class("dim-label")
+        self.panel3_placeholder.append(placeholder_label)
+        
+        panel3_inner_vbox.append(self.panel3_placeholder)
 
         page3_container.append(make_clamped(panel3_inner_vbox, 
                                             fill_vertical=True, 
@@ -283,10 +295,16 @@ class WelcomeWindow(Adw.ApplicationWindow):
         n_pages = self.carousel.get_n_pages()
 
         if current_page_idx == 2: # Panel de selección de modelo (índice 2)
-            status = self.model_selector.get_current_model_selection_status()
-            if not status["is_valid_for_next_step"]:
-                # Podríamos mostrar un Adw.Toast aquí para indicar el problema
-                print("DEBUG: Cannot proceed, model/API key selection is not valid.")
+            # Verificar que el model_selector esté creado antes de usarlo
+            if self.model_selector:
+                status = self.model_selector.get_current_model_selection_status()
+                if not status["is_valid_for_next_step"]:
+                    # Podríamos mostrar un Adw.Toast aquí para indicar el problema
+                    print("DEBUG: Cannot proceed, model/API key selection is not valid.")
+                    return
+            else:
+                # Si el model_selector aún no está creado, no permitir avanzar
+                print("DEBUG: Model selector not ready yet.")
                 return
 
         if current_page_idx < n_pages - 1:
@@ -403,26 +421,41 @@ class WelcomeWindow(Adw.ApplicationWindow):
             
             # Lógica específica para el panel de selección de modelo (índice 2)
             if current_page_idx == 2:
-                status = self.model_selector.get_current_model_selection_status()
-                self.next_button.set_sensitive(status["is_valid_for_next_step"])
-                
-                if status["needs_api_key"]:
-                    if not self.api_key_button_packed:
-                        self.header_bar.pack_start(self.api_key_button)
-                        self.api_key_button_packed = True
-                    self.api_key_button.set_visible(True)
-                    self.api_key_button.set_label("Set API Key" if not status["api_key_set"] else "Change API Key")
-                    self.api_key_button.get_style_context().remove_class("suggested-action")
-                    self.api_key_button.get_style_context().remove_class("destructive-action")
-                    if not status["api_key_set"]:
-                        self.api_key_button.get_style_context().add_class("destructive-action")
-                    else:
-                        self.api_key_button.get_style_context().add_class("suggested-action")
+                # Mostrar spinner si los modelos están cargando
+                if not self._models_loaded or not self._model_selector_created:
+                    if not self.loading_spinner_packed:
+                        self.header_bar.pack_start(self.loading_spinner)
+                        self.loading_spinner_packed = True
+                    self.loading_spinner.set_visible(True)
                 else:
+                    self._ensure_loading_spinner_removed()
+                
+                if self.model_selector:  # Solo si el selector está creado
+                    status = self.model_selector.get_current_model_selection_status()
+                    self.next_button.set_sensitive(status["is_valid_for_next_step"])
+                    
+                    if status["needs_api_key"]:
+                        if not self.api_key_button_packed:
+                            self.header_bar.pack_start(self.api_key_button)
+                            self.api_key_button_packed = True
+                        self.api_key_button.set_visible(True)
+                        self.api_key_button.set_label("Set API Key" if not status["api_key_set"] else "Change API Key")
+                        self.api_key_button.get_style_context().remove_class("suggested-action")
+                        self.api_key_button.get_style_context().remove_class("destructive-action")
+                        if not status["api_key_set"]:
+                            self.api_key_button.get_style_context().add_class("destructive-action")
+                        else:
+                            self.api_key_button.get_style_context().add_class("suggested-action")
+                    else:
+                        self._ensure_api_key_button_removed()
+                else:
+                    # Si el selector no está creado, deshabilitar Next
+                    self.next_button.set_sensitive(False)
                     self._ensure_api_key_button_removed()
             else: # Otros paneles intermedios
                 self.next_button.set_sensitive(True) # Por defecto sensible
                 self._ensure_api_key_button_removed()
+                self._ensure_loading_spinner_removed()
 
     def _ensure_api_key_button_removed(self):
         if self.api_key_button_packed and self.api_key_button.get_parent():
@@ -430,6 +463,14 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 self.header_bar.remove(self.api_key_button)
         self.api_key_button_packed = False
         self.api_key_button.set_visible(False)
+
+    def _ensure_loading_spinner_removed(self):
+        """Remueve el spinner de carga del header bar."""
+        if self.loading_spinner_packed and self.loading_spinner.get_parent():
+            if self.loading_spinner.get_parent() == self.header_bar:
+                self.header_bar.remove(self.loading_spinner)
+        self.loading_spinner_packed = False
+        self.loading_spinner.set_visible(False)
 
     def on_finish_clicked(self, button):
         """Guarda la configuración y cierra la ventana de bienvenida"""
@@ -467,7 +508,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
         return self.config_data.copy()
 
     def _on_api_key_button_clicked(self, button):
-        self.model_selector.trigger_api_key_dialog_for_current_provider()
+        if self.model_selector:
+            self.model_selector.trigger_api_key_dialog_for_current_provider()
 
     def _on_api_key_status_changed(self, selector, provider_key, needs_key, has_key):
         # Esta señal es principalmente para que CompactModelSelector informe de cambios.
@@ -482,6 +524,131 @@ class WelcomeWindow(Adw.ApplicationWindow):
         current_size = int(end_size * value)
         self.panel2_app_icon.set_size_request(current_size, current_size)
         self.panel2_app_icon.set_pixel_size(current_size)
+
+    def start_lazy_loading(self):
+        """Inicia la carga lazy de modelos después de mostrar la ventana."""
+        if not self._models_loaded:
+            # Si estamos en el panel 3, mostrar el spinner inmediatamente
+            if int(round(self.carousel.get_position())) == 2:
+                if not self.loading_spinner_packed:
+                    self.header_bar.pack_start(self.loading_spinner)
+                    self.loading_spinner_packed = True
+                self.loading_spinner.set_visible(True)
+            # Iniciar carga en thread separado después de un pequeño delay
+            GLib.timeout_add(200, self._start_background_loading)
+    
+    def _start_background_loading(self):
+        """Inicia la carga de modelos en un thread separado."""
+        print("Starting background model loading thread...")
+        threading.Thread(
+            target=self._load_models_in_thread,
+            daemon=True,  # Thread se cierra automáticamente cuando termina la app
+            name="ModelLoader"
+        ).start()
+        return False  # No repetir
+    
+    def _load_models_in_thread(self):
+        """Carga los modelos en un thread separado."""
+        try:
+            print("Importing model selector modules in background thread...")
+            
+            # Imports lazy en el thread de background - no bloquea UI
+            from gtk_llm_chat.wide_model_selector import CompactModelSelector, NO_SELECTION_KEY
+            from gtk_llm_chat.model_selection import ModelSelectionManager
+            
+            print("Creating model selector objects in background thread...")
+            
+            # Crear objetos en el thread principal de forma segura, pero pasando las clases
+            GLib.idle_add(self._create_model_selector_and_replace_placeholder, 
+                         CompactModelSelector, ModelSelectionManager)
+            
+        except Exception as e:
+            print(f"Error importing/creating model selector in background: {e}")
+            # Notificar error al thread principal
+            GLib.idle_add(self._on_models_loaded_error, str(e))
+    
+    def _create_model_selector_and_replace_placeholder(self, CompactModelSelector, ModelSelectionManager):
+        """Crea el model_selector y reemplaza el placeholder en el thread principal."""
+        try:
+            # Crear los objetos del selector usando las clases pasadas desde el thread
+            self._create_model_selector_if_needed(CompactModelSelector, ModelSelectionManager)
+            
+            # Reemplazar el placeholder con el selector real
+            panel3_inner_vbox = self.panel3_placeholder.get_parent()
+            if panel3_inner_vbox:
+                panel3_inner_vbox.remove(self.panel3_placeholder)
+                panel3_inner_vbox.append(self.model_selector)
+            
+            # Iniciar la carga de modelos en thread separado
+            threading.Thread(
+                target=self._load_models_data_in_thread,
+                daemon=True,
+                name="ModelDataLoader"
+            ).start()
+            
+        except Exception as e:
+            print(f"Error creating model selector: {e}")
+            GLib.idle_add(self._on_models_loaded_error, str(e))
+        
+        return False
+    
+    def _load_models_data_in_thread(self):
+        """Carga los datos de modelos en un thread separado."""
+        try:
+            print("Loading model data in background thread...")
+            # La carga real ocurre aquí en el thread de background
+            self.model_selector.load_providers_and_models()
+            
+            # Una vez completada la carga, notificar al thread principal
+            GLib.idle_add(self._on_models_loaded_completed)
+            
+        except Exception as e:
+            print(f"Error loading model data in background: {e}")
+            # Notificar error al thread principal
+            GLib.idle_add(self._on_models_loaded_error, str(e))
+    
+    def _on_models_loaded_completed(self):
+        """Callback ejecutado en el thread principal cuando se completa la carga."""
+        print("Background model loading completed successfully.")
+        # Marcar como completada la carga
+        self._models_loaded = True
+        # Remover el spinner de carga
+        self._ensure_loading_spinner_removed()
+        # Actualizar botones de navegación
+        if int(round(self.carousel.get_position())) == 2:  # Si estamos en el panel de modelos
+            self.update_navigation_buttons()
+        return False
+    
+    def _on_models_loaded_error(self, error_message):
+        """Callback ejecutado en el thread principal cuando hay error en la carga."""
+        print(f"Background model loading failed: {error_message}")
+        # Aquí podrías mostrar un mensaje de error al usuario
+        return False
+
+    def _create_model_selector_if_needed(self, CompactModelSelector, ModelSelectionManager):
+        """Crea el model_selector y model_manager solo cuando sea necesario."""
+        if not self._model_selector_created:
+            print("Creating model selector objects...")
+            self._model_selector_created = True
+            
+            # Las clases ya fueron importadas en el thread de background
+            # y pasadas como parámetros - no necesitamos imports aquí
+            
+            # Crear objetos lazy
+            self.model_manager = ModelSelectionManager(self.config_data, self.app.llm_client if hasattr(self.app, 'llm_client') else None)
+            self.model_selector = CompactModelSelector(manager=self.model_manager)
+            
+            # Configurar el widget
+            self.model_selector.set_vexpand(True)
+            self.model_selector.set_hexpand(True)
+            self.model_selector.set_valign(Gtk.Align.FILL)
+            self.model_selector.set_halign(Gtk.Align.FILL)
+            
+            # Conectar señales
+            self.model_selector.connect('model-selected', self._on_model_selected)
+            self.model_selector.connect('api-key-status-changed', self._on_api_key_status_changed)
+            
+            print("Model selector objects created successfully.")
 
 
 if __name__ == "__main__":
@@ -508,8 +675,12 @@ if __name__ == "__main__":
             print("Welcome flow finished. Config:", config)
             app.quit()
         app.on_welcome_finished = welcome_finished_callback # Añadir el callback a la app
+        import time
+        win_create_time = time.time()  # Medir tiempo de creación de la ventana
         win = WelcomeWindow(app) # on_start_callback ya no se pasa aquí
+        print(f"WelcomeWindow created in {time.time() - win_create_time:.2f} seconds")
         win.present()
+        win.start_lazy_loading() # Iniciar la carga lazy de modelos
         # Permitir Ctrl+C para cerrar
         signal.signal(signal.SIGINT, lambda s, f: app.quit())
 
