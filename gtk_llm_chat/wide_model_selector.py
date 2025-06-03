@@ -8,7 +8,27 @@ from .model_selection import ModelSelectionManager, LOCAL_PROVIDER_KEY, debug_pr
 
 NO_SELECTION_KEY = "_internal_no_selection_"
 
-class CompactModelSelector(Gtk.Box):
+class WideModelSelector(Gtk.Box):
+    def pick_model(self, modelid):
+        """
+        Selecciona el modelo dado su modelid, sin importar el proveedor.
+        Cambia el sidebar al proveedor correspondiente y selecciona el modelo en la lista.
+        """
+        for provider_key in self.manager.models_by_provider:
+            models = self.manager.get_models_for_provider(provider_key)
+            for model in models:
+                if getattr(model, 'model_id', None) == modelid:
+                    self.content_stack.set_visible_child_name(provider_key)
+                    page_ui = self._provider_pages_cache.get(provider_key)
+                    if page_ui:
+                        model_list = page_ui["model_list"]
+                        for row in model_list:
+                            if getattr(row, 'model_id', None) == modelid:
+                                GLib.idle_add(model_list.select_row, row)
+                                break
+                    self._update_model_info_panel(provider_key, modelid)
+                    return True
+        return False
     """
     Un widget de selección de modelo compacto usando Gtk.StackSidebar.
     Maneja la selección de proveedor, modelo y la configuración de API keys.
@@ -234,7 +254,7 @@ class CompactModelSelector(Gtk.Box):
             self.manager.config['model'] = model_id
             self.manager.emit('model-selected', model_id) 
             self.emit('model-selected', model_id)
-            debug_print(f"CompactModelSelector: Model '{model_id}' for provider '{provider_key}' selected.")
+            debug_print(f"WideModelSelector: Model '{model_id}' for provider '{provider_key}' selected.")
             self._update_and_emit_api_key_status(provider_key)
             self._update_model_info_panel(provider_key, model_id)
 
@@ -283,7 +303,7 @@ class CompactModelSelector(Gtk.Box):
         self._current_provider_key_for_api_dialog = None
 
     def _on_external_api_key_change(self, manager_instance, provider_key_changed: str):
-        debug_print(f"CompactModelSelector: API key changed externally for provider '{provider_key_changed}', updating UI.")
+        debug_print(f"WideModelSelector: API key changed externally for provider '{provider_key_changed}', updating UI.")
         if provider_key_changed in self._provider_pages_cache:
             page_ui = self._provider_pages_cache[provider_key_changed]
             self._populate_model_list_for_page(provider_key_changed, page_ui)
@@ -454,7 +474,7 @@ class CompactModelSelector(Gtk.Box):
             self._current_provider_key_for_api_dialog = current_provider
             self._show_api_key_dialog(current_provider)
         else:
-            debug_print("CompactModelSelector: Cannot trigger API key dialog, no valid provider selected.")
+            debug_print("WideModelSelector: Cannot trigger API key dialog, no valid provider selected.")
 
     def get_current_model_selection_status(self) -> dict:
         """
