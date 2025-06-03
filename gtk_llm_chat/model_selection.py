@@ -39,9 +39,16 @@ class ModelSelectionManager(GObject.Object):
         self._selected_provider_key = LOCAL_PROVIDER_KEY
         self._models_loaded = False
         self._keys_cache = None
+        self._provider_key_map = {}  # Normaliza provider_key -> provider_key original
 
     def get_provider_display_name(self, provider_key):
         """Obtiene un nombre legible para la clave del proveedor."""
+        norm_key = provider_key.lower().strip() if provider_key else "local/other"
+        display = self._provider_key_map.get(norm_key)
+        if display is not None:
+            if display == LOCAL_PROVIDER_KEY:
+                return _("Local/Other")
+            return display.replace('-', ' ').title().removeprefix('Llm ')
         if provider_key == LOCAL_PROVIDER_KEY:
             return _("Local/Other")
         return provider_key.replace('-', ' ').title().removeprefix('Llm ') if provider_key else _("Unknown Provider")
@@ -90,10 +97,12 @@ class ModelSelectionManager(GObject.Object):
         """
         Agrupa modelos por needs_key y puebla la lista de proveedores 
         usando introspección de plugins para descubrir todos los posibles.
+        Además, añade cualquier modelo que sólo aparezca en llm.get_models() (como openai).
         """
         from llm.plugins import pm, load_plugins
         self.models_by_provider.clear()
         self._provider_to_needs_key = {}
+        self._provider_key_map = {}
         try:
             # 1. Asegurar que los plugins están cargados
             import llm.plugins
@@ -104,63 +113,64 @@ class ModelSelectionManager(GObject.Object):
                 debug_print("ModelSelection: Plugins ya estaban cargados")
             
             all_possible_models = []
-            
-            # Función de registro para capturar modelos durante la invocación del hook
             def register_model(model, async_model=None, aliases=None):
                 all_possible_models.append(model)
-
-            # Llamar explícitamente al hook de registro de modelos
             pm.hook.register_models(register=register_model)
             
-            # 2. Obtener plugins con hook 'register_models'
             all_plugins = llm.get_plugins()
             plugins_with_models = [plugin for plugin in all_plugins if 'register_models' in plugin['hooks']]
             providers_set = {plugin['name']: plugin for plugin in plugins_with_models}
-            
             debug_print(f"Plugins con modelos: {list(providers_set.keys())}")
 
-            # 3. Construir mapping provider_key -> needs_key y agrupar modelos
             for provider_key in providers_set.keys():
+                # Normalizar quitando 'llm-' si existe al inicio
+                clean_key = provider_key
+                if clean_key.startswith('llm-'):
+                    clean_key = clean_key[4:]
+                norm_key = clean_key.lower().strip() if clean_key else "local/other"
+                self._provider_key_map[norm_key] = clean_key
                 found_needs_key = None
-                provider_models = []
-                
+                provider_models = {}
                 for model_obj in all_possible_models:
                     model_needs_key = getattr(model_obj, 'needs_key', None)
-                    # Heurística: si el provider_key es substring o prefijo del needs_key o viceversa
-                    if model_needs_key and (provider_key in model_needs_key or model_needs_key in provider_key):
+                    model_id = getattr(model_obj, 'model_id', None)
+                    if not model_id:
+                        continue
+                    if model_needs_key and (clean_key in model_needs_key or model_needs_key in clean_key):
                         found_needs_key = model_needs_key
-                        provider_models.append(model_obj)
-                    elif provider_key.lower() in getattr(model_obj, 'model_id', '').lower():
-                        # Heurística adicional: si el provider está en el ID del modelo
-                        provider_models.append(model_obj)
-                
-                # Agregar los modelos encontrados para este proveedor
+                        provider_models[model_id] = model_obj
+                    elif clean_key.lower() in getattr(model_obj, 'model_id', '').lower():
+                        provider_models[model_id] = model_obj
                 if provider_models:
-                    self.models_by_provider[provider_key] = provider_models
-                    debug_print(f"Proveedor {provider_key}: {len(provider_models)} modelos")
-                
+                    self.models_by_provider[norm_key] = list(provider_models.values())
+                    debug_print(f"Proveedor {clean_key}: {len(provider_models)} modelos")
                 if found_needs_key:
-                    self._provider_to_needs_key[provider_key] = found_needs_key
+                    self._provider_to_needs_key[norm_key] = found_needs_key
                 else:
-                    # Si no hay modelos, usar heurística: quitar 'llm-' si existe
-                    self._provider_to_needs_key[provider_key] = provider_key.replace('llm-', '')
+                    self._provider_to_needs_key[norm_key] = clean_key
 
-            # 4. Si no hay proveedores, intentar obtener modelos directamente
-            if not providers_set:
-                all_models = llm.get_models()
-                debug_print(f"No se encontraron proveedores, intentando obtener modelos directamente: {len(all_models)} modelos")
-                
-                # Agrupar modelos por proveedor
-                providers_from_models = defaultdict(list)
-                for model in all_models:
-                    provider = getattr(model, 'needs_key', None) or LOCAL_PROVIDER_KEY
-                    providers_from_models[provider].append(model)
-                
-                if providers_from_models:
-                    self.models_by_provider = providers_from_models
-                    for provider_key in providers_from_models.keys():
-                        self._provider_to_needs_key[provider_key] = provider_key
+            # 4. Añadir modelos que sólo aparecen en llm.get_models() (core, openai, etc), evitando duplicados exactos por model_id
+            all_models = llm.get_models()
+            for model in all_models:
+                provider = getattr(model, 'needs_key', None) or LOCAL_PROVIDER_KEY
+                # Normalizar quitando 'llm-' si existe al inicio
+                clean_key = provider
+                if isinstance(clean_key, str) and clean_key.startswith('llm-'):
+                    clean_key = clean_key[4:]
+                norm_key = clean_key.lower().strip() if clean_key else "local/other"
+                self._provider_key_map[norm_key] = clean_key
+                model_id = getattr(model, 'model_id', None)
+                if not model_id:
+                    continue
+                if norm_key not in self.models_by_provider:
+                    self.models_by_provider[norm_key] = []
+                existing_ids = {getattr(m, 'model_id', None) for m in self.models_by_provider[norm_key]}
+                if model_id not in existing_ids:
+                    self.models_by_provider[norm_key].append(model)
+                if norm_key not in self._provider_to_needs_key:
+                    self._provider_to_needs_key[norm_key] = clean_key
 
+            debug_print(f"ModelSelection: Proveedores detectados: {list(self.models_by_provider.keys())}")
             return True
         except Exception as e:
             print(f"Error getting or processing models/plugins: {e}")
@@ -173,9 +183,9 @@ class ModelSelectionManager(GObject.Object):
         if not self._models_loaded:
             self.populate_providers_and_group_models()
             self._models_loaded = True
-        
+        norm_key = provider_key.lower().strip() if provider_key else "local/other"
         return sorted(
-            self.models_by_provider.get(provider_key, []),
+            self.models_by_provider.get(norm_key, []),
             key=lambda m: getattr(m, 'name', getattr(m, 'model_id', '')).lower()
         )
 
