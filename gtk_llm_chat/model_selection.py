@@ -9,9 +9,6 @@ import pathlib
 import json
 
 from chat_application import _
-
-# Usaremos None para representar la ausencia de 'needs_key'
-LOCAL_PROVIDER_KEY = None
 DEBUG = os.environ.get('DEBUG') or False
 
 def debug_print(*args):
@@ -36,7 +33,7 @@ class ModelSelectionManager(GObject.Object):
         self.llm_client = llm_client
         self.models_by_provider = defaultdict(list)
         self._provider_to_needs_key = {}
-        self._selected_provider_key = LOCAL_PROVIDER_KEY
+        self._selected_provider_key = None
         self._models_loaded = False
         self._keys_cache = None
         self._provider_key_map = {}  # Normaliza provider_key -> provider_key original
@@ -46,10 +43,10 @@ class ModelSelectionManager(GObject.Object):
         norm_key = provider_key.lower().strip() if provider_key else "local/other"
         display = self._provider_key_map.get(norm_key)
         if display is not None:
-            if display == LOCAL_PROVIDER_KEY:
+            if display is None:
                 return _("Local/Other")
             return display.replace('-', ' ').title().removeprefix('Llm ')
-        if provider_key == LOCAL_PROVIDER_KEY:
+        if provider_key is None:
             return _("Local/Other")
         return provider_key.replace('-', ' ').title().removeprefix('Llm ') if provider_key else _("Unknown Provider")
 
@@ -127,7 +124,7 @@ class ModelSelectionManager(GObject.Object):
                 clean_key = provider_key
                 if clean_key.startswith('llm-'):
                     clean_key = clean_key[4:]
-                norm_key = clean_key.lower().strip() if clean_key else "local/other"
+                norm_key = clean_key.lower().strip() if clean_key else None
                 self._provider_key_map[norm_key] = clean_key
                 found_needs_key = None
                 provider_models = {}
@@ -136,10 +133,9 @@ class ModelSelectionManager(GObject.Object):
                     model_id = getattr(model_obj, 'model_id', None)
                     if not model_id:
                         continue
-                    if model_needs_key and (clean_key in model_needs_key or model_needs_key in clean_key):
+                    # Solo agregar si needs_key coincide exactamente con el proveedor
+                    if model_needs_key == clean_key:
                         found_needs_key = model_needs_key
-                        provider_models[model_id] = model_obj
-                    elif clean_key.lower() in getattr(model_obj, 'model_id', '').lower():
                         provider_models[model_id] = model_obj
                 if provider_models:
                     self.models_by_provider[norm_key] = list(provider_models.values())
@@ -152,12 +148,16 @@ class ModelSelectionManager(GObject.Object):
             # 4. Añadir modelos que sólo aparecen en llm.get_models() (core, openai, etc), evitando duplicados exactos por model_id
             all_models = llm.get_models()
             for model in all_models:
-                provider = getattr(model, 'needs_key', None) or LOCAL_PROVIDER_KEY
+                provider = getattr(model, 'needs_key', None)
                 # Normalizar quitando 'llm-' si existe al inicio
-                clean_key = provider
-                if isinstance(clean_key, str) and clean_key.startswith('llm-'):
-                    clean_key = clean_key[4:]
-                norm_key = clean_key.lower().strip() if clean_key else "local/other"
+                if provider is None:
+                    clean_key = "local/other"
+                    norm_key = "local/other"
+                else:
+                    clean_key = provider
+                    if isinstance(clean_key, str) and clean_key.startswith('llm-'):
+                        clean_key = clean_key[4:]
+                    norm_key = clean_key.lower().strip() if clean_key else None
                 self._provider_key_map[norm_key] = clean_key
                 model_id = getattr(model, 'model_id', None)
                 if not model_id:
@@ -190,14 +190,22 @@ class ModelSelectionManager(GObject.Object):
         )
 
     def check_api_key_status(self, provider_key):
-        """Verifica el estado de la API key para un proveedor."""
-        if provider_key == LOCAL_PROVIDER_KEY:
+        """Verifica el estado de la API key para un proveedor usando solo la agrupación interna."""
+        norm_key = provider_key.lower().strip() if provider_key else "local/other"
+        models_for_provider = self.models_by_provider.get(norm_key, [])
+        if not models_for_provider:
+            # Si no hay modelos, asumimos que no requiere clave
             return {'needs_key': False}
 
+        # Si todos los modelos de este provider tienen needs_key == None, no requiere clave
+        needs_key_required = any(getattr(m, 'needs_key', None) not in (None, "", False) for m in models_for_provider)
+        if not needs_key_required:
+            return {'needs_key': False}
+
+        # Si requiere clave, buscar si la tiene
         needs_key_map = self.get_needs_key_map()
         real_key = needs_key_map.get(provider_key, provider_key)
         stored_keys = self._get_keys_json()
-        
         return {
             'needs_key': True,
             'has_key': real_key in stored_keys and bool(stored_keys[real_key]),

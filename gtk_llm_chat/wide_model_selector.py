@@ -4,31 +4,11 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib
 
 from .chat_application import _
-from .model_selection import ModelSelectionManager, LOCAL_PROVIDER_KEY, debug_print
+from .model_selection import ModelSelectionManager, debug_print
 
 NO_SELECTION_KEY = "_internal_no_selection_"
 
 class WideModelSelector(Gtk.Box):
-    def pick_model(self, modelid):
-        """
-        Selecciona el modelo dado su modelid, sin importar el proveedor.
-        Cambia el sidebar al proveedor correspondiente y selecciona el modelo en la lista.
-        """
-        for provider_key in self.manager.models_by_provider:
-            models = self.manager.get_models_for_provider(provider_key)
-            for model in models:
-                if getattr(model, 'model_id', None) == modelid:
-                    self.content_stack.set_visible_child_name(provider_key)
-                    page_ui = self._provider_pages_cache.get(provider_key)
-                    if page_ui:
-                        model_list = page_ui["model_list"]
-                        for row in model_list:
-                            if getattr(row, 'model_id', None) == modelid:
-                                GLib.idle_add(model_list.select_row, row)
-                                break
-                    self._update_model_info_panel(provider_key, modelid)
-                    return True
-        return False
     """
     Un widget de selección de modelo compacto usando Gtk.StackSidebar.
     Maneja la selección de proveedor, modelo y la configuración de API keys.
@@ -37,7 +17,6 @@ class WideModelSelector(Gtk.Box):
     """
     __gsignals__ = {
         'model-selected': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-        'api-key-set-for-provider': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # Señal: (provider_key, needs_key, has_key)
         'api-key-status-changed': (GObject.SignalFlags.RUN_LAST, None, (str, bool, bool))
     }
@@ -74,6 +53,31 @@ class WideModelSelector(Gtk.Box):
         self.no_selection_icon_target_size = 128
 
         self.manager.connect('api-key-changed', self._on_external_api_key_change)
+
+    def pick_model(self, modelid):
+        """
+        Selecciona el modelo dado su modelid, sin importar el proveedor.
+        Cambia el sidebar al proveedor correspondiente y selecciona el modelo en la lista.
+        Además, emite las señales necesarias para que el contenedor actualice el UI.
+        """
+        for provider_key in self.manager.models_by_provider:
+            models = self.manager.get_models_for_provider(provider_key)
+            for model in models:
+                if getattr(model, 'model_id', None) == modelid:
+                    self.content_stack.set_visible_child_name(provider_key)
+                    page_ui = self._provider_pages_cache.get(provider_key)
+                    if page_ui:
+                        model_list = page_ui["model_list"]
+                        for row in model_list:
+                            if getattr(row, 'model_id', None) == modelid:
+                                GLib.idle_add(model_list.select_row, row)
+                                break
+                    self._update_model_info_panel(provider_key, modelid)
+                    # Emitir señal para que el contenedor actualice el headerbar
+                    self.emit('model-selected', modelid)
+                    self._update_and_emit_api_key_status(provider_key)
+                    return True
+        return False
 
     def _add_no_selection_page(self):
         """Añade la página inicial de 'Sin Selección'."""
@@ -297,7 +301,6 @@ class WideModelSelector(Gtk.Box):
             api_key = key_entry.get_text()
             if api_key: 
                 self.manager.set_api_key(provider_key, api_key)
-                self.emit('api-key-set-for-provider', provider_key)
                 # El _on_external_api_key_change se encargará de emitir api-key-status-changed
         dialog.destroy()
         self._current_provider_key_for_api_dialog = None
@@ -427,7 +430,7 @@ class WideModelSelector(Gtk.Box):
                     api_key_row.set_subtitle(_("Required • Not set"))
                     # Icono de advertencia
                     warning_icon = Gtk.Image.new_from_icon_name("padlock2-symbolic")
-                    warning_icon.add_css_class("warning")
+                    warning_icon.add_css_class("error")
                     api_key_row.add_suffix(warning_icon)
             else:
                 api_key_row.set_subtitle(_("Not required"))

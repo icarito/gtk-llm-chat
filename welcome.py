@@ -28,7 +28,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.next_button.add_css_class("suggested-action")
         self.next_button.connect('clicked', self.on_next_clicked)
         self.header_bar.pack_end(self.next_button)
-        self.start_chatting_button = Gtk.Button(label="Ready")
+        self.start_chatting_button = Gtk.Button(label="New Conversation")
         self.start_chatting_button.add_css_class("suggested-action")
         self.start_chatting_button.set_halign(Gtk.Align.CENTER)
         self.start_chatting_button.connect('clicked', self.on_finish_clicked)
@@ -351,12 +351,37 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
     def _on_model_selected(self, selector, model_id):
         self.config_data['model'] = model_id
-        try:
-            import llm
-            llm.set_default_model(model_id)
-            print(f"Modelo por defecto configurado: {model_id}")
-        except Exception as e:
-            print(f"Error configurando modelo por defecto: {e}")
+        provider_key = None
+        # Intentar obtener el provider_key usando llm_client si está disponible
+        llm_client = getattr(self.app, 'llm_client', None)
+        if llm_client and hasattr(llm_client, 'get_provider_for_model'):
+            provider_key = llm_client.get_provider_for_model(model_id)
+        else:
+            # Fallback: buscar en los modelos cargados
+            try:
+                import llm
+                all_models = llm.get_models()
+                for m in all_models:
+                    if getattr(m, 'model_id', None) == model_id:
+                        provider_key = getattr(m, 'needs_key', None)
+                        break
+            except Exception:
+                provider_key = None
+        # Consultar el estado de la API key
+        needs_key = False
+        has_key = False
+        if provider_key is not None and self.model_manager and hasattr(self.model_manager, 'check_api_key_status'):
+            key_status = self.model_manager.check_api_key_status(provider_key)
+            needs_key = key_status.get('needs_key', False)
+            has_key = key_status.get('has_key', False)
+        # Solo setear modelo por defecto si no requiere clave o si la clave está presente
+        if not needs_key or has_key:
+            try:
+                import llm
+                llm.set_default_model(model_id)
+                print(f"Modelo por defecto configurado: {model_id}")
+            except Exception as e:
+                print(f"Error configurando modelo por defecto: {e}")
         self.update_navigation_buttons()
 
     def save_configuration(self):
@@ -449,7 +474,31 @@ class WelcomeWindow(Adw.ApplicationWindow):
         if int(round(self.carousel.get_position())) == 2:
             self.update_navigation_buttons()
         if self.model_selector and modelid:
-            self.model_selector.pick_model(modelid)
+            # Validar si el modelo requiere API key y si está configurada
+            provider_key = None
+            # Intentar obtener el provider_key usando llm_client si está disponible
+            llm_client = getattr(self.app, 'llm_client', None)
+            if llm_client and hasattr(llm_client, 'get_provider_for_model'):
+                provider_key = llm_client.get_provider_for_model(modelid)
+            else:
+                # Fallback: intentar obtenerlo desde los modelos cargados
+                try:
+                    import llm
+                    all_models = llm.get_models()
+                    for m in all_models:
+                        if getattr(m, 'model_id', None) == modelid:
+                            provider_key = getattr(m, 'needs_key', None)
+                            break
+                except Exception:
+                    provider_key = None
+            # Consultar el estado de la API key
+            if provider_key is not None and hasattr(self.model_manager, 'check_api_key_status'):
+                key_status = self.model_manager.check_api_key_status(provider_key)
+                needs_key = key_status.get('needs_key', False)
+                has_key = key_status.get('has_key', False)
+                if not needs_key or has_key:
+                    self.model_selector.pick_model(modelid)
+            # Si no se puede determinar, NO seleccionar modelo automáticamente
         return False
 
     def _on_models_loaded_error(self, error_message):
