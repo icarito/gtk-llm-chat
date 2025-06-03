@@ -42,28 +42,29 @@ class ChatSidebar(Gtk.Box):
         self.stack.set_transition_type(Gtk.StackTransitionType.ROTATE_LEFT_RIGHT)
         self.stack.set_vexpand(True)
 
-        # --- Página 1: Grupo de acciones ---
-        actions_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        actions_group = Adw.PreferencesGroup(title=_("Actions"))
+        # --- Página 1: Acciones principales (diseño similar al info_panel) ---
+        actions_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
-        # Añadir un header con título centrado para la página de acciones
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        header.add_css_class("flat")
-        header.set_title_widget(Gtk.Label(label=_("Settings")))
-        actions_page.append(header)
+        # Contenedor principal con espaciado como en info_panel
+        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        main_vbox.set_valign(Gtk.Align.START)
+        main_vbox.set_halign(Gtk.Align.FILL)
+        main_vbox.set_margin_top(24)
+        main_vbox.set_margin_start(12)
+        main_vbox.set_margin_end(12)
+        main_vbox.set_margin_bottom(12)
 
-        # Filas de acciones con íconos simbólicos
-        # Delete Conversation - uso de ícono "user-trash-symbolic"
-        delete_row = Adw.ActionRow(title=_("Delete Conversation"))
-        delete_row.add_css_class("destructive")
-        delete_row.set_icon_name("user-trash-symbolic")
-        delete_row.set_activatable(True)  # Hacerla accionable
-        delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
-        actions_group.add(delete_row)
+        # Avatar con icono brain-symbolic (como en info_panel)
+        avatar = Adw.Avatar(size=64)
+        avatar.set_icon_name("brain-symbolic")
+        avatar.set_halign(Gtk.Align.CENTER)
+        avatar.set_margin_bottom(12)
+        main_vbox.append(avatar)
 
-        # Modelo - uso de ícono de IA "preferences-system-symbolic"
+        # Grupo del Modelo
+        model_group = Adw.PreferencesGroup(title=_("Model"))
+        
+        # Fila de Modelo - uso de ícono "brain-symbolic"
         model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
         self.model_row = Adw.ActionRow(title=_("Change Model"),
                                        subtitle="Provider: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
@@ -71,27 +72,53 @@ class ChatSidebar(Gtk.Box):
         # NO establecer subtítulo aquí, lo hará model-loaded
         self.model_row.set_activatable(True)  # Hacerla accionable
         self.model_row.connect("activated", self._on_model_button_clicked)
-        actions_group.add(self.model_row)
-
-        actions_page.append(actions_group)
         
-        # Grupo separado para About
-        about_group = Adw.PreferencesGroup()
-        # About - uso de ícono "help-about-symbolic" en su propio grupo
+        # Añadir botón "Set as Default Model" al row del modelo
+        self.default_model_button = Gtk.Button()
+        self.default_model_button.set_icon_name("starred-symbolic")
+        self.default_model_button.set_tooltip_text(_("Set as Default Model"))
+        self.default_model_button.add_css_class("flat")
+        self.default_model_button.add_css_class("warning")  # Estrella amarilla
+        self.default_model_button.connect("clicked", self._on_set_default_model_clicked)
+        self.model_row.add_suffix(self.default_model_button)
+        
+        model_group.add(self.model_row)
+
+        # Fila para Parámetros del Modelo
+        parameters_action_row = Adw.ActionRow(title=_("Model Parameters"))
+        parameters_action_row.set_icon_name("brain-augmented-symbolic")
+        parameters_action_row.set_activatable(True)
+        parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
+        model_group.add(parameters_action_row)
+        
+        main_vbox.append(model_group)
+
+        # Grupo de la Conversación
+        conversation_group = Adw.PreferencesGroup(title=_("Conversation"))
+        
+        # Delete Conversation - uso de ícono "user-trash-symbolic"
+        delete_row = Adw.ActionRow(title=_("Delete Conversation"))
+        delete_row.add_css_class("destructive")
+        delete_row.set_icon_name("user-trash-symbolic")
+        delete_row.set_activatable(True)  # Hacerla accionable
+        delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
+        conversation_group.add(delete_row)
+        
+        main_vbox.append(conversation_group)
+        
+        # Grupo About
+        about_group = Adw.PreferencesGroup(title=_("Information"))
+        # About - uso de ícono "help-about-symbolic"
         about_row = Adw.ActionRow(title=_("About"))
         about_row.set_icon_name("help-about-symbolic")
         about_row.set_activatable(True)  # Hacerla accionable
         about_row.connect("activated", lambda x: self.get_root().get_application().on_about_activate(None, None))
         about_group.add(about_row)
-        actions_page.append(about_group)
+        
+        main_vbox.append(about_group)
+        
+        actions_page.append(main_vbox)
         self.stack.add_titled(actions_page, "actions", _("Actions"))
-
-        # --- Nueva ActionRow para Parámetros del Modelo en la página de Acciones ---
-        parameters_action_row = Adw.ActionRow(title=_("Model Parameters"))
-        parameters_action_row.set_icon_name("brain-augmented-symbolic") # O un ícono más adecuado
-        parameters_action_row.set_activatable(True)
-        parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
-        actions_group.add(parameters_action_row) # Añadir al primer grupo de acciones
 
         # --- Página 2: Selector de Modelos usando ModelSelectorWidget ---
         # Solo el widget selector de modelos (usa sus propios headers)
@@ -148,6 +175,8 @@ class ChatSidebar(Gtk.Box):
             self.llm_client.connect('model-loaded', self._on_model_loaded)
             # Programar la actualización con el modelo actual
             GLib.idle_add(self.update_model_button)
+            # Configurar visibilidad inicial del botón de modelo por defecto
+            GLib.idle_add(self._update_default_model_button_visibility)
 
         # Volver a la primera pantalla al colapsar el sidebar
         def _on_sidebar_toggled(self, toggled):
@@ -197,6 +226,55 @@ class ChatSidebar(Gtk.Box):
         # Mostrar el selector de modelos
         self.stack.set_visible_child_name("model_selector")
 
+    def _on_set_default_model_clicked(self, button):
+        """Manejador para el botón 'Set as Default Model'."""
+        if not self.llm_client:
+            debug_print("ChatSidebar: No hay llm_client disponible para establecer modelo por defecto")
+            return
+            
+        current_model_id = self.llm_client.get_model_id()
+        if not current_model_id:
+            debug_print("ChatSidebar: No hay modelo actual para establecer como defecto")
+            return
+            
+        # Obtener el nombre del proveedor para mostrar en el diálogo
+        provider_name = self.llm_client.get_provider_for_model(current_model_id) or "Unknown Provider"
+        
+        root_window = self.get_root()
+        dialog = Adw.MessageDialog(
+            transient_for=root_window,
+            modal=True,
+            heading=_("Set Default Model"),
+            body=f"{_('Do you want to set')} '{current_model_id}' {_('from')} {provider_name} {_('as the default model for new conversations?')}"
+        )
+        
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("set_default", _("Set as Default"))
+        dialog.set_response_appearance("set_default", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("set_default")
+        
+        dialog.connect("response", self._on_set_default_model_dialog_response, current_model_id)
+        dialog.present()
+    
+    def _on_set_default_model_dialog_response(self, dialog, response_id, model_id):
+        """Manejador de la respuesta del diálogo 'Set as Default Model'."""
+        if response_id == "set_default":
+            # Guardar el modelo como defecto en la configuración
+            self.config['default_model'] = model_id
+            debug_print(f"ChatSidebar: Modelo '{model_id}' establecido como defecto")
+            
+            # Actualizar la visibilidad del botón
+            self._update_default_model_button_visibility()
+            
+            # Mostrar toast de confirmación si es posible
+            window = self.get_root()
+            if window and hasattr(window, 'add_toast'):
+                toast = Adw.Toast(title=f"{_('Model')} '{model_id}' {_('set as default')}")
+                toast.set_timeout(3)
+                window.add_toast(toast)
+                
+        dialog.destroy()
+
     def _on_temperature_changed(self, adjustment):
         """Manejador para cuando cambia el valor de la temperatura."""
         temperature = adjustment.get_value()
@@ -240,6 +318,8 @@ class ChatSidebar(Gtk.Box):
             provider_name = self.llm_client.get_provider_for_model(model_id) or "Unknown Provider"
         
         self.model_row.set_subtitle(f"Provider: {provider_name}")
+        debug_print(f"ChatSidebar: _on_model_loaded calling _update_default_model_button_visibility")
+        self._update_default_model_button_visibility()
 
     def _on_model_parameters_button_clicked(self, row):
         self.stack.set_visible_child_name("parameters")
@@ -309,3 +389,51 @@ class ChatSidebar(Gtk.Box):
             self.system_prompt_row.set_subtitle(f"{_('Current')}: {subtitle_text}")
         else:
             self.system_prompt_row.set_subtitle(_("Not set"))
+
+    def _update_default_model_button_visibility(self):
+        """Actualiza la visibilidad del botón 'Set as Default Model' según si el modelo actual es diferente al por defecto."""
+        debug_print(f"ChatSidebar: _update_default_model_button_visibility called")
+        
+        if not self.llm_client or not hasattr(self, 'default_model_button'):
+            debug_print("ChatSidebar: Cannot update button visibility - missing llm_client or button")
+            return
+            
+        current_model_id = self.llm_client.get_model_id()
+        # Obtener el modelo por defecto del sistema usando el módulo llm directamente
+        try:
+            import llm
+            default_model_id = llm.get_default_model()
+        except Exception as e:
+            debug_print(f"ChatSidebar: Error obteniendo modelo por defecto del sistema: {e}")
+            default_model_id = None
+        
+        debug_print(f"ChatSidebar: Checking button visibility - current: '{current_model_id}', default: '{default_model_id}'")
+        
+        # Mostrar el botón solo si hay un modelo actual y es diferente al modelo por defecto del sistema
+        # Si no hay modelo por defecto configurado, no mostrar el botón
+        show_button = (current_model_id is not None and 
+                      default_model_id is not None and
+                      current_model_id != default_model_id)
+        
+        debug_print(f"ChatSidebar: Button visibility calculation: show_button={show_button}")
+        debug_print(f"ChatSidebar: - current_model_id is not None: {current_model_id is not None}")
+        debug_print(f"ChatSidebar: - default_model_id is not None: {default_model_id is not None}")
+        debug_print(f"ChatSidebar: - models are different: {current_model_id != default_model_id}")
+        
+        self.default_model_button.set_visible(show_button)
+        debug_print(f"ChatSidebar: Default model button visibility set to: {show_button}")
+
+    def update_model_button(self):
+        """Actualiza la información del modelo seleccionado en la interfaz."""
+        if not self.llm_client:
+            return
+            
+        current_model_id = self.llm_client.get_model_id()
+            
+        # Actualizar la configuración con el modelo actual
+        self.config['model'] = current_model_id
+        
+        # Actualizar subtítulo del modelo con el proveedor
+        self.model_row.set_subtitle(f"Provider: {self.llm_client.get_provider_for_model(current_model_id) or 'Unknown Provider'}")
+        self._update_system_prompt_row_subtitle() # Asegurar que el subtítulo del system prompt también se actualice
+        self._update_default_model_button_visibility() # Actualizar visibilidad del botón de modelo por defecto
