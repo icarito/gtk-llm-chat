@@ -152,10 +152,10 @@ def main():
     # Menú inicial
     icon.menu = create_menu()
 
-    # Monitorizar la base de datos
-    chat_history = ChatHistory()
-    db_path = getattr(chat_history, 'db_path', None)
-    chat_history.close_connection()
+    # Obtener el path de la base de datos sin instanciar ChatHistory innecesariamente
+    import llm
+    user_dir = llm.user_dir()
+    db_path = os.path.join(user_dir, "logs.db")
     
     if db_path and os.path.exists(db_path):
         def reload_menu():

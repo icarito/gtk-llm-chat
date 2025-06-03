@@ -3,8 +3,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib
 
-from .chat_application import _
-from .model_selection import ModelSelectionManager, debug_print
+from chat_application import _
+from model_selection import ModelSelectionManager, debug_print
 
 NO_SELECTION_KEY = "_internal_no_selection_"
 
@@ -64,7 +64,9 @@ class WideModelSelector(Gtk.Box):
             models = self.manager.get_models_for_provider(provider_key)
             for model in models:
                 if getattr(model, 'model_id', None) == modelid:
-                    self.content_stack.set_visible_child_name(provider_key)
+                    # Normalizar None a un nombre válido para el stack
+                    stack_key = provider_key if provider_key is not None else "local"
+                    self.content_stack.set_visible_child_name(stack_key)
                     page_ui = self._provider_pages_cache.get(provider_key)
                     if page_ui:
                         model_list = page_ui["model_list"]
@@ -146,8 +148,10 @@ class WideModelSelector(Gtk.Box):
 
     def load_providers_and_models(self):
         """Carga los proveedores y prepara las páginas en el stack."""
-        for child_page in self.content_stack.get_pages():
-            self.content_stack.remove(child_page.get_child())
+        # Limpiar completamente el stack
+        while self.content_stack.get_first_child():
+            child = self.content_stack.get_first_child()
+            self.content_stack.remove(child)
         self._provider_pages_cache.clear()
         self._add_no_selection_page()
 
@@ -157,8 +161,8 @@ class WideModelSelector(Gtk.Box):
             placeholder_page_content.set_halign(Gtk.Align.CENTER)
             placeholder_page_content.append(Gtk.Label(label=_("No models or providers found.")))
             self.content_stack.add_titled(placeholder_page_content, "no_providers_page", _("Error"))
-            GLib.idle_add(lambda: self.content_stack.set_visible_child_name(NO_SELECTION_KEY))
-            self._update_and_emit_api_key_status(NO_SELECTION_KEY)
+            #GLib.idle_add(lambda: self.content_stack.set_visible_child_name(NO_SELECTION_KEY))
+            #self._update_and_emit_api_key_status(NO_SELECTION_KEY)
             return
 
         sorted_providers = sorted(
@@ -167,15 +171,27 @@ class WideModelSelector(Gtk.Box):
         )
         
         for provider_key in sorted_providers:
+            # Normalizar None a un nombre válido para el stack
+            stack_key = provider_key if provider_key is not None else "local"
+            debug_print(f"DEBUG: Agregando proveedor al stack - provider_key: '{provider_key}', stack_key: '{stack_key}', display_name: '{self.manager.get_provider_display_name(provider_key)}'")
             page_ui = self._create_page_for_provider(provider_key)
-            self.content_stack.add_titled(page_ui["page"], provider_key, self.manager.get_provider_display_name(provider_key))
+            self.content_stack.add_titled(page_ui["page"], stack_key, self.manager.get_provider_display_name(provider_key))
             self._provider_pages_cache[provider_key] = page_ui
             self._populate_model_list_for_page(provider_key, page_ui)
             # No actualizamos la tarjeta de API aquí, se hará al cambiar de página o seleccionar modelo
 
-        # Seleccionar la página "No Selection" inicialmente
-        GLib.idle_add(lambda: self.content_stack.set_visible_child_name(NO_SELECTION_KEY))
-        self._update_and_emit_api_key_status(NO_SELECTION_KEY)
+        # Solo forzar "No selection" si NO hay ningún modelo disponible en ningún proveedor
+        any_model_available = any(
+            any(getattr(model, 'model_id', None) for model in self.manager.get_models_for_provider(provider_key))
+            for provider_key in self.manager.models_by_provider
+        )
+
+        #if not any_model_available:
+        #    debug_print(f"DEBUG: No hay ningún modelo disponible en ningún proveedor, forzando página 'No Selection'")
+            #GLib.idle_add(lambda: self.content_stack.set_visible_child_name(NO_SELECTION_KEY))
+            #self._update_and_emit_api_key_status(NO_SELECTION_KEY)
+        #else:
+        #    debug_print(f"DEBUG: Hay al menos un modelo disponible, no se fuerza 'No Selection'")
 
     # --- Métodos de creación de UI para cada proveedor ---
 
@@ -228,6 +244,9 @@ class WideModelSelector(Gtk.Box):
         self._clear_list_box(model_list_widget)
 
         models = self.manager.get_models_for_provider(provider_key)
+        # Siempre deselecciona todo antes de poblar
+        GLib.idle_add(model_list_widget.unselect_all)
+
         if not models:
             row = Adw.ActionRow(title=_("No models found for this provider"))
             row.set_selectable(False)
@@ -246,7 +265,8 @@ class WideModelSelector(Gtk.Box):
                 model_list_widget.append(row)
                 if model_id == current_model_id:
                     active_row = row
-        
+
+        # Solo selecciona si hay un modelo válido
         if active_row:
             GLib.idle_add(model_list_widget.select_row, active_row)
 
@@ -264,7 +284,21 @@ class WideModelSelector(Gtk.Box):
 
     def _on_stack_page_changed(self, stack, param):
         current_provider_key = stack.get_visible_child_name()
-        self._update_and_emit_api_key_status(current_provider_key)
+        debug_print(f"DEBUG: _on_stack_page_changed called - stack page changed to: '{current_provider_key}'")
+        
+        # Log the mapping from stack key to actual provider key
+        if current_provider_key == "local":
+            actual_provider = None
+            debug_print(f"DEBUG: Stack key 'local' maps to provider key: None")
+        elif current_provider_key == NO_SELECTION_KEY:
+            actual_provider = NO_SELECTION_KEY
+            debug_print(f"DEBUG: Stack key '{NO_SELECTION_KEY}' maps to provider key: {NO_SELECTION_KEY}")
+        else:
+            actual_provider = current_provider_key
+            debug_print(f"DEBUG: Stack key '{current_provider_key}' maps to provider key: {actual_provider}")
+        
+        debug_print(f"DEBUG: Proveedor cambiado a: {actual_provider}")
+        self._update_and_emit_api_key_status(actual_provider)
 
     def _show_api_key_dialog(self, provider_key: str):
         dialog = Adw.MessageDialog(
@@ -306,27 +340,56 @@ class WideModelSelector(Gtk.Box):
         self._current_provider_key_for_api_dialog = None
 
     def _on_external_api_key_change(self, manager_instance, provider_key_changed: str):
-        debug_print(f"WideModelSelector: API key changed externally for provider '{provider_key_changed}', updating UI.")
+        debug_print(f"WideModelSelector: API key changed externally for provider '{provider_key_changed}', reloading models and updating UI.")
+        
+        # Save current selection to restore after reload
+        current_provider = self.get_current_provider_key()
+        current_stack_key = self.content_stack.get_visible_child_name()
+        debug_print(f"WideModelSelector: Saving current selection - provider: '{current_provider}', stack_key: '{current_stack_key}'")
+        
+        # First reload dynamic models to get newly available models with the API key
+        try:
+            self.manager.reload_dynamic_models_only()
+            debug_print(f"WideModelSelector: Dynamic models reloaded after API key change for '{provider_key_changed}'")
+        except Exception as e:
+            debug_print(f"WideModelSelector: Error reloading dynamic models: {e}")
+        
+        # Then update the UI
         if provider_key_changed in self._provider_pages_cache:
             page_ui = self._provider_pages_cache[provider_key_changed]
             self._populate_model_list_for_page(provider_key_changed, page_ui)
             
             # Update info panel if this provider is currently selected and a model is selected
-            current_provider = self.get_current_provider_key()
             selected_model = self.get_selected_model_id()
             if current_provider == provider_key_changed and selected_model:
                 self._update_model_info_panel(provider_key_changed, selected_model)
+        
+        # Restore the selection if it was the provider that changed
+        if current_provider == provider_key_changed and current_stack_key != NO_SELECTION_KEY:
+            debug_print(f"WideModelSelector: Restoring selection to stack_key: '{current_stack_key}'")
+            GLib.idle_add(lambda: self.content_stack.set_visible_child_name(current_stack_key))
                 
         self._update_and_emit_api_key_status(provider_key_changed)
 
     def _update_and_emit_api_key_status(self, provider_key: str):
-        if provider_key == NO_SELECTION_KEY or not provider_key:
-            self.emit('api-key-status-changed', NO_SELECTION_KEY, False, False)
-            return
+        debug_print(f"DEBUG: _update_and_emit_api_key_status called with provider_key: '{provider_key}'")
+        
+        #if provider_key == NO_SELECTION_KEY or not provider_key:
+        #    debug_print(f"DEBUG: Ocultando botón API key para {provider_key}")
+        #    self.emit('api-key-status-changed', NO_SELECTION_KEY, False, False)
+        #    return
 
+        debug_print(f"DEBUG: Verificando status API key para proveedor: {provider_key}")
         key_status = self.manager.check_api_key_status(provider_key)
         needs_key = key_status.get('needs_key', False)
         has_key = key_status.get('has_key', False)
+        debug_print(f"DEBUG: Status API key - needs_key: {needs_key}, has_key: {has_key}")
+        
+        if needs_key:
+            debug_print(f"DEBUG: Mostrando botón API key para {provider_key}")
+        else:
+            debug_print(f"DEBUG: No se necesita API key para {provider_key}")
+            
         self.emit('api-key-status-changed', provider_key, needs_key, has_key)
 
     def _clear_list_box(self, list_box: Gtk.ListBox):
@@ -469,7 +532,9 @@ class WideModelSelector(Gtk.Box):
         return self.manager.config.get('model')
 
     def get_current_provider_key(self) -> str | None:
-        return self.content_stack.get_visible_child_name()
+        stack_key = self.content_stack.get_visible_child_name()
+        # Mapear "local" de vuelta a None para compatibilidad
+        return None if stack_key == "local" else stack_key
 
     def trigger_api_key_dialog_for_current_provider(self):
         current_provider = self.get_current_provider_key()

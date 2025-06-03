@@ -5,16 +5,20 @@ import time
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import os
 import threading
+from platform_utils import debug_print
 
 
 class WelcomeWindow(Adw.ApplicationWindow):
-    def __init__(self, app, on_start_callback=None):
+    def __init__(self, app, on_welcome_finished=None):
         super().__init__(application=app)
+        self._on_welcome_finished = on_welcome_finished
         self.set_default_size(800, 600)
         self.panel_titles = ["", "Tray applet", "Default Model", ""]
-        self.on_start_callback = on_start_callback
         self.config_data = {}
 
+        # Conectar la señal realize para iniciar la carga de modelos automáticamente
+        self.connect('realize', self._on_realize)
+        
         root_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.header_bar = Adw.HeaderBar()
         self.header_bar.set_show_end_title_buttons(True)
@@ -33,10 +37,11 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.start_chatting_button.set_halign(Gtk.Align.CENTER)
         self.start_chatting_button.connect('clicked', self.on_finish_clicked)
         self.api_key_button = Gtk.Button()
+        self.api_key_button.set_size_request(120, -1)  # Tamaño mínimo fijo
         self.api_key_button.connect('clicked', self._on_api_key_button_clicked)
         self.api_key_button_packed = False
         self.loading_spinner = Adw.Spinner()
-        self.loading_spinner.set_size_request(16, 16)
+        self.loading_spinner.set_size_request(24, 24)  # Tamaño fijo
         self.loading_spinner_packed = False
         root_vbox.append(self.header_bar)
         self.set_content(root_vbox)
@@ -63,7 +68,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page1 = Adw.StatusPage()
         page1.set_hexpand(True)
         page1.set_halign(Gtk.Align.FILL)
-        img_path = os.path.join(os.path.dirname(__file__), "windows/org.fuentelibre.gtk_llm_Chat.png")
+        img_path = os.path.join(os.path.dirname(__file__), "../windows/org.fuentelibre.gtk_llm_Chat.png")
         vbox1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         vbox1.set_valign(Gtk.Align.CENTER)
         vbox1.set_halign(Gtk.Align.CENTER)
@@ -209,8 +214,6 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page_to_scroll_to = self.carousel.get_nth_page(1)
         if page_to_scroll_to:
             self.carousel.scroll_to(page_to_scroll_to, True)
-        if self.on_start_callback:
-            self.on_start_callback()
 
     def on_prev_clicked(self, button):
         current_page_idx = int(round(self.carousel.get_position()))
@@ -285,71 +288,130 @@ class WelcomeWindow(Adw.ApplicationWindow):
         current_page_idx = int(round(idx))
         n = self.carousel.get_n_pages()
         self.prev_button.set_sensitive(current_page_idx > 0)
+
+        # Página 0: Bienvenida
         if current_page_idx == 0:
             self.prev_button.set_visible(False)
             self.next_button.set_visible(False)
             self._ensure_api_key_button_removed()
-        elif current_page_idx == n - 1:
+            return
+
+        # Última página: Listo para comenzar
+        if current_page_idx == n - 1:
             self.prev_button.set_visible(True)
             self.next_button.set_visible(False)
             if self.start_chatting_button.get_parent() != self.header_bar:
                 self.header_bar.pack_end(self.start_chatting_button)
             self.start_chatting_button.set_visible(True)
             self._ensure_api_key_button_removed()
-        else:
-            self.prev_button.set_visible(True)
-            self.next_button.set_visible(True)
-            self.start_chatting_button.set_visible(False)
-            if current_page_idx == 2:
-                if not self._models_loaded or not self._model_selector_created:
-                    if not self.loading_spinner_packed:
-                        self.header_bar.pack_start(self.loading_spinner)
-                        self.loading_spinner_packed = True
-                    self.loading_spinner.set_visible(True)
-                else:
-                    self._ensure_loading_spinner_removed()
-                if self.model_selector:
-                    status = self.model_selector.get_current_model_selection_status()
-                    self.next_button.set_sensitive(status["is_valid_for_next_step"])
-                    if status["needs_api_key"]:
-                        if not self.api_key_button_packed:
-                            self.header_bar.pack_start(self.api_key_button)
-                            self.api_key_button_packed = True
-                        self.api_key_button.set_visible(True)
-                        self.api_key_button.set_label("Set API Key" if not status["api_key_set"] else "Change API Key")
-                        self.api_key_button.get_style_context().remove_class("suggested-action")
-                        self.api_key_button.get_style_context().remove_class("destructive-action")
-                        if not status["api_key_set"]:
-                            self.api_key_button.get_style_context().add_class("destructive-action")
-                        else:
-                            self.api_key_button.get_style_context().add_class("suggested-action")
-                    else:
-                        self._ensure_api_key_button_removed()
-                else:
-                    self.next_button.set_sensitive(False)
-                    self._ensure_api_key_button_removed()
-            else:
-                self.next_button.set_sensitive(True)
+            return
+
+        # Otras páginas
+        self.prev_button.set_visible(True)
+        self.next_button.set_visible(True)
+        self.start_chatting_button.set_visible(False)
+
+        # Página de selección de modelo
+        if current_page_idx == 2:
+            if not self._models_loaded or not self._model_selector_created:
+                if not self.loading_spinner_packed:
+                    self.header_bar.pack_start(self.loading_spinner)
+                    self.loading_spinner_packed = True
+                self.loading_spinner.set_visible(True)
+                self.next_button.set_sensitive(False)
                 self._ensure_api_key_button_removed()
+                return
+            else:
                 self._ensure_loading_spinner_removed()
 
+            # Si hay selector de modelo, usar su status
+            if self.model_selector:
+                status = self.model_selector.get_current_model_selection_status()
+                current_provider = self.model_selector.get_current_provider_key()
+                print(f"Debug update_navigation_buttons: current_provider={current_provider}")
+
+                # Mostrar u ocultar botón de API key según status
+                self._update_api_key_button(current_provider)
+                # El botón Next se habilita si hay un modelo seleccionado válido
+                self.next_button.set_sensitive(status["is_valid_for_next_step"])
+            else:
+                self.next_button.set_sensitive(False)
+                self._ensure_api_key_button_removed()
+        else:
+            self.next_button.set_sensitive(True)
+            self._ensure_api_key_button_removed()
+            self._ensure_loading_spinner_removed()
+
+    def _update_api_key_button(self, current_provider):
+        """Muestra u oculta el botón de API key según el estado del proveedor actual."""
+        provider_needs_key = False
+        provider_has_key = False
+        models_count = 0
+        if current_provider and current_provider != "no_selection" and hasattr(self.model_manager, 'check_api_key_status'):
+            key_status = self.model_manager.check_api_key_status(current_provider)
+            provider_needs_key = key_status.get('needs_key', False)
+            provider_has_key = key_status.get('has_key', False)
+            if hasattr(self.model_manager, 'models_by_provider') and current_provider in self.model_manager.models_by_provider:
+                models_count = len(self.model_manager.models_by_provider[current_provider])
+            # Heurística extra: si está en el mapeo de needs_key pero no lo reporta, forzar needs_key
+            if not provider_needs_key and hasattr(self.model_manager, '_provider_to_needs_key'):
+                if current_provider in self.model_manager._provider_to_needs_key:
+                    needs_key_name = self.model_manager._provider_to_needs_key[current_provider]
+                    if needs_key_name and needs_key_name != "":
+                        provider_needs_key = True
+                        try:
+                            import llm
+                            key_value = llm.get_key(needs_key_name)
+                            key_exists = key_value is not None and key_value.strip() != ""
+                            provider_has_key = key_exists and models_count > 0
+                        except Exception:
+                            provider_has_key = False
+        if provider_needs_key:
+            print(f"Debug: Mostrando botón API key para {current_provider}")
+            if not self.api_key_button_packed:
+                if self.api_key_button.get_parent() is not None:
+                    self.api_key_button.get_parent().remove(self.api_key_button)
+                self.api_key_button.set_visible(False)
+                self.header_bar.pack_start(self.api_key_button)
+                self.api_key_button_packed = True
+            button_text = "Set API Key" if not provider_has_key else "Change API Key"
+            self.api_key_button.set_label(button_text)
+            self.api_key_button.get_style_context().remove_class("suggested-action")
+            self.api_key_button.get_style_context().remove_class("destructive-action")
+            if not provider_has_key:
+                self.api_key_button.get_style_context().add_class("suggested-action")
+            else:
+                self.api_key_button.get_style_context().add_class("destructive-action")
+            self.api_key_button.set_visible(True)
+        else:
+            print(f"Debug: Ocultando botón API key para {current_provider}")
+            self._ensure_api_key_button_removed()
+
     def _ensure_api_key_button_removed(self):
-        if self.api_key_button_packed and self.api_key_button.get_parent() == self.header_bar:
-            self.header_bar.remove(self.api_key_button)
-        self.api_key_button_packed = False
+        if self.api_key_button_packed:
+            try:
+                if self.api_key_button.get_parent() == self.header_bar:
+                    self.header_bar.remove(self.api_key_button)
+                self.api_key_button_packed = False
+            except Exception as e:
+                print(f"Error removiendo botón API key: {e}")
+                self.api_key_button_packed = False
         self.api_key_button.set_visible(False)
 
     def _ensure_loading_spinner_removed(self):
-        if self.loading_spinner_packed and self.loading_spinner.get_parent() == self.header_bar:
-            self.header_bar.remove(self.loading_spinner)
-        self.loading_spinner_packed = False
+        if self.loading_spinner_packed:
+            try:
+                if self.loading_spinner.get_parent() == self.header_bar:
+                    self.header_bar.remove(self.loading_spinner)
+                self.loading_spinner_packed = False
+            except Exception as e:
+                print(f"Error removiendo spinner: {e}")
+                self.loading_spinner_packed = False
         self.loading_spinner.set_visible(False)
 
     def on_finish_clicked(self, button):
-        self.save_configuration()
         self.close()
-        if hasattr(self.get_application(), 'on_welcome_finished'):
-            self.get_application().on_welcome_finished(self.get_configuration())
+        self._on_welcome_finished(self.get_configuration())
 
 
     def _on_model_selected(self, selector, model_id):
@@ -382,6 +444,20 @@ class WelcomeWindow(Adw.ApplicationWindow):
             try:
                 import llm
                 llm.set_default_model(model_id)
+
+                # Forzar la creación de logs.db para evitar ejecuciones repetidas del asistente
+                try:
+                    # Usamos la lógica ya implementada en ChatHistory
+                    from db_operations import ChatHistory
+                    
+                    # Solo necesitamos inicializar ChatHistory y llamar a _ensure_db_exists()
+                    temp_history = ChatHistory()
+                    temp_history._ensure_db_exists()  # Esto aplica las migraciones si el archivo no existe
+                    self.app._needs_initial_setup = False
+                    debug_print("Base de datos logs.db creada correctamente")
+                except Exception as db_err:
+                    debug_print(f"Error forzando creación de BD: {db_err}")
+                
                 print(f"Modelo por defecto configurado: {model_id}")
             except Exception as e:
                 print(f"Error configurando modelo por defecto: {e}")
@@ -404,6 +480,26 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.model_selector.trigger_api_key_dialog_for_current_provider()
 
     def _on_api_key_status_changed(self, selector, provider_key, needs_key, has_key):
+        print(f"Debug: API key status changed - provider: {provider_key}, needs: {needs_key}, has: {has_key}")
+
+        # Si se configuró una API key (needs_key=True y has_key=True), recargar solo los modelos dinámicos
+        # sin cambiar el stack para evitar bucles infinitos
+        if needs_key and has_key and self.model_selector:
+            print(f"Debug: API key configurada para {provider_key}, recargando solo modelos dinámicos...")
+            try:
+                # Recargar modelos dinámicos directamente sin tocar la UI del stack
+                self.model_selector.manager.reload_dynamic_models_only()
+                
+                # Actualizar solo la página del proveedor que cambió
+                if provider_key in self.model_selector._provider_pages_cache:
+                    page_ui = self.model_selector._provider_pages_cache[provider_key]
+                    self.model_selector._populate_model_list_for_page(provider_key, page_ui)
+                    print(f"Debug: Lista de modelos actualizada para proveedor {provider_key}")
+                
+            except Exception as e:
+                print(f"Error recargando modelos dinámicos: {e}")
+
+        # Actualizar botones en cualquier caso
         if int(round(self.carousel.get_position())) == 2:
             self.update_navigation_buttons()
 
@@ -459,16 +555,23 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
     def _load_models_data_in_thread(self):
         try:
+            # Cargar proveedores y modelos usando el manager del selector
             self.model_selector.load_providers_and_models()
+            
+            # Obtener el modelo por defecto
             try:
                 import llm
                 modelid = llm.get_default_model()
+                print(f"Debug: Modelo por defecto obtenido: {modelid}")
             except Exception as e:
                 print(f"Error obteniendo modelo por defecto: {e}")
                 modelid = None
+            
             GLib.idle_add(self._on_models_loaded_completed, modelid)
         except Exception as e:
             print(f"Error loading model data in background: {e}")
+            import traceback
+            traceback.print_exc()
             GLib.idle_add(self._on_models_loaded_error, str(e))
 
     def _on_models_loaded_completed(self, modelid=None):
@@ -476,32 +579,59 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self._ensure_loading_spinner_removed()
         if int(round(self.carousel.get_position())) == 2:
             self.update_navigation_buttons()
+        
         if self.model_selector and modelid:
-            # Validar si el modelo requiere API key y si está configurada
+            print(f"Debug: Intentando seleccionar modelo por defecto: {modelid}")
+            # Verificar si el modelo requiere API key y si está configurada
             provider_key = None
-            # Intentar obtener el provider_key usando llm_client si está disponible
-            llm_client = getattr(self.app, 'llm_client', None)
-            if llm_client and hasattr(llm_client, 'get_provider_for_model'):
-                provider_key = llm_client.get_provider_for_model(modelid)
-            else:
-                # Fallback: intentar obtenerlo desde los modelos cargados
+            
+            # Obtener el provider_key del modelo usando el manager
+            if hasattr(self.model_selector, 'manager') and self.model_selector.manager:
+                manager = self.model_selector.manager
+                # Buscar el modelo en todos los proveedores
+                for prov_key, models in manager.models_by_provider.items():
+                    for model in models:
+                        if getattr(model, 'model_id', None) == modelid:
+                            provider_key = manager._provider_to_needs_key.get(prov_key)
+                            print(f"Debug: Encontrado modelo {modelid} en proveedor {prov_key}, needs_key: {provider_key}")
+                            break
+                    if provider_key is not None:
+                        break
+            
+            # Si no se encontró, intentar obtener directamente del modelo
+            if provider_key is None:
                 try:
                     import llm
                     all_models = llm.get_models()
                     for m in all_models:
                         if getattr(m, 'model_id', None) == modelid:
                             provider_key = getattr(m, 'needs_key', None)
+                            print(f"Debug: Encontrado modelo {modelid} directamente, needs_key: {provider_key}")
                             break
-                except Exception:
+                except Exception as e:
+                    print(f"Error buscando modelo en llm.get_models(): {e}")
                     provider_key = None
-            # Consultar el estado de la API key
+            
+            # Consultar el estado de la API key si es necesario
+            should_select = True
             if provider_key is not None and hasattr(self.model_manager, 'check_api_key_status'):
                 key_status = self.model_manager.check_api_key_status(provider_key)
                 needs_key = key_status.get('needs_key', False)
                 has_key = key_status.get('has_key', False)
-                if not needs_key or has_key:
-                    self.model_selector.pick_model(modelid)
-            # Si no se puede determinar, NO seleccionar modelo automáticamente
+                print(f"Debug: Estado de API key para {provider_key}: needs_key={needs_key}, has_key={has_key}")
+                
+                if needs_key and not has_key:
+                    should_select = False
+                    print(f"Debug: No seleccionando modelo {modelid} porque falta API key para {provider_key}")
+            
+            # Seleccionar el modelo si es apropiado
+            if should_select:
+                print(f"Debug: Seleccionando modelo por defecto: {modelid}")
+                self.model_selector.pick_model(modelid)
+        else:
+            print("Debug: No hay modelo por defecto para seleccionar")
+            # Intentar seleccionar un modelo disponible
+        
         return False
 
     def _on_models_loaded_error(self, error_message):
@@ -519,12 +649,15 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.model_selector.set_halign(Gtk.Align.FILL)
             self.model_selector.connect('model-selected', self._on_model_selected)
             self.model_selector.connect('api-key-status-changed', self._on_api_key_status_changed)
+            # También conectar al stack interno para detectar cambios de proveedor
+            if hasattr(self.model_selector, 'content_stack'):
+                self.model_selector.content_stack.connect('notify::visible-child-name', self._on_provider_changed)
 
     def _on_tray_option_changed(self, checkbutton):
         if not checkbutton.get_active():
             return
         try:
-            from gtk_llm_chat.platform_utils import ensure_load_on_session_startup
+            from platform_utils import ensure_load_on_session_startup
             if self.tray_radio1.get_active():
                 success = ensure_load_on_session_startup(True)
                 if success:
@@ -544,7 +677,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
     def _initialize_tray_options(self):
         try:
-            from gtk_llm_chat.platform_utils import is_loading_on_session_startup
+            from platform_utils import is_loading_on_session_startup
             autostart_enabled = is_loading_on_session_startup()
             if autostart_enabled:
                 self.tray_radio1.set_active(True)
@@ -559,6 +692,17 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.tray_radio2.set_active(True)
             self.config_data['tray_startup'] = 'application'
 
+    def _on_provider_changed(self, stack, pspec):
+        """Actualiza los botones cuando se cambia de proveedor."""
+        current_provider = stack.get_visible_child_name()
+        print(f"Debug: Proveedor cambiado a: {current_provider}")
+        if int(round(self.carousel.get_position())) == 2:
+            # Usar un timeout pequeño para que el cambio se complete
+            GLib.timeout_add(50, self.update_navigation_buttons)
+
+    def _on_realize(self, widget):
+        """Callback cuando la ventana se realiza - inicia la carga de modelos."""
+        self.start_lazy_loading()
 
 if __name__ == "__main__":
     import sys
@@ -566,8 +710,7 @@ if __name__ == "__main__":
     app = Adw.Application(application_id="org.fuentelibre.GtkLLMChatWelcome", flags=Gio.ApplicationFlags.FLAGS_NONE)
     icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
     project_root = os.path.dirname(os.path.abspath(__file__))
-    custom_icon_path = os.path.join(project_root, "gtk_llm_chat")
-    icon_theme.add_search_path(custom_icon_path)
+    icon_theme.add_search_path(project_root)
     settings = Gtk.Settings.get_default()
     if settings:
         settings.set_property("gtk-icon-theme-name", "Adwaita")
@@ -575,10 +718,8 @@ if __name__ == "__main__":
         def welcome_finished_callback(config):
             print("Welcome flow finished. Config:", config)
             app.quit()
-        app.on_welcome_finished = welcome_finished_callback
-        win = WelcomeWindow(app)
+        win = WelcomeWindow(app, on_welcome_finished=welcome_finished_callback)
         win.present()
-        win.start_lazy_loading()
         signal.signal(signal.SIGINT, lambda s, f: app.quit())
     app.connect('activate', on_activate)
     app.run(sys.argv)

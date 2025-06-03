@@ -25,14 +25,16 @@ class ChatHistory:
         if db_path is None:
             # Use llm.user_dir() to get the directory
             user_dir = llm.user_dir()
-            # Ensure the directory exists
+            # Ensure the directory exists, pero NO el archivo
             os.makedirs(user_dir, exist_ok=True)
             db_path = os.path.join(user_dir, "logs.db")
         self.db_path = db_path
         self._thread_local = threading.local()
 
-        # Ensure the database schema is up-to-date using llm's migrations
-        self._run_llm_migrations()
+    def _ensure_db_exists(self):
+        """Asegura que la base de datos existe y está migrada, solo si es necesario."""
+        if not os.path.exists(self.db_path):
+            self._run_llm_migrations()
 
     def _run_llm_migrations(self):
         """Ensures the database schema is managed by llm's migrations."""
@@ -54,22 +56,17 @@ class ChatHistory:
                 except Exception as close_err:
                     logging.error(f"Error closing sqlite_utils connection after migration: {close_err}", exc_info=True)
 
-
     def get_connection(self):
         """Gets a sqlite3 connection for the current thread."""
-        # ... (resto del método sin cambios) ...
         if not hasattr(self._thread_local, "conn") or self._thread_local.conn is None:
             try:
-                # Antes de conectar, asegurémonos que la BD y tablas existen
-                # (La migración ya se corrió en __init__, pero esto es una doble verificación
-                # por si algo falló silenciosamente o el archivo fue borrado)
+                # Solo crear la BD si no existe cuando vamos a conectarnos
                 if not os.path.exists(self.db_path):
-                     self._run_llm_migrations() # Intentar correr migraciones de nuevo si no existe
+                    self._run_llm_migrations()
 
                 self._thread_local.conn = sqlite3.connect(self.db_path)
                 self._thread_local.conn.row_factory = sqlite3.Row
             except sqlite3.Error as e:
-                # Podríamos intentar correr migraciones aquí si el error es "no such table"
                 if "no such table" in str(e):
                     logging.warning(f"Table not found error on connect, attempting migrations again: {e}")
                     try:
@@ -78,8 +75,8 @@ class ChatHistory:
                         self._thread_local.conn = sqlite3.connect(self.db_path)
                         self._thread_local.conn.row_factory = sqlite3.Row
                     except Exception as migrate_err:
-                         logging.error(f"Failed to run migrations on 'no such table' error: {migrate_err}", exc_info=True)
-                         raise ConnectionError(_(f"Error al conectar a la base de datos después de fallo de migración: {e}")) from migrate_err
+                        logging.error(f"Failed to run migrations on 'no such table' error: {migrate_err}", exc_info=True)
+                        raise ConnectionError(_(f"Error al conectar a la base de datos después de fallo de migración: {e}")) from migrate_err
                 else:
                     raise ConnectionError(_(f"Error al conectar a la base de datos: {e}")) from e
         return self._thread_local.conn
@@ -91,6 +88,8 @@ class ChatHistory:
             self._thread_local.conn = None
 
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:
+        if not os.path.exists(self.db_path):
+            return []
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -114,6 +113,8 @@ class ChatHistory:
         return history
 
     def get_last_conversation(self):
+        if not os.path.exists(self.db_path):
+            return None
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM conversations ORDER BY id DESC LIMIT 1")
@@ -121,6 +122,8 @@ class ChatHistory:
         return dict(row) if row else None
 
     def get_conversation(self, conversation_id: str):
+        if not os.path.exists(self.db_path):
+            return None
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -156,6 +159,8 @@ class ChatHistory:
         conn.commit()
 
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
+        if not os.path.exists(self.db_path):
+            return []
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -177,6 +182,8 @@ class ChatHistory:
         self, conversation_id: str, prompt: str, response_text: str,
         model_id: str, fragments: List[str] = None, system_fragments: List[str] = None
     ):
+        # Asegurarse que la BD existe antes de escribir
+        self._ensure_db_exists()
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -209,6 +216,8 @@ class ChatHistory:
             conn.rollback()
 
     def create_conversation_if_not_exists(self, conversation_id, name: str, model: Optional[str] = None):
+        # Asegurarse que la BD existe antes de escribir
+        self._ensure_db_exists()
         conn = self.get_connection()
         cursor = conn.cursor()
         try:

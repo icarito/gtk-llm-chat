@@ -143,23 +143,8 @@ class LLMClient(GObject.Object):
 
             debug_print(f"LLMClient: Attempting to load model: {model_id} (in _load_model_internal)")
             
-            # Verificar modelos disponibles
-            available_models = llm.get_models()
-            debug_print(f"LLMClient: Hay {len(available_models)} modelos disponibles")
-            
-            # Buscar modelo por ID exacto
-            model_found = False
-            for model in available_models:
-                if getattr(model, 'model_id', None) == model_id:
-                    model_found = True
-                    break
-            
-            if not model_found and available_models:
-                # Si el modelo no se encuentra, usar el primer modelo disponible
-                fallback_model = available_models[0]
-                fallback_id = getattr(fallback_model, 'model_id', None)
-                debug_print(f"LLMClient: Modelo {model_id} no encontrado, usando alternativa: {fallback_id}")
-                model_id = fallback_id
+            # Cargar directamente el modelo solicitado
+            debug_print(f"LLMClient: Intentando cargar modelo directamente: {model_id}")
             
             # Cargar el modelo
             new_model = llm.get_model(model_id)
