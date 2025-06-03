@@ -18,7 +18,7 @@ class ModelSelectorWidget(Gtk.Box):
         'api-key-status-changed': (GObject.SignalFlags.RUN_LAST, None, (str, bool, bool))
     }
 
-    def __init__(self, manager=None, config=None, llm_client=None):
+    def __init__(self, manager=None, config=None, llm_client=None, show_headers=True):
         """
         Inicializa el selector de modelos.
         
@@ -27,12 +27,14 @@ class ModelSelectorWidget(Gtk.Box):
                    se creará uno nuevo usando config y llm_client.
             config: Configuración opcional si no se proporciona manager.
             llm_client: Cliente LLM opcional si no se proporciona manager.
+            show_headers: Si mostrar los headers en las páginas (por defecto True).
         """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         
         # Inicializar manager
         self.manager = manager or ModelSelectionManager(config, llm_client)
         self._selected_provider_key = None
+        self.show_headers = show_headers
 
         # Contenedor principal para apilar paneles
         self.stack = Gtk.Stack()
@@ -58,12 +60,13 @@ class ModelSelectorWidget(Gtk.Box):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         page.set_vexpand(True)
 
-        # Header con título
-        header = Adw.HeaderBar()
-        header.set_show_end_title_buttons(False)
-        header.add_css_class("flat")
-        header.set_title_widget(Gtk.Label(label=_("Select Provider")))
-        page.append(header)
+        # Header con título (solo si show_headers es True)
+        if self.show_headers:
+            header = Adw.HeaderBar()
+            header.set_show_end_title_buttons(False)
+            header.add_css_class("flat")
+            header.set_title_widget(Gtk.Label(label=_("Select Provider")))
+            page.append(header)
 
         # Lista de proveedores en una sola columna
         scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -131,10 +134,27 @@ class ModelSelectorWidget(Gtk.Box):
 
         for provider_key in providers:
             display_name = self.manager.get_provider_display_name(provider_key)
+            
+            # Pre-cargar modelos para obtener el conteo
+            models = self.manager.get_models_for_provider(provider_key)
+            model_count = len(models) if models else 0
+            
+            # Crear fila con subtítulo mostrando el número de modelos
             row = Adw.ActionRow(title=display_name)
+            if model_count > 0:
+                row.set_subtitle(f"{model_count} models")
+            else:
+                # Verificar si necesita API key para mostrar mensaje apropiado
+                key_status = self.manager.check_api_key_status(provider_key)
+                if key_status.get('needs_key', False) and not key_status.get('has_key', False):
+                    row.set_subtitle(_("API key required"))
+                else:
+                    row.set_subtitle(_("No models"))
+            
             row.set_activatable(True)
             row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
             row.provider_key = provider_key
+            print(f"DEBUG: Created row for provider '{provider_key}' (type: {type(provider_key)}) with {model_count} models")
             self.provider_list.append(row)
 
     def _clear_list_box(self, list_box):
@@ -147,13 +167,20 @@ class ModelSelectorWidget(Gtk.Box):
 
     def _on_provider_row_activated(self, list_box, row):
         """Manejador cuando se selecciona un proveedor."""
-        provider_key = getattr(row, 'provider_key', None)
-        if provider_key is not None:
+        # Usar hasattr para distinguir entre "no tiene atributo" vs "atributo es None"
+        if hasattr(row, 'provider_key'):
+            provider_key = row.provider_key
+            print(f"DEBUG: Row activated - provider_key: {provider_key} (type: {type(provider_key)})")
+            print(f"DEBUG: Calling _populate_model_list for {provider_key}")
             self._populate_model_list(provider_key)
+            print(f"DEBUG: Setting stack to 'models' page")
             self.stack.set_visible_child_name("models")
+        else:
+            print(f"DEBUG: Row does not have provider_key attribute, no action taken")
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos para el proveedor seleccionado."""
+        print(f"DEBUG: _populate_model_list called with provider_key: {provider_key} (type: {type(provider_key)})")
         self._clear_list_box(self.model_list)
         self._selected_provider_key = provider_key
         
@@ -163,6 +190,8 @@ class ModelSelectorWidget(Gtk.Box):
         # Obtener modelos primero para determinar si necesita API key
         models = self.manager.get_models_for_provider(provider_key)
         print(f"DEBUG: Modelos encontrados para {provider_key}: {len(models) if models else 0}")
+        if models:
+            print(f"DEBUG: Primeros 3 modelos: {[getattr(m, 'model_id', 'NO_ID') for m in models[:3]]}")
         
         # Actualizar banner de API key
         key_status = self.manager.check_api_key_status(provider_key)
