@@ -164,7 +164,14 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.tray_radio2 = Gtk.CheckButton(label="No, only when I start the app")
         self.tray_radio2.add_css_class("selection-mode")
         self.tray_radio1.set_group(self.tray_radio2) # Agrupar para que sean mutuamente excluyentes
-        self.tray_radio2.set_active(True) # Opción por defecto
+        
+        # Configurar estado inicial basado en la configuración actual del sistema
+        self._initialize_tray_options()
+        
+        # Conectar señales para responder a cambios
+        self.tray_radio1.connect('toggled', self._on_tray_option_changed)
+        self.tray_radio2.connect('toggled', self._on_tray_option_changed)
+        
         self.tray_group.append(self.tray_radio1)
         self.tray_group.append(self.tray_radio2)
         page2_vbox_content.append(self.tray_group)
@@ -487,6 +494,16 @@ class WelcomeWindow(Adw.ApplicationWindow):
         """Callback cuando se selecciona un modelo."""
         # Guardar el modelo seleccionado en la configuración
         self.config_data['model'] = model_id
+        
+        # Configurar como modelo por defecto en llm
+        try:
+            import llm
+            llm.set_default_model(model_id)
+            print(f"Modelo por defecto configurado: {model_id}")
+        except Exception as e:
+            print(f"Error configurando modelo por defecto: {e}")
+            # TODO: Mostrar toast de error
+        
         self.update_navigation_buttons() # Re-evaluar la validez para "Next"
 
     def save_configuration(self):
@@ -614,6 +631,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self._models_loaded = True
         # Remover el spinner de carga
         self._ensure_loading_spinner_removed()
+        
         # Actualizar botones de navegación
         if int(round(self.carousel.get_position())) == 2:  # Si estamos en el panel de modelos
             self.update_navigation_buttons()
@@ -649,6 +667,57 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.model_selector.connect('api-key-status-changed', self._on_api_key_status_changed)
             
             print("Model selector objects created successfully.")
+
+    def _on_tray_option_changed(self, checkbutton):
+        """Callback cuando cambia la opción de autostart del applet."""
+        if not checkbutton.get_active():
+            return  # Solo procesar cuando se activa, no cuando se desactiva
+        
+        try:
+            from gtk_llm_chat.platform_utils import ensure_load_on_session_startup
+            
+            if self.tray_radio1.get_active():
+                # "Yes, with my session" - habilitar autostart
+                success = ensure_load_on_session_startup(True)
+                if success:
+                    print("Autostart habilitado para inicio de sesión")
+                    self.config_data['tray_startup'] = 'session'
+                else:
+                    print("Error habilitando autostart")
+                    # TODO: Mostrar toast de error
+            else:
+                # "No, only when I start the app" - deshabilitar autostart
+                success = ensure_load_on_session_startup(False)
+                if success:
+                    print("Autostart deshabilitado")
+                    self.config_data['tray_startup'] = 'application'
+                else:
+                    print("Error deshabilitando autostart")
+                    # TODO: Mostrar toast de error
+                    
+        except Exception as e:
+            print(f"Error configurando autostart: {e}")
+            # TODO: Mostrar toast de error
+
+    def _initialize_tray_options(self):
+        """Inicializa los CheckButtons del panel 2 según el estado actual del autostart."""
+        try:
+            from gtk_llm_chat.platform_utils import is_loading_on_session_startup
+            
+            autostart_enabled = is_loading_on_session_startup()
+            if (autostart_enabled):
+                self.tray_radio1.set_active(True)  # "Yes, with my session"
+                self.config_data['tray_startup'] = 'session'
+                print("Autostart detectado como habilitado")
+            else:
+                self.tray_radio2.set_active(True)  # "No, only when I start the app"
+                self.config_data['tray_startup'] = 'application'
+                print("Autostart detectado como deshabilitado")
+        except Exception as e:
+            print(f"Error verificando estado de autostart: {e}")
+            # Fallback: configurar opción por defecto
+            self.tray_radio2.set_active(True)
+            self.config_data['tray_startup'] = 'application'
 
 
 if __name__ == "__main__":
