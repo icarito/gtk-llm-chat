@@ -257,6 +257,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_controller)
+        
+        # Conectar señal de cierre de ventana para terminar la aplicación si se cierra sin completar
+        self.connect('close-request', self._on_window_close_request)
 
     def on_start_clicked(self, button):
         page_to_scroll_to = self.carousel.get_nth_page(1)
@@ -460,6 +463,13 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def on_finish_clicked(self, button):
         self.close()
         self._on_welcome_finished(self.get_configuration())
+
+    def _on_window_close_request(self, window):
+        """Maneja el cierre de la ventana de bienvenida."""
+        debug_print("Ventana de bienvenida cerrada sin completar el asistente, terminando aplicación")
+        # Terminar la aplicación para evitar procesos zombie
+        self.app.quit()
+        return False
 
 
     def _on_model_selected(self, selector, model_id):
