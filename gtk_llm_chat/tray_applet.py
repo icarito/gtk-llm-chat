@@ -8,7 +8,7 @@ import locale
 import gettext
 import threading
 
-from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux
+from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux, is_mac
 from gtk_llm_chat.db_operations import ChatHistory
 
 try:
@@ -151,7 +151,7 @@ class DBMonitor:
             self.on_change()
 
 if not is_linux():
-    # --- Watchdog para Windows ---
+    # --- Watchdog para Windows y macOS ---
     class DBChangeHandler(FileSystemEventHandler):
         """Maneja eventos de modificación/contenido en el fichero de base de datos."""
         def __init__(self, db_path, on_change):
@@ -159,18 +159,48 @@ if not is_linux():
             self.db_path = os.path.abspath(db_path)
             self.db_filename = os.path.basename(db_path)
             self.on_change = on_change
+            self.db_exists = os.path.exists(self.db_path)
+            self._last_change_time = 0
+            print(f"[tray_applet] Iniciando monitor de watchdog para: {self.db_path}")
+
+        def _safe_on_change(self):
+            """Llama on_change de forma segura con manejo de errores y debounce"""
+            import time
+            current_time = time.time()
+            # Debounce: evitar llamadas múltiples en menos de 1 segundo
+            if current_time - self._last_change_time < 1.0:
+                return
+            self._last_change_time = current_time
+            
+            try:
+                print(f"[tray_applet] Recargando menú por cambios en logs.db")
+                self.on_change()
+            except Exception as e:
+                print(f"[tray_applet] Error al recargar menú: {e}")
 
         def on_modified(self, event):
             # Solo reaccionar si el archivo modificado es logs.db
             if (not event.is_directory and 
                 os.path.basename(event.src_path) == self.db_filename):
-                self.on_change()
+                print(f"[tray_applet] logs.db modificado: {event.src_path}")
+                self._safe_on_change()
 
         def on_created(self, event):
             # Solo reaccionar si el archivo creado es logs.db
             if (not event.is_directory and 
                 os.path.basename(event.src_path) == self.db_filename):
-                self.on_change()
+                self.db_exists = True
+                print(f"[tray_applet] logs.db creado: {event.src_path}")
+                self._safe_on_change()
+
+        def on_moved(self, event):
+            # Manejar cuando el archivo es movido/renombrado (como en SQLite con archivos temporales)
+            if (not event.is_directory and 
+                hasattr(event, 'dest_path') and event.dest_path and
+                os.path.basename(event.dest_path) == self.db_filename):
+                self.db_exists = True
+                print(f"[tray_applet] logs.db movido: {event.dest_path}")
+                self._safe_on_change()
 
 # --- Señal para salir limpio ---
 def on_quit_signal(sig, frame):
@@ -194,16 +224,9 @@ def main():
         icon.menu = create_menu()
     
     # Siempre monitorear el directorio para detectar creación/cambios de logs.db
-    # Usar watchdog en Windows, Gio.FileMonitor en otras plataformas
-    if not is_linux():
-        print("[tray_applet] Usando watchdog para monitorización en Windows")
-        event_handler = DBChangeHandler(db_path, reload_menu)
-        observer = Observer()
-        observer.schedule(event_handler, os.path.dirname(db_path), recursive=False)
-        observer.daemon = True
-        observer.start()
-    else:
-        print("[tray_applet] Usando Gio.FileMonitor para monitorización")
+    # Usar watchdog en Windows y macOS, Gio.FileMonitor en Linux
+    if is_linux():
+        print("[tray_applet] Usando Gio.FileMonitor para monitorización en Linux")
         # Gio requiere loop GLib, así que lo corremos en un hilo aparte
         def gio_loop():
             DBMonitor(db_path, reload_menu)
@@ -211,6 +234,24 @@ def main():
             GLib.MainLoop().run()
         t = threading.Thread(target=gio_loop, daemon=True)
         t.start()
+    else:
+        platform_name = "macOS" if is_mac() else "Windows"
+        print(f"[tray_applet] Usando watchdog para monitorización en {platform_name}")
+        event_handler = DBChangeHandler(db_path, reload_menu)
+        observer = Observer()
+        
+        # Monitorear el directorio de la base de datos
+        db_dir = os.path.dirname(db_path)
+        observer.schedule(event_handler, db_dir, recursive=False)
+        observer.daemon = True
+        observer.start()
+        
+        print(f"[tray_applet] Monitoreando directorio: {db_dir}")
+        
+        # Si el archivo ya existe, forzar una recarga inicial del menú
+        if os.path.exists(db_path):
+            print(f"[tray_applet] logs.db ya existe, recargando menú inicial")
+            reload_menu()
 
     icon.run()
 
