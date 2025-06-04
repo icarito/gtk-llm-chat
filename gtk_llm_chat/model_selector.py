@@ -142,7 +142,7 @@ class ModelSelectorWidget(Gtk.Box):
             # Crear fila con subtítulo mostrando el número de modelos
             row = Adw.ActionRow(title=display_name)
             if model_count > 0:
-                row.set_subtitle(f"{model_count} models")
+                row.set_subtitle(f"{model_count} {_('models')}")
             else:
                 # Verificar si necesita API key para mostrar mensaje apropiado
                 key_status = self.manager.check_api_key_status(provider_key)

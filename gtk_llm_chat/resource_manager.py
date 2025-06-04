@@ -65,8 +65,8 @@ class ResourceManager:
             if os.path.exists(path):
                 return path
                 
-        print(f"Warning: Resource not found: {relative_path}")
-        print(f"Searched in: {possible_paths}")
+        debug_print(f"Warning: Resource not found: {relative_path}")
+        debug_print(f"Searched in: {possible_paths}")
         return None
     
     def get_icon_pixbuf(self, icon_path: str, size: int = 64) -> Optional[GdkPixbuf.Pixbuf]:
