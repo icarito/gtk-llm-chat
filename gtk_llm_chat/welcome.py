@@ -6,6 +6,7 @@ from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import os
 import threading
 from platform_utils import debug_print
+from resource_manager import resource_manager
 
 
 class WelcomeWindow(Adw.ApplicationWindow):
@@ -15,6 +16,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.set_default_size(800, 600)
         self.panel_titles = ["", "Tray applet", "Default Model", ""]
         self.config_data = {}
+
+        # Configurar recursos (solo iconos, sin estilos CSS personalizados)
+        resource_manager.setup_icon_theme()
 
         # Conectar la señal realize para iniciar la carga de modelos automáticamente
         self.connect('realize', self._on_realize)
@@ -68,19 +72,20 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page1 = Adw.StatusPage()
         page1.set_hexpand(True)
         page1.set_halign(Gtk.Align.FILL)
-        img_path = os.path.join(os.path.dirname(__file__), "../windows/org.fuentelibre.gtk_llm_Chat.png")
+        
+        # Usar resource_manager para cargar la imagen
         vbox1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         vbox1.set_valign(Gtk.Align.CENTER)
         vbox1.set_halign(Gtk.Align.CENTER)
         vbox1.set_hexpand(True)
-        if os.path.exists(img_path):
-            image = Gtk.Picture.new_for_filename(img_path)
-            image.set_valign(Gtk.Align.CENTER)
-            image.set_halign(Gtk.Align.CENTER)
-            image.set_content_fit(Gtk.ContentFit.CONTAIN)
-            image.set_size_request(128, 128)
-            image.set_hexpand(True)
-            vbox1.append(image)
+        
+        # Usar resource_manager para cargar el icono de la aplicación con tamaño grande
+        app_image = resource_manager.create_image_widget("windows/org.fuentelibre.gtk_llm_Chat.png", 128)
+        app_image.set_valign(Gtk.Align.CENTER)
+        app_image.set_halign(Gtk.Align.CENTER)
+        app_image.set_size_request(128, 128)
+        vbox1.append(app_image)
+        
         page1.set_title("Own the conversation.")
         page1.set_description("Use any model you want. Your conversations are stored locally.")
         panel1_desc_label2 = Gtk.Label(label="This wizard will guide you through the initial setup")
@@ -103,17 +108,16 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page2_vbox_content.set_valign(Gtk.Align.CENTER)
         page2_vbox_content.set_halign(Gtk.Align.CENTER)
         page2_vbox_content.set_hexpand(True)
+        
         self.panel2_app_icon_target_size = 64
-        self.panel2_app_icon = Gtk.Image.new_from_icon_name("org.fuentelibre.gtk_llm_Chat")
+        # Usar resource_manager para crear el icono
+        self.panel2_app_icon = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat", 1)
         self.panel2_app_icon.set_opacity(0.0)
-        self.panel2_app_icon.add_css_class("icon-dropshadow")
         self.panel2_app_icon.set_size_request(1, 1)
-        self.panel2_app_icon.set_pixel_size(1)
         self.panel2_app_icon.set_halign(Gtk.Align.CENTER)
         self.panel2_app_icon.set_margin_bottom(12)
         page2_vbox_content.append(self.panel2_app_icon)
         panel2_desc_label = Gtk.Label(label="Access conversations from the convenience of your system tray")
-        panel2_desc_label.add_css_class("title-2")
         panel2_desc_label.set_wrap(True)
         panel2_desc_label.set_justify(Gtk.Justification.CENTER)
         panel2_desc_label.set_halign(Gtk.Align.CENTER)
@@ -130,9 +134,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.tray_group.set_halign(Gtk.Align.CENTER)
         self.tray_group.set_margin_top(12)
         self.tray_radio1 = Gtk.CheckButton(label="Yes, with my session")
-        self.tray_radio1.add_css_class("selection-mode")
         self.tray_radio2 = Gtk.CheckButton(label="No, only when I start the app")
-        self.tray_radio2.add_css_class("selection-mode")
         self.tray_radio1.set_group(self.tray_radio2)
         self._initialize_tray_options()
         self.tray_radio1.connect('toggled', self._on_tray_option_changed)

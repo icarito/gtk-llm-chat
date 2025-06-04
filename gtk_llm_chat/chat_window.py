@@ -16,6 +16,8 @@ from db_operations import ChatHistory
 from chat_application import _
 from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
+from style_manager import style_manager
+from resource_manager import resource_manager
 
 DEBUG = os.environ.get('DEBUG') or False
 
@@ -33,6 +35,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def __init__(self, config=None, chat_history=None, **kwargs):
         super().__init__(**kwargs)
         self.insert_action_group('app', self.get_application())
+
+        # Cargar estilos CSS y configurar recursos
+        style_manager.load_styles()
+        resource_manager.setup_icon_theme()
+        
+        # Aplicar clase CSS para la ventana principal
+        style_manager.apply_to_widget(self, "main-container")
 
         # Conectar señal de cierre de ventana
         self.connect('close-request', self._on_close_request)
@@ -148,6 +157,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # --- Contenido principal (el chat) ---
         chat_content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        style_manager.apply_to_widget(chat_content_box, "chat-container")
         # ScrolledWindow para el historial de mensajes
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
@@ -160,11 +170,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_margin_start(12)
         self.messages_box.set_margin_end(12)
         self.messages_box.set_can_focus(False)
+        style_manager.apply_to_widget(self.messages_box, "messages-container")
         scroll.set_child(self.messages_box)
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         input_box.add_css_class('toolbar')
         input_box.add_css_class('card')
+        style_manager.apply_to_widget(input_box, "input-container")
         input_box.set_margin_top(6)
         input_box.set_margin_bottom(6)
         input_box.set_margin_start(6)
@@ -176,6 +188,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_text.set_pixels_below_lines(3)
         self.input_text.set_pixels_inside_wrap(3)
         self.input_text.set_hexpand(True)
+        style_manager.apply_to_widget(self.input_text, "input-text")
         buffer = self.input_text.get_buffer()
         buffer.connect('changed', self._on_text_changed)
         key_controller_input = Gtk.EventControllerKey()
@@ -185,6 +198,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
+        style_manager.apply_to_widget(self.send_button, "primary-button")
         # Ensamblar la interfaz de chat
         input_box.append(self.input_text)
         input_box.append(self.send_button)
@@ -276,110 +290,110 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.input_text.grab_focus()
 
     def _setup_css(self):
+        """Aplica estilos CSS específicos para la ventana de chat."""
+        # Los estilos base ya están cargados por style_manager
+        # Solo necesitamos estilos específicos del chat
+        
         css_provider = Gtk.CssProvider()
-        # Añadir estilo para el sidebar si es necesario
-        data = """
-            /* ... (estilos existentes) ... */
-
-            .message {
-                padding: 8px;
-            }
-
+        
+        # Estilos específicos para mensajes de chat
+        chat_specific_css = """
+            /* Estilos específicos para mensajes de chat */
             .message-content {
-                padding: 6px;
-                min-width: 400px;
+                padding: 12px 16px;
+                min-width: 300px;
+                word-wrap: break-word;
             }
 
             .user-message .message-content {
-                background-color: @blue_3;
-                border-radius: 12px 12px 0 12px;
+                background: linear-gradient(135deg, @theme_selected_bg_color, 
+                                          shade(@theme_selected_bg_color, 0.9));
+                color: @theme_selected_fg_color;
+                border-radius: 18px 18px 4px 18px;
+                margin-left: 60px;
             }
 
             .assistant-message .message-content {
-                background-color: @card_bg_color;
-                border-radius: 12px 12px 12px 0;
+                background-color: @theme_base_color;
+                color: @theme_text_color;
+                border: 1px solid alpha(@theme_fg_color, 0.1);
+                border-radius: 18px 18px 18px 4px;
+                margin-right: 60px;
+            }
+
+            .message textview {
+                background: transparent;
+                color: inherit;
+                padding: 0;
+                border: none;
+            }
+
+            .message textview text {
+                background: transparent;
+                color: inherit;
+            }
+
+            .user-message textview text selection {
+                background-color: alpha(@theme_selected_fg_color, 0.3);
+                color: @theme_selected_fg_color;
+            }
+
+            .assistant-message textview text selection {
+                background-color: alpha(@theme_selected_bg_color, 0.3);
+                color: @theme_text_color;
             }
 
             .timestamp {
-                font-size: 0.8em;
+                font-size: 0.85em;
                 opacity: 0.7;
+                margin-top: 4px;
             }
 
             .error-message {
                 background-color: alpha(@error_color, 0.1);
-                border-radius: 6px;
-                padding: 8px;
+                border: 1px solid @error_color;
+                border-radius: 8px;
+                padding: 12px;
+                margin: 8px;
             }
 
             .error-icon {
                 color: @error_color;
+                margin-right: 8px;
             }
-
-            .error-content {
-                padding: 3px;
-            }
-
-            textview {
-                background: none;
-                color: inherit;
-                padding: 3px;
-            }
-
-            textview text {
-                background: none;
-            }
-
-            .user-message textview text {
-                color: white;
-            }
-
-            .user-message textview text selection {
-                background-color: rgba(255,255,255,0.3);
-                color: white;
-            }
-
-            /* Estilos opcionales para el sidebar */
-            /* .sidebar-title { ... } */
         """
-        # Some platform-specific CSS:
-        if sys.platform.startswith('win'):
-            data += """
+        
+        # Agregar estilos específicos por plataforma si es necesario
+        platform_specific = style_manager.get_platform()
+        
+        if platform_specific == 'windows':
+            chat_specific_css += """
+                /* Ajustes específicos para Windows */
                 window {
                     box-shadow: none;
-                    margin: -12px;
-                    border-radius: 0px;
-                    padding: 6px;
                 }
             """
-        elif sys.platform.startswith('darwin'):
+        elif platform_specific == 'macos':
+            # Configurar controles de ventana nativos para macOS
             self.header.set_decoration_layout('close,minimize,maximize:')
-            def find_window_controls(parent):
-                if not parent:
-                    return None
-                child = parent.get_first_child()
-                while child:
-                    if isinstance(child, Gtk.WindowControls):
-                        return child
-                    found_in_child = find_window_controls(child)
-                    if found_in_child:
-                        return found_in_child
-                    hijo = hijo.get_next_sibling()
-                return None
-            controls = find_window_controls(self.header)
-            controls.set_use_native_controls(True)
-            data += """
+            chat_specific_css += """
+                /* Ajustes específicos para macOS */
                 window {
-                    border-radius: 10px;
+                    border-radius: 8px;
                 }
             """
         
-        css_provider.load_from_data(data, -1) # Usar -1
-
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
+        try:
+            css_provider.load_from_data(chat_specific_css.encode('utf-8'))
+            
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1  # Mayor prioridad que los estilos base
+            )
+            print("✓ Chat-specific CSS loaded successfully")
+        except Exception as e:
+            print(f"✗ Error loading chat CSS: {e}")
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""

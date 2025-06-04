@@ -94,6 +94,8 @@ a = Analysis(
         'gtk_llm_chat.chat_window',
         'gtk_llm_chat.widgets',
         'gtk_llm_chat.markdownview',
+        'gtk_llm_chat.resource_manager',
+        'gtk_llm_chat.style_manager',
         'gtk_llm_chat.llm_client',
         'gtk_llm_chat.tray_applet',
         'gtk_llm_chat._version',
