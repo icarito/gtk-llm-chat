@@ -29,6 +29,8 @@ def ensure_single_instance(lockfile=None):
         debug_print(f"{e}")
         sys.exit(1)
 
+
+
 def is_linux():
     return PLATFORM.startswith('linux')
 
@@ -40,7 +42,6 @@ def is_mac():
 
 def is_frozen():
     return getattr(sys, 'frozen', False)
-
 
 def launch_tray_applet(config):
     """
@@ -369,3 +370,174 @@ def _check_autostart_macos():
     launch_agents_dir = os.path.expanduser("~/Library/LaunchAgents")
     plist_file = os.path.join(launch_agents_dir, "org.fuentelibre.gtk-llm-chat-applet.plist")
     return os.path.exists(plist_file)
+
+
+def debug_frozen_environment():
+    """
+    Función de diagnóstico para aplicaciones congeladas (PyInstaller).
+    Diagnostica problemas con plugins LLM y carga de modelos.
+    """
+    debug_print("=== DIAGNÓSTICO DE ENTORNO CONGELADO ===")
+    
+    # Información básica del sistema
+    debug_print(f"sys.frozen: {getattr(sys, 'frozen', False)}")
+    debug_print(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'No disponible')}")
+    debug_print(f"sys.executable: {sys.executable}")
+    debug_print(f"sys.path primeros 5 elementos: {sys.path[:5]}")
+    
+    # Diagnóstico detallado de importación de plugins LLM
+    debug_print("=== LLM PLUGINS IMPORT TEST ===")
+    core_and_plugins = [
+        'llm',
+        'llm_groq', 'llm_gemini', 'llm_openrouter', 
+        'llm_perplexity', 'llm_anthropic', 'llm_deepseek', 'llm_grok'
+    ]
+    for pkg in core_and_plugins:
+        try:
+            mod = __import__(pkg)
+            debug_print(f"  ✓ {pkg} importado correctamente: {getattr(mod, '__file__', 'builtin')}")
+        except Exception as e:
+            debug_print(f"  ✗ {pkg} ERROR: {e}")
+            # Diagnóstico más profundo del error
+            if "add_docstring" in str(e):
+                debug_print(f"    >> Error de add_docstring detectado en {pkg}")
+                debug_print(f"    >> Tipo de error: {type(e)}")
+                debug_print(f"    >> Args del error: {e.args}")
+                
+                # Verificar si existe el módulo en _MEIPASS
+                if hasattr(sys, '_MEIPASS'):
+                    import glob
+                    pkg_files = glob.glob(os.path.join(sys._MEIPASS, f"{pkg}*"))
+                    debug_print(f"    >> Archivos {pkg}* en _MEIPASS: {pkg_files}")
+                    
+                    # Verificar archivos .so o .pyd (extensiones compiladas)
+                    so_files = glob.glob(os.path.join(sys._MEIPASS, "**", "*.so"), recursive=True)
+                    pyd_files = glob.glob(os.path.join(sys._MEIPASS, "**", "*.pyd"), recursive=True)
+                    debug_print(f"    >> Total archivos .so: {len(so_files)}")
+                    debug_print(f"    >> Total archivos .pyd: {len(pyd_files)}")
+                    
+                    # Buscar archivos relacionados con el paquete
+                    related_so = [f for f in so_files if pkg.replace('_', '') in f.lower() or 'llm' in f.lower()]
+                    related_pyd = [f for f in pyd_files if pkg.replace('_', '') in f.lower() or 'llm' in f.lower()]
+                    debug_print(f"    >> Archivos .so relacionados con {pkg}: {related_so}")
+                    debug_print(f"    >> Archivos .pyd relacionados con {pkg}: {related_pyd}")
+            
+            import traceback
+            debug_print(f"    >> Traceback completo:")
+            traceback.print_exc()
+    
+    # Diagnóstico adicional del entorno Python
+    debug_print("=== DIAGNÓSTICO ADICIONAL DEL ENTORNO ===")
+    debug_print(f"Versión de Python: {sys.version}")
+    debug_print(f"Plataforma: {sys.platform}")
+    debug_print(f"Arquitectura: {os.uname().machine if hasattr(os, 'uname') else 'unknown'}")
+    
+    # Verificar si hay conflictos de extensiones C
+    try:
+        import sqlite3
+        debug_print(f"✓ sqlite3 importado correctamente: {sqlite3.version}")
+    except Exception as e:
+        debug_print(f"✗ Error importando sqlite3: {e}")
+    
+    try:
+        import json
+        debug_print(f"✓ json importado correctamente")
+    except Exception as e:
+        debug_print(f"✗ Error importando json: {e}")
+    
+    # Verificar bibliotecas compiladas comunes
+    test_imports = ['hashlib', 'ssl', '_socket', 'zlib', 'bz2']
+    debug_print("Verificando módulos con extensiones C:")
+    for mod in test_imports:
+        try:
+            __import__(mod)
+            debug_print(f"  ✓ {mod}")
+        except Exception as e:
+            debug_print(f"  ✗ {mod}: {e}")
+    
+    # Verificar disponibilidad de LLM si se pudo importar
+    try:
+        import llm
+        debug_print(f"✓ LLM importado correctamente")
+        debug_print(f"LLM version: {getattr(llm, '__version__', 'desconocida')}")
+        
+        # Obtener modelos disponibles
+        try:
+            models = list(llm.get_models())
+            debug_print(f"Total de modelos encontrados: {len(models)}")
+            
+            # Agrupar por proveedor
+            providers = {}
+            for model in models:
+                provider = getattr(model, 'model_id', 'unknown').split('/')[0]
+                if provider not in providers:
+                    providers[provider] = 0
+                providers[provider] += 1
+            
+            debug_print("Modelos por proveedor:")
+            for provider, count in providers.items():
+                debug_print(f"  {provider}: {count} modelos")
+                
+        except Exception as e:
+            debug_print(f"✗ Error obteniendo modelos: {e}")
+            
+        # Verificar modelo por defecto
+        try:
+            default_model = llm.get_default_model()
+            debug_print(f"Modelo por defecto del sistema: {default_model}")
+        except Exception as e:
+            debug_print(f"✗ Error obteniendo modelo por defecto: {e}")
+            
+    except ImportError as e:
+        debug_print(f"✗ Error importando LLM: {e}")
+    
+    debug_print("=== FIN DIAGNÓSTICO ENTORNO CONGELADO ===\n")
+
+
+def debug_database_monitoring():
+    """
+    Función de diagnóstico para problemas de monitoreo de base de datos.
+    Útil para el applet de bandeja que necesita monitorear logs.db.
+    """
+    debug_print("=== DIAGNÓSTICO DE MONITOREO DE BASE DE DATOS ===")
+    
+    try:
+        import llm
+        user_dir = llm.user_dir()
+        debug_print(f"Directorio de usuario LLM: {user_dir}")
+        
+        logs_db_path = os.path.join(user_dir, "logs.db")
+        debug_print(f"Ruta logs.db: {logs_db_path}")
+        
+        if os.path.exists(logs_db_path):
+            debug_print("✓ logs.db existe")
+            stat = os.stat(logs_db_path)
+            debug_print(f"  Tamaño: {stat.st_size} bytes")
+            debug_print(f"  Última modificación: {stat.st_mtime}")
+        else:
+            debug_print("✗ logs.db no existe")
+            
+        # Verificar directorio padre
+        if os.path.exists(user_dir):
+            debug_print(f"✓ Directorio de usuario existe")
+            try:
+                contents = os.listdir(user_dir)
+                debug_print(f"  Contenido del directorio ({len(contents)} elementos):")
+                for item in contents[:10]:  # Mostrar solo primeros 10
+                    debug_print(f"    {item}")
+                if len(contents) > 10:
+                    debug_print(f"    ... y {len(contents) - 10} más")
+            except Exception as e:
+                debug_print(f"  ✗ Error listando directorio: {e}")
+        else:
+            debug_print("✗ Directorio de usuario no existe")
+            
+    except Exception as e:
+        debug_print(f"✗ Error en diagnóstico de base de datos: {e}")
+    
+    debug_print("=== FIN DIAGNÓSTICO BASE DE DATOS ===\n")
+
+
+# Llamada automática a diagnóstico si está en modo DEBUG y congelado
+if DEBUG and is_frozen():
+    debug_frozen_environment()

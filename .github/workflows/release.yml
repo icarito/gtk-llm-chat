@@ -220,6 +220,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        steps:
+      - name: Workaround for externally-managed-environment error
+        run: |
+          python3 -m pip config --user set global.break-system-packages true
+          python3 -m pip install --user PyGObject
       - name: Install dependencies
         run: |
           # Workaround for externally-managed-environment error

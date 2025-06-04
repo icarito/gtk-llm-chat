@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 from platform import system
 from PyInstaller.building.datastruct import TOC
 import glob
+import os
 
 libdir = '/usr/lib/x86_64-linux-gnu'
 patterns = [
@@ -62,20 +63,22 @@ a = Analysis(
             }
         }
     },
-    runtime_hooks=[],
+    runtime_hooks=['hooks/rthook_numpy_python313.py'],
     excludes=[],
     noarchive=False,
     optimize=2,
     datas=[
         ('po', 'po'),
         ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
-        ('windows/*.png', 'windows')
+        ('windows/*.png', 'windows'),
+        ('numpy_python313_patch.py', '.')
     ] + typelibs,
     hiddenimports=[
         'gettext',
         'llm',
         'llm.default_plugins',
         'llm.default_plugins.openai_models',
+        'llm.default_plugins.default_tools',
         'llm_groq',
         'llm_gemini',
         'llm_openrouter',
