@@ -262,17 +262,23 @@ class ChatSidebar(Gtk.Box):
             # Guardar el modelo como defecto en la configuración
             self.config['default_model'] = model_id
             debug_print(f"ChatSidebar: Modelo '{model_id}' establecido como defecto")
-            
-            # Actualizar la visibilidad del botón
-            self._update_default_model_button_visibility()
-            
+
+            # Forzar recarga del modelo por defecto desde llm y refrescar el estado visual
+            try:
+                import llm
+                llm.set_default_model(model_id)
+            except Exception as e:
+                debug_print(f"ChatSidebar: Error al establecer modelo por defecto en llm: {e}")
+            # Llamar update_model_button para refrescar TODO el panel
+            self.update_model_button()
+
             # Mostrar toast de confirmación si es posible
             window = self.get_root()
             if window and hasattr(window, 'add_toast'):
                 toast = Adw.Toast(title=f"{_('Model')} '{model_id}' {_('set as default')}")
                 toast.set_timeout(3)
                 window.add_toast(toast)
-                
+
         dialog.destroy()
 
     def _on_temperature_changed(self, adjustment):
@@ -391,37 +397,40 @@ class ChatSidebar(Gtk.Box):
             self.system_prompt_row.set_subtitle(_("Not set"))
 
     def _update_default_model_button_visibility(self):
-        """Actualiza la visibilidad del botón 'Set as Default Model' según si el modelo actual es diferente al por defecto."""
+        """Actualiza el estilo y estado del botón de estrella según si el modelo actual es el modelo por defecto."""
         debug_print(f"ChatSidebar: _update_default_model_button_visibility called")
-        
         if not self.llm_client or not hasattr(self, 'default_model_button'):
             debug_print("ChatSidebar: Cannot update button visibility - missing llm_client or button")
             return
-            
+
         current_model_id = self.llm_client.get_model_id()
-        # Obtener el modelo por defecto del sistema usando el módulo llm directamente
         try:
             import llm
             default_model_id = llm.get_default_model()
         except Exception as e:
             debug_print(f"ChatSidebar: Error obteniendo modelo por defecto del sistema: {e}")
             default_model_id = None
-        
-        debug_print(f"ChatSidebar: Checking button visibility - current: '{current_model_id}', default: '{default_model_id}'")
-        
-        # Mostrar el botón solo si hay un modelo actual y es diferente al modelo por defecto del sistema
-        # Si no hay modelo por defecto configurado, no mostrar el botón
-        show_button = (current_model_id is not None and 
-                      default_model_id is not None and
-                      current_model_id != default_model_id)
-        
-        debug_print(f"ChatSidebar: Button visibility calculation: show_button={show_button}")
-        debug_print(f"ChatSidebar: - current_model_id is not None: {current_model_id is not None}")
-        debug_print(f"ChatSidebar: - default_model_id is not None: {default_model_id is not None}")
-        debug_print(f"ChatSidebar: - models are different: {current_model_id != default_model_id}")
-        
-        self.default_model_button.set_visible(show_button)
-        debug_print(f"ChatSidebar: Default model button visibility set to: {show_button}")
+
+        is_default = (current_model_id is not None and default_model_id is not None and current_model_id == default_model_id)
+
+        # El botón de estrella siempre debe ser visible
+        self.default_model_button.set_visible(True)
+
+        # Limpiar clases previas
+        self.default_model_button.remove_css_class("warning")
+        self.default_model_button.remove_css_class("suggested-action")
+
+        if is_default:
+            # Estilo de advertencia y deshabilitado
+            self.default_model_button.add_css_class("warning")
+            self.default_model_button.set_sensitive(False)
+            self.default_model_button.set_tooltip_text(_("Este es el modelo por defecto actual"))
+        else:
+            # Estilo normal y habilitado
+            self.default_model_button.set_sensitive(True)
+            self.default_model_button.set_tooltip_text(_("Establecer como modelo por defecto"))
+            self.default_model_button.add_css_class("suggested-action")
+        debug_print(f"ChatSidebar: Default model button updated. is_default={is_default}")
 
     def update_model_button(self):
         """Actualiza la información del modelo seleccionado en la interfaz."""
