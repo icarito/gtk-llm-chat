@@ -386,7 +386,7 @@ class LLMChatApplication(Adw.Application):
         window.title_entry.grab_focus()
 
     def on_delete_activate(self, action, param):
-        """Deletes the current conversation"""
+        """Elimina la conversación actual solo si tiene historial, si no cierra la ventana directamente."""
         window = self.get_active_window()
 
         # Verificar que tenemos una ventana y acceder a su configuración
@@ -394,27 +394,41 @@ class LLMChatApplication(Adw.Application):
             debug_print("No se puede eliminar: ventana inválida o sin configuración")
             return
 
-        dialog = Gtk.MessageDialog(
+        cid = window.config.get('cid')
+        chat_history = getattr(window, 'chat_history', None)
+        has_history = False
+        if cid and chat_history:
+            try:
+                history_entries = chat_history.get_conversation_history(cid)
+                has_history = bool(history_entries)
+            except Exception as e:
+                debug_print(f"Error consultando historial para CID {cid}: {e}")
+
+        if not has_history:
+            debug_print("No hay historial, cerrando ventana directamente (Ctrl+W)")
+            window.close()
+            return
+
+        # Usar Adw.MessageDialog en vez de Gtk.MessageDialog
+        dialog = Adw.MessageDialog(
             transient_for=window,
             modal=True,
-            message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text=_("Are you sure you want to delete the conversation?")
+            heading=_("Delete Conversation"),
+            body=_("Are you sure you want to delete the conversation?")
         )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("delete", _("Delete"))
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
 
         def on_delete_response(dialog, response):
-            if response == Gtk.ResponseType.YES and hasattr(window, 'chat_history'):
+            if response == "delete" and hasattr(window, 'chat_history'):
                 cid = window.config.get('cid')
                 debug_print(f"Eliminando conversación con CID: {cid}")
                 if cid:
                     window.chat_history.delete_conversation(cid)
-
-                    # Verificar si hay más ventanas abiertas
-                    other_windows = [w for w in self.get_windows() if w != window]
-
                     # Cerrar solo la ventana actual en lugar de toda la aplicación
                     window.close()
-
             dialog.destroy()
 
         dialog.connect("response", on_delete_response)
