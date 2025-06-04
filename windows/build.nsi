@@ -184,13 +184,6 @@ Section "!${APPNAME}" sec_app
     WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
         "EstimatedSize" "${INSTALLSIZE}"
 
-    ; Option to add applet to Windows startup
-    MessageBox MB_YESNO "Do you want ${APPNAME} applet to start with Windows?" IDYES add_startup
-    goto skip_startup
-    add_startup:
-        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "gtk-llm-chat --applet" "$INSTDIR\gtk-llm-chat.exe --applet"
-    skip_startup:
-
     ; Check if we need to reboot
     IfRebootFlag 0 noreboot
         MessageBox MB_YESNO "A reboot is required to finish the installation. Do you wish to reboot now?" \
