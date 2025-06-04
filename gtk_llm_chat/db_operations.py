@@ -46,8 +46,6 @@ class ChatHistory:
             logging.info(f"LLM migrations applied successfully to {self.db_path}")
         except Exception as e:
             logging.error(f"Error running LLM migrations on {self.db_path}: {e}", exc_info=True)
-            # Considerar si se debe relanzar el error o manejarlo de otra forma
-            # raise RuntimeError(f"Failed to apply LLM migrations: {e}") from e
         finally:
             # Asegurarse de cerrar la conexión usada por sqlite_utils
             if db_utils and hasattr(db_utils, 'conn') and db_utils.conn:
@@ -55,6 +53,8 @@ class ChatHistory:
                     db_utils.conn.close()
                 except Exception as close_err:
                     logging.error(f"Error closing sqlite_utils connection after migration: {close_err}", exc_info=True)
+        # Forzar flush a disco cerrando la conexión principal
+        self.close_connection()
 
     def get_connection(self):
         """Gets a sqlite3 connection for the current thread."""
@@ -147,6 +147,7 @@ class ChatHistory:
             conn.commit()
         finally:
             cursor.close()
+            self.close_connection()
 
     def delete_conversation(self, conversation_id: str):
         conn = self.get_connection()
@@ -214,6 +215,8 @@ class ChatHistory:
         except sqlite3.Error as e:
             print(_(f"Error adding entry to history: {e}"))
             conn.rollback()
+        finally:
+            self.close_connection()
 
     def create_conversation_if_not_exists(self, conversation_id, name: str, model: Optional[str] = None):
         # Asegurarse que la BD existe antes de escribir
@@ -229,6 +232,8 @@ class ChatHistory:
         except sqlite3.Error as e:
             print(_(f"Error creating conversation record: {e}"))
             conn.rollback()
+        finally:
+            self.close_connection()
 
     def _add_fragments(self, response_id: str, fragments: List[str], table_name: str):
         conn = self.get_connection()
@@ -250,15 +255,16 @@ class ChatHistory:
             except sqlite3.Error as e:
                  print(f"Database error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
+        self.close_connection()
 
-    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> int: # &lt;-- Devuelve int
+    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> int:
         conn = self.get_connection()
         cursor = conn.cursor()
         content_hash = hashlib.sha256(fragment_content.encode('utf-8')).hexdigest()
         cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
         row = cursor.fetchone()
         if row:
-            return row['id'] # Devuelve el ID entero existente
+            fragment_id = row['id'] # Devuelve el ID entero existente
         else:
             # Usar datetime para el timestamp UTC como lo hace llm
             timestamp_utc = datetime.now(timezone.utc).isoformat()
@@ -270,15 +276,16 @@ class ChatHistory:
             # Obtener el ID recién insertado
             fragment_id = cursor.lastrowid
             if fragment_id is None:
-                 # Fallback por si lastrowid no funciona (raro en SQLite con PK entero)
-                 cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
-                 row = cursor.fetchone()
-                 if row:
-                     fragment_id = row['id']
-                 else:
-                     # Esto no debería pasar si la inserción fue exitosa
-                     raise sqlite3.Error("Could not retrieve fragment ID after insertion.")
-            return fragment_id # Devuelve el nuevo ID entero
+                # Fallback por si lastrowid no funciona (raro en SQLite con PK entero)
+                cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
+                row = cursor.fetchone()
+                if row:
+                    fragment_id = row['id']
+                else:
+                    # Esto no debería pasar si la inserción fue exitosa
+                    raise sqlite3.Error("Could not retrieve fragment ID after insertion.")
+        self.close_connection()
+        return fragment_id # Devuelve el nuevo ID entero
 
     def get_fragments_for_response(self, response_id: str, table_name: str) -> List[str]:
         conn = self.get_connection()
