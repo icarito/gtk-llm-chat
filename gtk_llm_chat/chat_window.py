@@ -18,6 +18,7 @@ from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
 from style_manager import style_manager
 from resource_manager import resource_manager
+import traceback
 
 DEBUG = os.environ.get('DEBUG') or False
 
@@ -118,6 +119,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header.set_title_widget(self.title_widget)
         self.set_title(title)  # Set window title based on initial title
 
+        # Workaround de controles nativos en macOS (con delay de 100ms)
+        if sys.platform == 'darwin':
+            GLib.timeout_add(100, self._macos_native_controls_workaround)
+
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
@@ -136,7 +141,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # --- Fin Botones Header Bar ---
 
-
         # --- Contenedor principal (OverlaySplitView) ---
         self.split_view = Adw.OverlaySplitView()
         self.split_view.set_vexpand(True)
@@ -154,14 +158,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Conectar al cambio de 'show-sidebar' para cambiar el icono y foco
         self.split_view.connect("notify::show-sidebar", self._on_sidebar_visibility_changed)
 
-
         # --- Contenido principal (el chat) ---
         chat_content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         style_manager.apply_to_widget(chat_content_box, "chat-container")
+        
         # ScrolledWindow para el historial de mensajes
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -172,6 +177,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_can_focus(False)
         style_manager.apply_to_widget(self.messages_box, "messages-container")
         scroll.set_child(self.messages_box)
+        
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         input_box.add_css_class('toolbar')
@@ -181,6 +187,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         input_box.set_margin_bottom(6)
         input_box.set_margin_start(6)
         input_box.set_margin_end(6)
+        
         # TextView para entrada
         self.input_text = Gtk.TextView()
         self.input_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -194,17 +201,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         key_controller_input = Gtk.EventControllerKey()
         key_controller_input.connect('key-pressed', self._on_key_pressed)
         self.input_text.add_controller(key_controller_input)
+        
         # Botón enviar
         self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
         style_manager.apply_to_widget(self.send_button, "primary-button")
+        
         # Ensamblar la interfaz de chat
         input_box.append(self.input_text)
         input_box.append(self.send_button)
         chat_content_box.append(scroll)
         chat_content_box.append(input_box)
-
 
         # Establecer el contenido principal en el split_view
         self.split_view.set_content(chat_content_box)
@@ -281,6 +289,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window = Gtk.EventControllerFocus.new()
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
+
+    def _macos_native_controls_workaround(self):
+        """Busca y activa Gtk.WindowControls existentes en la headerbar (solo macOS, sin crear nuevos)."""
+        self.header.set_decoration_layout('close,minimize,maximize:')
+        if not hasattr(Gtk, 'WindowControls'):
+            return False  # Return False to not repeat the timeout
+            
+        def find_window_controls(parent):
+            if not parent:
+                return None
+            child = parent.get_first_child()
+            while child:
+                # Gtk.WindowControls solo existe en macOS/libadwaita
+                if hasattr(Gtk, 'WindowControls') and isinstance(child, Gtk.WindowControls):
+                    return child
+                found_in_child = find_window_controls(child)
+                if found_in_child:
+                    return found_in_child
+                child = child.get_next_sibling()
+            return None
+            
+        controls = find_window_controls(self.header)
+        if controls:
+            controls.set_use_native_controls(True)
+        return False  # Return False to not repeat the timeout
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
