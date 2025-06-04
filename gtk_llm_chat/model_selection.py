@@ -170,7 +170,9 @@ class ModelSelectionManager(GObject.Object):
         """Lee y cachea keys.json."""
         if self._keys_cache is None:
             try:
-                keys_path = os.path.join(llm.user_dir(), "keys.json")
+                from platform_utils import ensure_user_dir_exists
+                user_dir = ensure_user_dir_exists()
+                keys_path = os.path.join(user_dir, "keys.json")
                 if os.path.exists(keys_path):
                     with open(keys_path) as f:
                         self._keys_cache = json.load(f)
@@ -356,7 +358,9 @@ class ModelSelectionManager(GObject.Object):
     def set_api_key(self, provider_key, api_key):
         """Establece la API key para un proveedor."""
         try:
-            keys_path = os.path.join(llm.user_dir(), "keys.json")
+            from platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
+            keys_path = os.path.join(user_dir, "keys.json")
             keys_path_obj = pathlib.Path(keys_path)
             keys_path_obj.parent.mkdir(parents=True, exist_ok=True)
 

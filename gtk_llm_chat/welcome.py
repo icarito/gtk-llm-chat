@@ -277,10 +277,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
             if self.model_selector:
                 status = self.model_selector.get_current_model_selection_status()
                 if not status["is_valid_for_next_step"]:
-                    print("DEBUG: Cannot proceed, model/API key selection is not valid.")
+                    debug_print("DEBUG: Cannot proceed, model/API key selection is not valid.")
                     return
             else:
-                print("DEBUG: Model selector not ready yet.")
+                debug_print("DEBUG: Model selector not ready yet.")
                 return
         if current_page_idx < n_pages - 1:
             next_page_widget = self.carousel.get_nth_page(current_page_idx + 1)
@@ -376,7 +376,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
             if self.model_selector:
                 status = self.model_selector.get_current_model_selection_status()
                 current_provider = self.model_selector.get_current_provider_key()
-                print(f"Debug update_navigation_buttons: current_provider={current_provider}")
+                debug_print(f"Debug update_navigation_buttons: current_provider={current_provider}")
 
                 # Mostrar u ocultar botón de API key según status
                 self._update_api_key_button(current_provider)
@@ -415,7 +415,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                         except Exception:
                             provider_has_key = False
         if provider_needs_key:
-            print(f"Debug: Mostrando botón API key para {current_provider}")
+            debug_print(f"Debug: Mostrando botón API key para {current_provider}")
             if not self.api_key_button_packed:
                 if self.api_key_button.get_parent() is not None:
                     self.api_key_button.get_parent().remove(self.api_key_button)
@@ -432,7 +432,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 self.api_key_button.get_style_context().add_class("destructive-action")
             self.api_key_button.set_visible(True)
         else:
-            print(f"Debug: Ocultando botón API key para {current_provider}")
+            debug_print(f"Debug: Ocultando botón API key para {current_provider}")
             self._ensure_api_key_button_removed()
 
     def _ensure_api_key_button_removed(self):
@@ -442,7 +442,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                     self.header_bar.remove(self.api_key_button)
                 self.api_key_button_packed = False
             except Exception as e:
-                print(f"Error removiendo botón API key: {e}")
+                debug_print(f"Error removiendo botón API key: {e}")
                 self.api_key_button_packed = False
         self.api_key_button.set_visible(False)
 
@@ -453,7 +453,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                     self.header_bar.remove(self.loading_spinner)
                 self.loading_spinner_packed = False
             except Exception as e:
-                print(f"Error removiendo spinner: {e}")
+                debug_print(f"Error removiendo spinner: {e}")
                 self.loading_spinner_packed = False
         self.loading_spinner.set_visible(False)
 
@@ -506,9 +506,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 except Exception as db_err:
                     debug_print(f"Error forzando creación de BD: {db_err}")
                 
-                print(f"Modelo por defecto configurado: {model_id}")
+                debug_print(f"Modelo por defecto configurado: {model_id}")
             except Exception as e:
-                print(f"Error configurando modelo por defecto: {e}")
+                debug_print(f"Error configurando modelo por defecto: {e}")
             
             from platform_utils import spawn_tray_applet
             spawn_tray_applet({})
@@ -521,7 +521,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.config_data['tray_startup'] = 'application'
         else:
             self.config_data['tray_startup'] = 'never'
-        print(f"Configuration saved: {self.config_data}")
+        debug_print(f"Configuration saved: {self.config_data}")
 
     def get_configuration(self):
         return self.config_data.copy()
@@ -531,12 +531,12 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.model_selector.trigger_api_key_dialog_for_current_provider()
 
     def _on_api_key_status_changed(self, selector, provider_key, needs_key, has_key):
-        print(f"Debug: API key status changed - provider: {provider_key}, needs: {needs_key}, has: {has_key}")
+        debug_print(f"Debug: API key status changed - provider: {provider_key}, needs: {needs_key}, has: {has_key}")
 
         # Si se configuró una API key (needs_key=True y has_key=True), recargar solo los modelos dinámicos
         # sin cambiar el stack para evitar bucles infinitos
         if needs_key and has_key and self.model_selector:
-            print(f"Debug: API key configurada para {provider_key}, recargando solo modelos dinámicos...")
+            debug_print(f"Debug: API key configurada para {provider_key}, recargando solo modelos dinámicos...")
             try:
                 # Recargar modelos dinámicos directamente sin tocar la UI del stack
                 self.model_selector.manager.reload_dynamic_models_only()
@@ -545,10 +545,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 if provider_key in self.model_selector._provider_pages_cache:
                     page_ui = self.model_selector._provider_pages_cache[provider_key]
                     self.model_selector._populate_model_list_for_page(provider_key, page_ui)
-                    print(f"Debug: Lista de modelos actualizada para proveedor {provider_key}")
+                    debug_print(f"Debug: Lista de modelos actualizada para proveedor {provider_key}")
                 
             except Exception as e:
-                print(f"Error recargando modelos dinámicos: {e}")
+                debug_print(f"Error recargando modelos dinámicos: {e}")
 
         # Actualizar botones en cualquier caso
         if int(round(self.carousel.get_position())) == 2:
@@ -584,7 +584,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
             from gtk_llm_chat.model_selection import ModelSelectionManager
             GLib.idle_add(self._create_model_selector_and_replace_placeholder, WideModelSelector, ModelSelectionManager)
         except Exception as e:
-            print(f"Error importing/creating model selector in background: {e}")
+            debug_print(f"Error importing/creating model selector in background: {e}")
             GLib.idle_add(self._on_models_loaded_error, str(e))
 
     def _create_model_selector_and_replace_placeholder(self, WideModelSelector, ModelSelectionManager):
@@ -600,7 +600,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 name="ModelDataLoader"
             ).start()
         except Exception as e:
-            print(f"Error creating model selector: {e}")
+            debug_print(f"Error creating model selector: {e}")
             GLib.idle_add(self._on_models_loaded_error, str(e))
         return False
 
@@ -613,16 +613,16 @@ class WelcomeWindow(Adw.ApplicationWindow):
             try:
                 import llm
                 modelid = llm.get_default_model()
-                print(f"Debug: Modelo por defecto obtenido: {modelid}")
+                debug_print(f"Debug: Modelo por defecto obtenido: {modelid}")
             except Exception as e:
-                print(f"Error obteniendo modelo por defecto: {e}")
+                debug_print(f"Error obteniendo modelo por defecto: {e}")
                 modelid = None
             
             GLib.idle_add(self._on_models_loaded_completed, modelid)
         except Exception as e:
-            print(f"Error loading model data in background: {e}")
+            debug_print(f"Error loading model data in background: {e}")
             import traceback
-            traceback.print_exc()
+            debug_print(traceback.format_exc())
             GLib.idle_add(self._on_models_loaded_error, str(e))
 
     def _on_models_loaded_completed(self, modelid=None):
@@ -724,7 +724,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 else:
                     print("Error deshabilitando autostart")
         except Exception as e:
-            print(f"Error configurando autostart: {e}")
+            debug_print(f"Error configurando autostart: {e}")
 
     def _initialize_tray_options(self):
         try:

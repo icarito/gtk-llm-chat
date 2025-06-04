@@ -267,8 +267,9 @@ class LLMChatApplication(Adw.Application):
             bool: True si se necesita mostrar el asistente, False si ya hay configuración
         """
         try:
-            # Obtener la ruta de la base de datos usando llm.user_dir()
-            user_dir = llm.user_dir()
+            # Obtener la ruta de la base de datos usando ensure_user_dir_exists()
+            from platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
             
             debug_print(f"_check_initial_setup_needed: user_dir = {user_dir}")

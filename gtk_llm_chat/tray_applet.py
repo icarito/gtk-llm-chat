@@ -217,8 +217,8 @@ def main():
     """Función principal del applet de bandeja simplificado.
     Solo monitoreará logs.db y mostrará un menú con las conversaciones existentes."""
     # Obtener el path de la base de datos
-    import llm
-    user_dir = llm.user_dir()
+    from platform_utils import ensure_user_dir_exists
+    user_dir = ensure_user_dir_exists()
     db_path = os.path.join(user_dir, "logs.db")
     
     # Inicializar el icon de bandeja

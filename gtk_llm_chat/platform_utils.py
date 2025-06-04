@@ -136,8 +136,8 @@ def fork_or_spawn_applet(config={}):
         return True
         
     # Verificar que logs.db exista antes de lanzar el applet
-    import llm
-    user_dir = llm.user_dir()
+    from platform_utils import ensure_user_dir_exists
+    user_dir = ensure_user_dir_exists()
     db_path = os.path.join(user_dir, 'logs.db')
     
     if not os.path.exists(db_path):
@@ -387,6 +387,20 @@ def _check_autostart_macos():
     plist_file = os.path.join(launch_agents_dir, "org.fuentelibre.gtk-llm-chat-applet.plist")
     return os.path.exists(plist_file)
 
+def ensure_user_dir_exists():
+    """
+    Asegura que el directorio de usuario de llm existe (llm.user_dir()),
+    creando el directorio si es necesario de forma segura y multiplataforma.
+    """
+    try:
+        import llm
+        user_dir = llm.user_dir()
+        import os
+        os.makedirs(user_dir, exist_ok=True)
+        return user_dir
+    except Exception as e:
+        debug_print(f"Error asegurando directorio de usuario: {e}")
+        return None
 
 def debug_frozen_environment():
     """
@@ -518,8 +532,8 @@ def debug_database_monitoring():
     debug_print("=== DIAGNÓSTICO DE MONITOREO DE BASE DE DATOS ===")
     
     try:
-        import llm
-        user_dir = llm.user_dir()
+        from platform_utils import ensure_user_dir_exists
+        user_dir = ensure_user_dir_exists()
         debug_print(f"Directorio de usuario LLM: {user_dir}")
         
         logs_db_path = os.path.join(user_dir, "logs.db")

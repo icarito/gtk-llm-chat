@@ -23,10 +23,9 @@ def debug_print(*args, **kwargs):
 class ChatHistory:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            # Use llm.user_dir() to get the directory
-            user_dir = llm.user_dir()
-            # Ensure the directory exists, pero NO el archivo
-            os.makedirs(user_dir, exist_ok=True)
+            # Usar ensure_user_dir_exists para asegurar el directorio
+            from platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
         self.db_path = db_path
         self._thread_local = threading.local()
