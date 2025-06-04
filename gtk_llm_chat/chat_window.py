@@ -397,7 +397,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             """
         
         try:
-            css_provider.load_from_data(chat_specific_css.encode('utf-8'))
+            css_provider.load_from_data(chat_specific_css)
             
             Gtk.StyleContext.add_provider_for_display(
                 Gdk.Display.get_default(),
