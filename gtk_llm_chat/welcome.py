@@ -14,7 +14,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def __init__(self, app, on_welcome_finished=None):
         super().__init__(application=app)
         self._on_welcome_finished = on_welcome_finished
-        self.set_default_size(800, 600)
+        self.set_default_size(900, 700)
+        self.set_size_request(700, 500)  # Tamaño mínimo razonable para evitar colapsos
         self.panel_titles = ["", "Tray applet", "Default Model", ""]
         self.config_data = {}
 
@@ -38,27 +39,37 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.connect('realize', self._on_realize)
         
         root_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root_vbox.set_hexpand(True)
+        root_vbox.set_vexpand(True)
+        root_vbox.set_size_request(700, 500)
         self.prev_button = Gtk.Button()
         self.prev_button.set_icon_name("go-previous-symbolic")
         self.prev_button.add_css_class("flat")
+        self.prev_button.set_size_request(100, 40)
         self.prev_button.connect('clicked', self.on_prev_clicked)
         self.header_bar.pack_start(self.prev_button)
-        
+
         self.next_button = Gtk.Button(label="Next")
         self.next_button.add_css_class("suggested-action")
+        self.next_button.set_size_request(100, 40)
         self.next_button.connect('clicked', self.on_next_clicked)
         self.header_bar.pack_end(self.next_button)
+
         self.start_chatting_button = Gtk.Button(label="New Conversation")
         self.start_chatting_button.add_css_class("suggested-action")
         self.start_chatting_button.set_halign(Gtk.Align.CENTER)
+        self.start_chatting_button.set_size_request(160, 40)
         self.start_chatting_button.connect('clicked', self.on_finish_clicked)
+
         self.api_key_button = Gtk.Button()
-        self.api_key_button.set_size_request(120, -1)  # Tamaño mínimo fijo
+        self.api_key_button.set_size_request(120, 40)  # Tamaño mínimo fijo
         self.api_key_button.connect('clicked', self._on_api_key_button_clicked)
         self.api_key_button_packed = False
+
         self.loading_spinner = Adw.Spinner()
-        self.loading_spinner.set_size_request(24, 24)  # Tamaño fijo
+        self.loading_spinner.set_size_request(32, 32)  # Spinner más grande para visibilidad
         self.loading_spinner_packed = False
+
         root_vbox.append(self.header_bar)
         self.set_content(root_vbox)
 
@@ -68,6 +79,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.carousel.set_halign(Gtk.Align.FILL)
         self.carousel.set_orientation(Gtk.Orientation.HORIZONTAL)
         self.carousel.set_interactive(False)
+        self.carousel.set_size_request(700, 450)
 
         def make_clamped(child, fill_vertical=False, halign=Gtk.Align.CENTER):
             clamp = Adw.Clamp()
@@ -84,12 +96,15 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page1 = Adw.StatusPage()
         page1.set_hexpand(True)
         page1.set_halign(Gtk.Align.FILL)
+        page1.set_size_request(700, 450)
         
         # Usar resource_manager para cargar la imagen
         vbox1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         vbox1.set_valign(Gtk.Align.CENTER)
         vbox1.set_halign(Gtk.Align.CENTER)
-        vbox1.set_hexpand(True)
+        vbox1.set_hexpand(False)
+        vbox1.set_vexpand(False)
+        # No forzar size_request aquí, dejar que el clamp lo limite
         
         # Usar resource_manager para cargar el icono de la aplicación con tamaño grande
         app_image = resource_manager.create_image_widget("windows/org.fuentelibre.gtk_llm_Chat.png", 128)
@@ -113,13 +128,22 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.start_button.set_hexpand(True)
         self.start_button.connect('clicked', self.on_start_clicked)
         vbox1.append(self.start_button)
-        page1.set_child(make_clamped(vbox1))
+        # Usar un Gtk.Box vertical expandible para centrar vbox1 verticalmente
+        centering_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        centering_box.set_hexpand(True)
+        centering_box.set_vexpand(True)
+        centering_box.append(Gtk.Box(vexpand=True))  # Espaciador arriba
+        centering_box.append(vbox1)
+        centering_box.append(Gtk.Box(vexpand=True))  # Espaciador abajo
+        page1.set_child(make_clamped(centering_box))
 
         # Panel 2: Applet de bandeja
         page2_vbox_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page2_vbox_content.set_valign(Gtk.Align.CENTER)
         page2_vbox_content.set_halign(Gtk.Align.CENTER)
-        page2_vbox_content.set_hexpand(True)
+        page2_vbox_content.set_hexpand(False)
+        page2_vbox_content.set_vexpand(False)
+        # No forzar size_request aquí, dejar que el clamp lo limite
         
         self.panel2_app_icon_target_size = 64
         # Usar resource_manager para crear el icono
@@ -165,6 +189,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page3_container.set_halign(Gtk.Align.FILL)
         page3_container.set_vexpand(True)
         page3_container.set_valign(Gtk.Align.FILL)
+        page3_container.set_size_request(700, 450)
         panel3_inner_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         panel3_inner_vbox.set_valign(Gtk.Align.FILL)
         panel3_inner_vbox.set_halign(Gtk.Align.FILL)
@@ -191,6 +216,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4.set_hexpand(True)
         page4.set_halign(Gtk.Align.FILL)
         page4.set_title("Ready to start!")
+        page4.set_size_request(700, 450)
         page4_vbox_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page4_vbox_content.set_valign(Gtk.Align.CENTER)
         page4_vbox_content.set_halign(Gtk.Align.CENTER)
@@ -203,8 +229,16 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4_vbox_content.append(checkmark_icon)
         page4.set_child(make_clamped(page4_vbox_content))
 
+        # Centrado vertical para el panel 2
+        centering_box2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        centering_box2.set_hexpand(True)
+        centering_box2.set_vexpand(True)
+        centering_box2.append(Gtk.Box(vexpand=True))  # Espaciador arriba
+        centering_box2.append(page2_vbox_content)
+        centering_box2.append(Gtk.Box(vexpand=True))  # Espaciador abajo
+
         self.carousel.append(page1)
-        self.carousel.append(make_clamped(page2_vbox_content, fill_vertical=False))
+        self.carousel.append(make_clamped(centering_box2, fill_vertical=False))
         self.carousel.append(make_clamped(page3_container, fill_vertical=True))
         self.carousel.append(page4)
         self.indicator_dots = Adw.CarouselIndicatorDots(carousel=self.carousel)
