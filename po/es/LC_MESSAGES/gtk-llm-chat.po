@@ -1,14 +1,14 @@
-# Spanish translations for PACKAGE package.
+# Spanish translations for gtk-llm-chat package.
 # Copyright (C) 2025 THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
+# This file is distributed under the same license as the gtk-llm-chat package.
 # Sebastian Silva <sebastian@fuentelibre.org>, 2025.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: PACKAGE VERSION\n"
+"Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2025-05-08 00:10-0500\n"
-"PO-Revision-Date: 2025-03-29 19:14-0500\n"
+"POT-Creation-Date: 2025-06-04 18:35-0500\n"
+"PO-Revision-Date: 2025-06-04 18:45-0500\n"
 "Last-Translator: Sebastian Silva <sebastian@fuentelibre.org>\n"
 "Language-Team: Spanish <es@tp.org.es>\n"
 "Language: es\n"
@@ -17,157 +17,227 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: gtk_llm_chat/chat_window.py:90
+#: gtk_llm_chat/chat_window.py:135
 msgid "Model Settings"
 msgstr "Configuración del modelo"
 
-#: gtk_llm_chat/chat_window.py:96
+#: gtk_llm_chat/chat_window.py:141
 msgid "Rename"
 msgstr "Renombrar"
 
-#: gtk_llm_chat/chat_window.py:159
+#: gtk_llm_chat/chat_window.py:211
 msgid "Send"
 msgstr "Enviar"
 
-#: gtk_llm_chat/chat_sidebar.py:51 gtk_llm_chat/chat_sidebar.py:91
-msgid "Actions"
-msgstr "Acciones"
+#: gtk_llm_chat/chat_sidebar.py:65 gtk_llm_chat/chat_sidebar.py:278
+#: gtk_llm_chat/wide_model_selector.py:454
+msgid "Model"
+msgstr "Modelo"
 
-#: gtk_llm_chat/chat_sidebar.py:58
-msgid "Settings"
-msgstr "Configuración"
-
-#
-#: gtk_llm_chat/chat_sidebar.py:63
-msgid "Delete Conversation"
-msgstr "Eliminar conversación"
-
-#: gtk_llm_chat/chat_sidebar.py:72
+#: gtk_llm_chat/chat_sidebar.py:69
 msgid "Change Model"
 msgstr "Cambiar modelo"
 
-#: gtk_llm_chat/chat_sidebar.py:85
-msgid "About"
-msgstr "Acerca de"
+#: gtk_llm_chat/chat_sidebar.py:70 gtk_llm_chat/chat_sidebar.py:312
+#: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/wide_model_selector.py:516
+msgid "Provider"
+msgstr "Proveedor"
 
-#: gtk_llm_chat/chat_sidebar.py:94 gtk_llm_chat/chat_sidebar.py:165
+#: gtk_llm_chat/chat_sidebar.py:79
+msgid "Set as Default Model"
+msgstr "Establecer como modelo por defecto"
+
+#: gtk_llm_chat/chat_sidebar.py:88 gtk_llm_chat/chat_sidebar.py:138
 msgid "Model Parameters"
 msgstr "Parámetros del modelo"
 
+#: gtk_llm_chat/chat_sidebar.py:97
+msgid "Conversation"
+msgstr "Conversación"
+
+#: gtk_llm_chat/chat_sidebar.py:100 gtk_llm_chat/chat_application.py:417
+msgid "Delete Conversation"
+msgstr "Eliminar conversación"
+
 #: gtk_llm_chat/chat_sidebar.py:110
-msgid "Select Provider"
-msgstr "Seleccionar proveedor"
+msgid "Information"
+msgstr "Información"
+
+#: gtk_llm_chat/chat_sidebar.py:112
+msgid "About"
+msgstr "Acerca de"
 
 #: gtk_llm_chat/chat_sidebar.py:121
-msgid "Providers"
-msgstr "Proveedores"
+msgid "Actions"
+msgstr "Acciones"
 
-#: gtk_llm_chat/chat_sidebar.py:133
-msgid "Select Model"
-msgstr "Seleccionar modelo"
+#: gtk_llm_chat/chat_sidebar.py:129
+msgid "Model Selector"
+msgstr "Selector de modelo"
 
-#: gtk_llm_chat/chat_sidebar.py:155
-msgid "Models"
-msgstr "Modelos"
-
-#: gtk_llm_chat/chat_sidebar.py:172
+#: gtk_llm_chat/chat_sidebar.py:145
 msgid "Temperature"
 msgstr "Temperatura"
 
-#: gtk_llm_chat/chat_sidebar.py:185
+#: gtk_llm_chat/chat_sidebar.py:158
 msgid "System Prompt"
 msgstr "Prompt del sistema"
 
-#: gtk_llm_chat/chat_sidebar.py:192
+#: gtk_llm_chat/chat_sidebar.py:165
 msgid "Parameters"
 msgstr "Parámetros"
 
-#: gtk_llm_chat/chat_sidebar.py:217
-msgid "Local/Other"
-msgstr "Local/Otro"
-
-#: gtk_llm_chat/chat_sidebar.py:218
+#: gtk_llm_chat/chat_sidebar.py:241 gtk_llm_chat/chat_sidebar.py:308
+#: gtk_llm_chat/chat_sidebar.py:310 gtk_llm_chat/chat_sidebar.py:432
+#: gtk_llm_chat/model_selection.py:129
 msgid "Unknown Provider"
 msgstr "Proveedor desconocido"
 
-#: gtk_llm_chat/chat_sidebar.py:253
-msgid "No models found"
-msgstr "No se encontraron modelos"
+#: gtk_llm_chat/chat_sidebar.py:247
+msgid "Set Default Model"
+msgstr "Establecer modelo por defecto"
 
-#: gtk_llm_chat/chat_sidebar.py:287
-msgid "No models found for this provider"
-msgstr "No se encontraron modelos para este proveedor"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "Do you want to set"
+msgstr "¿Desea establecer"
 
-#: gtk_llm_chat/chat_sidebar.py:344
-msgid "Error reading keys file"
-msgstr "Error al leer el archivo de claves"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "from"
+msgstr "de"
 
-#: gtk_llm_chat/chat_sidebar.py:345
-msgid "Check File"
-msgstr "Revisar archivo"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "as the default model for new conversations?"
+msgstr "como modelo por defecto para nuevas conversaciones?"
 
-#: gtk_llm_chat/chat_sidebar.py:355
-msgid "API Key is configured"
-msgstr "La clave API está configurada"
-
-#: gtk_llm_chat/chat_sidebar.py:356
-msgid "Change Key"
-msgstr "Cambiar clave"
-
-#: gtk_llm_chat/chat_sidebar.py:361
-msgid "API Key Required"
-msgstr "Se requiere clave API"
-
-#: gtk_llm_chat/chat_sidebar.py:362 gtk_llm_chat/chat_sidebar.py:433
-msgid "Set Key"
-msgstr "Establecer clave"
-
-#: gtk_llm_chat/chat_sidebar.py:369
-msgid "Error accessing keys file"
-msgstr "Error al acceder al archivo de claves"
-
-#: gtk_llm_chat/chat_sidebar.py:370
-msgid "Check Permissions"
-msgstr "Revisar permisos"
-
-#: gtk_llm_chat/chat_sidebar.py:429
-msgid "Enter API Key"
-msgstr "Ingrese la clave API"
-
-#: gtk_llm_chat/chat_sidebar.py:430
-msgid "Enter the API key for"
-msgstr "Ingrese la clave API para"
-
-#: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/chat_sidebar.py:571
+#: gtk_llm_chat/chat_sidebar.py:251 gtk_llm_chat/chat_sidebar.py:330
+#: gtk_llm_chat/model_selector.py:291 gtk_llm_chat/chat_application.py:420
+#: gtk_llm_chat/wide_model_selector.py:310
 msgid "Cancel"
 msgstr "Cancelar"
 
-#: gtk_llm_chat/chat_sidebar.py:439
-msgid "Paste your API key here"
-msgstr "Pegue su clave API aquí"
+#: gtk_llm_chat/chat_sidebar.py:252
+msgid "Set as Default"
+msgstr "Establecer por defecto"
 
-#: gtk_llm_chat/chat_sidebar.py:568
+#: gtk_llm_chat/chat_sidebar.py:278
+msgid "set as default"
+msgstr "establecido por defecto"
+
+#: gtk_llm_chat/chat_sidebar.py:327
 msgid "Set System Prompt"
 msgstr "Establecer prompt del sistema"
 
-#: gtk_llm_chat/chat_sidebar.py:569
+#: gtk_llm_chat/chat_sidebar.py:328
 msgid "Enter the system prompt for the AI model:"
 msgstr "Ingrese el prompt del sistema para el modelo de IA:"
 
-#: gtk_llm_chat/chat_sidebar.py:572
+#: gtk_llm_chat/chat_sidebar.py:331
 msgid "Set"
 msgstr "Establecer"
 
-#: gtk_llm_chat/chat_sidebar.py:622
+#: gtk_llm_chat/chat_sidebar.py:381
 msgid "Current"
 msgstr "Actual"
 
-#: gtk_llm_chat/chat_sidebar.py:624
+#: gtk_llm_chat/chat_sidebar.py:383
 msgid "Not set"
 msgstr "No establecido"
 
-#
-#: gtk_llm_chat/gtk_llm_applet.py:57 gtk_llm_chat/chat_application.py:50
+#: gtk_llm_chat/chat_sidebar.py:413
+msgid "This is the current default model"
+msgstr "Este es el modelo por defecto actual"
+
+#: gtk_llm_chat/chat_sidebar.py:417
+msgid "Set as default model"
+msgstr "Establecer como modelo por defecto"
+
+#: gtk_llm_chat/model_selector.py:46
+msgid "Providers"
+msgstr "Proveedores"
+
+#: gtk_llm_chat/model_selector.py:50
+msgid "Models"
+msgstr "Modelos"
+
+#: gtk_llm_chat/model_selector.py:68
+msgid "Select Provider"
+msgstr "Seleccionar proveedor"
+
+#: gtk_llm_chat/model_selector.py:95
+msgid "Select Model"
+msgstr "Seleccionar modelo"
+
+#: gtk_llm_chat/model_selector.py:124
+msgid "No models found"
+msgstr "No se encontraron modelos"
+
+#: gtk_llm_chat/model_selector.py:145
+msgid "models"
+msgstr "modelos"
+
+#: gtk_llm_chat/model_selector.py:150
+msgid "API key required"
+msgstr "Se requiere clave API"
+
+#: gtk_llm_chat/model_selector.py:152
+msgid "No models"
+msgstr "Sin modelos"
+
+#: gtk_llm_chat/model_selector.py:210 gtk_llm_chat/model_selector.py:335
+msgid "API Key is configured"
+msgstr "La clave API está configurada"
+
+#: gtk_llm_chat/model_selector.py:211 gtk_llm_chat/model_selector.py:336
+msgid "Change Key"
+msgstr "Cambiar clave"
+
+#: gtk_llm_chat/model_selector.py:216 gtk_llm_chat/model_selector.py:340
+msgid "API Key Required"
+msgstr "Se requiere clave API"
+
+#: gtk_llm_chat/model_selector.py:217 gtk_llm_chat/model_selector.py:292
+#: gtk_llm_chat/model_selector.py:341 gtk_llm_chat/wide_model_selector.py:311
+msgid "Set Key"
+msgstr "Establecer clave"
+
+#: gtk_llm_chat/model_selector.py:235
+msgid "No models available"
+msgstr "No hay modelos disponibles"
+
+#: gtk_llm_chat/model_selector.py:236
+msgid "Configure an API key to access models from this provider"
+msgstr "Configure una clave API para acceder a modelos de este proveedor"
+
+#: gtk_llm_chat/model_selector.py:241 gtk_llm_chat/wide_model_selector.py:251
+msgid "No models found for this provider"
+msgstr "No se encontraron modelos para este proveedor"
+
+#: gtk_llm_chat/model_selector.py:288 gtk_llm_chat/wide_model_selector.py:307
+msgid "Enter API Key"
+msgstr "Ingrese la clave API"
+
+#: gtk_llm_chat/model_selector.py:289 gtk_llm_chat/wide_model_selector.py:308
+msgid "Enter the API key for"
+msgstr "Ingrese la clave API para"
+
+#: gtk_llm_chat/model_selector.py:298 gtk_llm_chat/wide_model_selector.py:317
+msgid "Paste your API key here"
+msgstr "Pegue su clave API aquí"
+
+#: gtk_llm_chat/model_selector.py:356
+msgid "Model Selector Test"
+msgstr "Prueba del selector de modelo"
+
+#: gtk_llm_chat/tray_applet.py:103 gtk_llm_chat/tray_applet.py:239
+#: gtk_llm_chat/welcome.py:59 gtk_llm_chat/llm_client.py:22
+msgid "New Conversation"
+msgstr "Nueva conversación"
+
+#: gtk_llm_chat/tray_applet.py:107 gtk_llm_chat/tray_applet.py:241
+msgid "Quit"
+msgstr "Salir"
+
+#: gtk_llm_chat/tray_applet.py:210 gtk_llm_chat/chat_application.py:68
 msgid ""
 "\n"
 "Closing application..."
@@ -175,84 +245,220 @@ msgstr ""
 "\n"
 "Cerrando aplicación..."
 
-#
-#: gtk_llm_chat/gtk_llm_applet.py:100 gtk_llm_chat/llm_client.py:21
-#: gtk_llm_chat/tk_llm_applet.py:65
-msgid "New Conversation"
-msgstr "Nueva Conversación"
+#: gtk_llm_chat/tray_applet.py:225
+msgid "LLM Conversations"
+msgstr "Conversaciones LLM"
 
-#: gtk_llm_chat/gtk_llm_applet.py:112 gtk_llm_chat/tk_llm_applet.py:69
-msgid "Quit"
-msgstr "Salir"
+#: gtk_llm_chat/welcome.py:20
+msgid "Tray applet"
+msgstr "Applet de bandeja"
 
-#: gtk_llm_chat/chat_application.py:99
+#: gtk_llm_chat/welcome.py:20
+msgid "Default Model"
+msgstr "Modelo por defecto"
+
+#: gtk_llm_chat/welcome.py:53
+msgid "Next"
+msgstr "Siguiente"
+
+#: gtk_llm_chat/welcome.py:117
+msgid "Own the conversation."
+msgstr "Controla la conversación."
+
+#: gtk_llm_chat/welcome.py:118
+msgid "Use any model you want. Your conversations are stored locally."
+msgstr ""
+"Usa cualquier modelo que desees. Tus conversaciones se almacenan localmente."
+
+#: gtk_llm_chat/welcome.py:119
+msgid "This wizard will guide you through the initial setup"
+msgstr "Este asistente te guiará a través de la configuración inicial"
+
+#: gtk_llm_chat/welcome.py:125
+msgid "Start"
+msgstr "Comenzar"
+
+#: gtk_llm_chat/welcome.py:157
+msgid "Access conversations from the convenience of your system tray"
+msgstr "Accede a conversaciones desde la comodidad de tu bandeja del sistema"
+
+#: gtk_llm_chat/welcome.py:163
+msgid "Would you like to start the applet with your session?"
+msgstr "¿Te gustaría iniciar el applet con tu sesión?"
+
+#: gtk_llm_chat/welcome.py:173
+msgid "Yes, with my session"
+msgstr "Sí, con mi sesión"
+
+#: gtk_llm_chat/welcome.py:174
+msgid "No, only when I start the app"
+msgstr "No, solo cuando inicie la aplicación"
+
+#: gtk_llm_chat/welcome.py:209
+msgid "Loading model selection..."
+msgstr "Cargando selección de modelo..."
+
+#: gtk_llm_chat/welcome.py:219
+msgid "Ready to start!"
+msgstr "¡Listo para comenzar!"
+
+#: gtk_llm_chat/welcome.py:429
+msgid "Set API Key"
+msgstr "Establecer clave API"
+
+#: gtk_llm_chat/welcome.py:429
+msgid "Change API Key"
+msgstr "Cambiar clave API"
+
+#: gtk_llm_chat/chat_application.py:193
 msgid "Error: _version.py not found"
 msgstr "Error: _version.py no encontrado"
 
-#: gtk_llm_chat/chat_application.py:218
+#: gtk_llm_chat/chat_application.py:418
 msgid "Are you sure you want to delete the conversation?"
 msgstr "¿Está seguro que desea eliminar la conversación?"
 
-#: gtk_llm_chat/chat_application.py:237
+#: gtk_llm_chat/chat_application.py:421
+msgid "Delete"
+msgstr "Eliminar"
+
+#: gtk_llm_chat/chat_application.py:443
 msgid "Gtk LLM Chat"
 msgstr "Gtk LLM Chat"
 
-#
-#: gtk_llm_chat/chat_application.py:240
+#: gtk_llm_chat/chat_application.py:446
 msgid "A frontend for LLM"
 msgstr "Un frontend para LLM"
 
-#: gtk_llm_chat/llm_client.py:231
+#: gtk_llm_chat/wide_model_selector.py:92
+msgid ""
+"Please select a provider from the list on the left.\n"
+"Then, choose a model from the list that appears here."
+msgstr ""
+"Por favor seleccione un proveedor de la lista de la izquierda.\n"
+"Luego, elija un modelo de la lista que aparece aquí."
+
+#: gtk_llm_chat/wide_model_selector.py:127
+msgid "Most AI models require an API key"
+msgstr "La mayoría de modelos de IA requieren una clave API"
+
+#: gtk_llm_chat/wide_model_selector.py:134
+msgid ""
+"You'll need to register with each provider to obtain these authentication "
+"tokens."
+msgstr ""
+"Necesitará registrarse con cada proveedor para obtener estos tokens de "
+"autenticación."
+
+#: gtk_llm_chat/wide_model_selector.py:147
+msgid "No Selection"
+msgstr "Sin selección"
+
+#: gtk_llm_chat/wide_model_selector.py:162
+msgid "No models or providers found."
+msgstr "No se encontraron modelos o proveedores."
+
+#: gtk_llm_chat/wide_model_selector.py:163
+msgid "Error"
+msgstr "Error"
+
+#: gtk_llm_chat/wide_model_selector.py:442
+msgid "Model information not available"
+msgstr "Información del modelo no disponible"
+
+#: gtk_llm_chat/wide_model_selector.py:443
+msgid "Unable to retrieve model details"
+msgstr "No se pudieron obtener los detalles del modelo"
+
+#: gtk_llm_chat/wide_model_selector.py:467
+msgid "Aliases"
+msgstr "Alias"
+
+#: gtk_llm_chat/wide_model_selector.py:478
+msgid "API Key"
+msgstr "Clave API"
+
+#: gtk_llm_chat/wide_model_selector.py:487
+msgid "Required • Set"
+msgstr "Requerida • Establecida"
+
+#: gtk_llm_chat/wide_model_selector.py:493
+msgid "Required • Not set"
+msgstr "Requerida • No establecida"
+
+#: gtk_llm_chat/wide_model_selector.py:499
+msgid "Not required"
+msgstr "No requerida"
+
+#: gtk_llm_chat/wide_model_selector.py:510
+#: gtk_llm_chat/wide_model_selector.py:511
+msgid "Unknown"
+msgstr "Desconocido"
+
+#: gtk_llm_chat/wide_model_selector.py:512
+msgid "Plugin"
+msgstr "Plugin"
+
+#: gtk_llm_chat/single_instance.py:26 gtk_llm_chat/single_instance.py:32
+msgid "Another instance is already running."
+msgstr "Otra instancia ya se está ejecutando."
+
+#: gtk_llm_chat/llm_client.py:234
 msgid "LLMClient: Ignoring invalid temperature:"
 msgstr "LLMClient: Ignorando temperatura inválida"
 
-#: gtk_llm_chat/llm_client.py:266
-msgid "LLMClient: Starting stream processing..."
-msgstr "LLMClient: Solicitud de cancelación recibida."
-
 #: gtk_llm_chat/llm_client.py:269
+msgid "LLMClient: Starting stream processing..."
+msgstr "LLMClient: Iniciando procesamiento de stream..."
+
+#: gtk_llm_chat/llm_client.py:272
 msgid "LLMClient: Stream processing cancelled externally."
 msgstr "LLMClient: Procesamiento de stream cancelado externamente."
 
-#: gtk_llm_chat/llm_client.py:275
+#: gtk_llm_chat/llm_client.py:278
 msgid "LLMClient: Stream finished normally."
 msgstr "LLMClient: Stream finalizado normalmente."
 
-#: gtk_llm_chat/llm_client.py:325
-msgid "LLMClient: Cancel request received."
-msgstr "LLMClient: Solicitud de cancelación recibida."
+#: gtk_llm_chat/model_selection.py:119 gtk_llm_chat/model_selection.py:125
+msgid "Local/Other"
+msgstr "Local/Otro"
 
-#: gtk_llm_chat/llm_client.py:328
-msgid "LLMClient: Terminating active stream thread."
-msgstr "LLMClient: Terminando hilo de stream activo."
+#~ msgid "Settings"
+#~ msgstr "Configuración"
 
-#: gtk_llm_chat/llm_client.py:331
-msgid "LLMClient: No active stream thread to cancel."
-msgstr "LLMClient: No hay hilo de stream activo para cancelar."
+#~ msgid "Error reading keys file"
+#~ msgstr "Error al leer el archivo de claves"
 
-#: gtk_llm_chat/llm_client.py:368
-msgid "LLMClient: Error - Conversación no disponible para cargar historial."
-msgstr "LLMClient: Error - Conversación no disponible para cargar historial."
+#~ msgid "Check File"
+#~ msgstr "Revisar archivo"
 
-#: gtk_llm_chat/llm_client.py:448
-msgid "LLMClient: Historial cargado. Total de respuestas en conversación: "
-msgstr "LLMClient: Historial cargado. Total respuestas en la conversación: "
+#~ msgid "Error accessing keys file"
+#~ msgstr "Error al acceder al archivo de claves"
 
-#
-#: gtk_llm_chat/tk_llm_applet.py:119
-#, fuzzy
-msgid "LLM Conversations"
-msgstr "Nueva Conversación"
+#~ msgid "Check Permissions"
+#~ msgstr "Revisar permisos"
 
-#: gtk_llm_chat/tk_llm_applet.py:143
-msgid "Exiting..."
-msgstr "Saliendo..."
+#~ msgid "LLMClient: Cancel request received."
+#~ msgstr "LLMClient: Solicitud de cancelación recibida."
+
+#~ msgid "LLMClient: Terminating active stream thread."
+#~ msgstr "LLMClient: Terminando hilo de stream activo."
+
+#~ msgid "LLMClient: No active stream thread to cancel."
+#~ msgstr "LLMClient: No hay hilo de stream activo para cancelar."
+
+#~ msgid "LLMClient: Error - Conversación no disponible para cargar historial."
+#~ msgstr ""
+#~ "LLMClient: Error - Conversación no disponible para cargar historial."
+
+#~ msgid "LLMClient: Historial cargado. Total de respuestas en conversación: "
+#~ msgstr "LLMClient: Historial cargado. Total respuestas en la conversación: "
+
+#~ msgid "Exiting..."
+#~ msgstr "Saliendo..."
 
 #~ msgid "LLM Chat"
 #~ msgstr "LLM Chat"
-
-#~ msgid "Delete"
-#~ msgstr "Eliminar"
 
 #, fuzzy
 #~ msgid "Error: conversation_id is required to add to history."

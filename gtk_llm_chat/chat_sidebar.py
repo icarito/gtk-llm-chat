@@ -67,7 +67,7 @@ class ChatSidebar(Gtk.Box):
         # Fila de Modelo - uso de ícono "brain-symbolic"
         model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
         self.model_row = Adw.ActionRow(title=_("Change Model"),
-                                       subtitle="Provider: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
+                                       subtitle=f"{_('Provider')}: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
         self.model_row.set_icon_name("brain-symbolic")
         # NO establecer subtítulo aquí, lo hará model-loaded
         self.model_row.set_activatable(True)  # Hacerla accionable
@@ -238,7 +238,7 @@ class ChatSidebar(Gtk.Box):
             return
             
         # Obtener el nombre del proveedor para mostrar en el diálogo
-        provider_name = self.llm_client.get_provider_for_model(current_model_id) or "Unknown Provider"
+        provider_name = self.llm_client.get_provider_for_model(current_model_id) or _("Unknown Provider")
         
         root_window = self.get_root()
         dialog = Adw.MessageDialog(
@@ -300,30 +300,16 @@ class ChatSidebar(Gtk.Box):
         else:
             debug_print("ChatSidebar: Saltando actualización de subtítulo de temperatura (adjustment o temperature_row no inicializados).")
 
-    def update_model_button(self):
-        """Actualiza la información del modelo seleccionado en la interfaz."""
-        if not self.llm_client:
-            return
-            
-        current_model_id = self.llm_client.get_model_id()
-            
-        # Actualizar la configuración con el modelo actual
-        self.config['model'] = current_model_id
-        
-        # Actualizar subtítulo del modelo con el proveedor
-        self.model_row.set_subtitle(f"Provider: {self.llm_client.get_provider_for_model(current_model_id) or 'Unknown Provider'}")
-        self._update_system_prompt_row_subtitle() # Asegurar que el subtítulo del system prompt también se actualice
-
     def _on_model_loaded(self, client, model_id):
         """Callback para la señal model-loaded del LLMClient."""
         debug_print(f"ChatSidebar: Model loaded: {model_id}")
 
         # Obtener el proveedor del modelo cargado
-        provider_name = "Unknown Provider"
+        provider_name = _("Unknown Provider")
         if self.llm_client:
-            provider_name = self.llm_client.get_provider_for_model(model_id) or "Unknown Provider"
+            provider_name = self.llm_client.get_provider_for_model(model_id) or _("Unknown Provider")
         
-        self.model_row.set_subtitle(f"Provider: {provider_name}")
+        self.model_row.set_subtitle(f"{_('Provider')}: {provider_name}")
         debug_print(f"ChatSidebar: _on_model_loaded calling _update_default_model_button_visibility")
         self._update_default_model_button_visibility()
 
@@ -424,11 +410,11 @@ class ChatSidebar(Gtk.Box):
             # Estilo de advertencia y deshabilitado
             self.default_model_button.add_css_class("warning")
             self.default_model_button.set_sensitive(False)
-            self.default_model_button.set_tooltip_text(_("Este es el modelo por defecto actual"))
+            self.default_model_button.set_tooltip_text(_("This is the current default model"))
         else:
             # Estilo normal y habilitado
             self.default_model_button.set_sensitive(True)
-            self.default_model_button.set_tooltip_text(_("Establecer como modelo por defecto"))
+            self.default_model_button.set_tooltip_text(_("Set as default model"))
             self.default_model_button.add_css_class("suggested-action")
         debug_print(f"ChatSidebar: Default model button updated. is_default={is_default}")
 
@@ -443,6 +429,6 @@ class ChatSidebar(Gtk.Box):
         self.config['model'] = current_model_id
         
         # Actualizar subtítulo del modelo con el proveedor
-        self.model_row.set_subtitle(f"Provider: {self.llm_client.get_provider_for_model(current_model_id) or 'Unknown Provider'}")
+        self.model_row.set_subtitle(f"{_('Provider')}: {self.llm_client.get_provider_for_model(current_model_id) or _('Unknown Provider')}")
         self._update_system_prompt_row_subtitle() # Asegurar que el subtítulo del system prompt también se actualice
         self._update_default_model_button_visibility() # Actualizar visibilidad del botón de modelo por defecto

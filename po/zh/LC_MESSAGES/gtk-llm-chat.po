@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2025-05-08 00:10-0500\n"
+"POT-Creation-Date: 2025-06-04 18:30-0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,155 +18,238 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: gtk_llm_chat/chat_window.py:90
+#: gtk_llm_chat/chat_window.py:135
 msgid "Model Settings"
 msgstr "模型设置"
 
-#: gtk_llm_chat/chat_window.py:96
+#: gtk_llm_chat/chat_window.py:141
 msgid "Rename"
 msgstr "重命名"
 
-#: gtk_llm_chat/chat_window.py:159
+#: gtk_llm_chat/chat_window.py:211
 msgid "Send"
 msgstr "发送"
 
-#: gtk_llm_chat/chat_sidebar.py:51 gtk_llm_chat/chat_sidebar.py:91
-msgid "Actions"
-msgstr "操作"
+#: gtk_llm_chat/chat_sidebar.py:65 gtk_llm_chat/chat_sidebar.py:278
+#: gtk_llm_chat/wide_model_selector.py:454
+#, fuzzy
+msgid "Model"
+msgstr "模型"
 
-#: gtk_llm_chat/chat_sidebar.py:58
-msgid "Settings"
-msgstr "设置"
-
-#: gtk_llm_chat/chat_sidebar.py:63
-msgid "Delete Conversation"
-msgstr "删除对话"
-
-#: gtk_llm_chat/chat_sidebar.py:72
+#: gtk_llm_chat/chat_sidebar.py:69
 msgid "Change Model"
 msgstr "更改模型"
 
-#: gtk_llm_chat/chat_sidebar.py:85
-msgid "About"
-msgstr "关于"
+#: gtk_llm_chat/chat_sidebar.py:70 gtk_llm_chat/chat_sidebar.py:312
+#: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/wide_model_selector.py:516
+#, fuzzy
+msgid "Provider"
+msgstr "提供者"
 
-#: gtk_llm_chat/chat_sidebar.py:94 gtk_llm_chat/chat_sidebar.py:165
+#: gtk_llm_chat/chat_sidebar.py:79
+#, fuzzy
+msgid "Set as Default Model"
+msgstr "选择模型"
+
+#: gtk_llm_chat/chat_sidebar.py:88 gtk_llm_chat/chat_sidebar.py:138
 msgid "Model Parameters"
 msgstr "模型参数"
 
+#: gtk_llm_chat/chat_sidebar.py:97
+#, fuzzy
+msgid "Conversation"
+msgstr "新的对话"
+
+#: gtk_llm_chat/chat_sidebar.py:100 gtk_llm_chat/chat_application.py:417
+msgid "Delete Conversation"
+msgstr "删除对话"
+
 #: gtk_llm_chat/chat_sidebar.py:110
-msgid "Select Provider"
-msgstr "选择提供者"
+msgid "Information"
+msgstr ""
+
+#: gtk_llm_chat/chat_sidebar.py:112
+msgid "About"
+msgstr "关于"
 
 #: gtk_llm_chat/chat_sidebar.py:121
-msgid "Providers"
-msgstr "提供者"
+msgid "Actions"
+msgstr "操作"
 
-#: gtk_llm_chat/chat_sidebar.py:133
-msgid "Select Model"
-msgstr "选择模型"
+#: gtk_llm_chat/chat_sidebar.py:129
+#, fuzzy
+msgid "Model Selector"
+msgstr "模型设置"
 
-#: gtk_llm_chat/chat_sidebar.py:155
-msgid "Models"
-msgstr "模型"
-
-#: gtk_llm_chat/chat_sidebar.py:172
+#: gtk_llm_chat/chat_sidebar.py:145
 msgid "Temperature"
 msgstr "温度"
 
-#: gtk_llm_chat/chat_sidebar.py:185
+#: gtk_llm_chat/chat_sidebar.py:158
 msgid "System Prompt"
 msgstr "系统提示"
 
-#: gtk_llm_chat/chat_sidebar.py:192
+#: gtk_llm_chat/chat_sidebar.py:165
 msgid "Parameters"
 msgstr "参数"
 
-#: gtk_llm_chat/chat_sidebar.py:217
-msgid "Local/Other"
-msgstr "本地/其他"
-
-#: gtk_llm_chat/chat_sidebar.py:218
+#: gtk_llm_chat/chat_sidebar.py:241 gtk_llm_chat/chat_sidebar.py:308
+#: gtk_llm_chat/chat_sidebar.py:310 gtk_llm_chat/chat_sidebar.py:432
+#: gtk_llm_chat/model_selection.py:129
 msgid "Unknown Provider"
 msgstr "未知提供者"
 
-#: gtk_llm_chat/chat_sidebar.py:253
-msgid "No models found"
-msgstr "未找到模型"
+#: gtk_llm_chat/chat_sidebar.py:247
+#, fuzzy
+msgid "Set Default Model"
+msgstr "选择模型"
 
-#: gtk_llm_chat/chat_sidebar.py:287
-msgid "No models found for this provider"
-msgstr "此提供者未找到模型"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "Do you want to set"
+msgstr ""
 
-#: gtk_llm_chat/chat_sidebar.py:344
-msgid "Error reading keys file"
-msgstr "读取密钥文件出错"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "from"
+msgstr ""
 
-#: gtk_llm_chat/chat_sidebar.py:345
-msgid "Check File"
-msgstr "检查文件"
+#: gtk_llm_chat/chat_sidebar.py:248
+msgid "as the default model for new conversations?"
+msgstr ""
 
-#: gtk_llm_chat/chat_sidebar.py:355
-msgid "API Key is configured"
-msgstr "API 密钥已配置"
-
-#: gtk_llm_chat/chat_sidebar.py:356
-msgid "Change Key"
-msgstr "更改密钥"
-
-#: gtk_llm_chat/chat_sidebar.py:361
-msgid "API Key Required"
-msgstr "需要 API 密钥"
-
-#: gtk_llm_chat/chat_sidebar.py:362 gtk_llm_chat/chat_sidebar.py:433
-msgid "Set Key"
-msgstr "设置密钥"
-
-#: gtk_llm_chat/chat_sidebar.py:369
-msgid "Error accessing keys file"
-msgstr "访问密钥文件出错"
-
-#: gtk_llm_chat/chat_sidebar.py:370
-msgid "Check Permissions"
-msgstr "检查权限"
-
-#: gtk_llm_chat/chat_sidebar.py:429
-msgid "Enter API Key"
-msgstr "输入 API 密钥"
-
-#: gtk_llm_chat/chat_sidebar.py:430
-msgid "Enter the API key for"
-msgstr "请输入 API 密钥："
-
-#: gtk_llm_chat/chat_sidebar.py:432 gtk_llm_chat/chat_sidebar.py:571
+#: gtk_llm_chat/chat_sidebar.py:251 gtk_llm_chat/chat_sidebar.py:330
+#: gtk_llm_chat/model_selector.py:291 gtk_llm_chat/chat_application.py:420
+#: gtk_llm_chat/wide_model_selector.py:310
 msgid "Cancel"
 msgstr "取消"
 
-#: gtk_llm_chat/chat_sidebar.py:439
-msgid "Paste your API key here"
-msgstr "请在此粘贴您的 API 密钥"
+#: gtk_llm_chat/chat_sidebar.py:252
+msgid "Set as Default"
+msgstr ""
 
-#: gtk_llm_chat/chat_sidebar.py:568
+#: gtk_llm_chat/chat_sidebar.py:278
+msgid "set as default"
+msgstr ""
+
+#: gtk_llm_chat/chat_sidebar.py:327
 msgid "Set System Prompt"
 msgstr "设置系统提示"
 
-#: gtk_llm_chat/chat_sidebar.py:569
+#: gtk_llm_chat/chat_sidebar.py:328
 msgid "Enter the system prompt for the AI model:"
 msgstr "请输入 AI 模型的系统提示："
 
-#: gtk_llm_chat/chat_sidebar.py:572
+#: gtk_llm_chat/chat_sidebar.py:331
 msgid "Set"
 msgstr "设置"
 
-#: gtk_llm_chat/chat_sidebar.py:622
+#: gtk_llm_chat/chat_sidebar.py:381
 msgid "Current"
 msgstr "当前"
 
-#: gtk_llm_chat/chat_sidebar.py:624
+#: gtk_llm_chat/chat_sidebar.py:383
 msgid "Not set"
 msgstr "未设置"
 
-#: gtk_llm_chat/gtk_llm_applet.py:57 gtk_llm_chat/chat_application.py:50
+#: gtk_llm_chat/chat_sidebar.py:413
+msgid "This is the current default model"
+msgstr ""
+
+#: gtk_llm_chat/chat_sidebar.py:417
+#, fuzzy
+msgid "Set as default model"
+msgstr "选择模型"
+
+#: gtk_llm_chat/model_selector.py:46
+msgid "Providers"
+msgstr "提供者"
+
+#: gtk_llm_chat/model_selector.py:50
+msgid "Models"
+msgstr "模型"
+
+#: gtk_llm_chat/model_selector.py:68
+msgid "Select Provider"
+msgstr "选择提供者"
+
+#: gtk_llm_chat/model_selector.py:95
+msgid "Select Model"
+msgstr "选择模型"
+
+#: gtk_llm_chat/model_selector.py:124
+msgid "No models found"
+msgstr "未找到模型"
+
+#: gtk_llm_chat/model_selector.py:145
+#, fuzzy
+msgid "models"
+msgstr "模型"
+
+#: gtk_llm_chat/model_selector.py:150
+#, fuzzy
+msgid "API key required"
+msgstr "需要 API 密钥"
+
+#: gtk_llm_chat/model_selector.py:152
+#, fuzzy
+msgid "No models"
+msgstr "未找到模型"
+
+#: gtk_llm_chat/model_selector.py:210 gtk_llm_chat/model_selector.py:335
+msgid "API Key is configured"
+msgstr "API 密钥已配置"
+
+#: gtk_llm_chat/model_selector.py:211 gtk_llm_chat/model_selector.py:336
+msgid "Change Key"
+msgstr "更改密钥"
+
+#: gtk_llm_chat/model_selector.py:216 gtk_llm_chat/model_selector.py:340
+msgid "API Key Required"
+msgstr "需要 API 密钥"
+
+#: gtk_llm_chat/model_selector.py:217 gtk_llm_chat/model_selector.py:292
+#: gtk_llm_chat/model_selector.py:341 gtk_llm_chat/wide_model_selector.py:311
+msgid "Set Key"
+msgstr "设置密钥"
+
+#: gtk_llm_chat/model_selector.py:235
+msgid "No models available"
+msgstr ""
+
+#: gtk_llm_chat/model_selector.py:236
+msgid "Configure an API key to access models from this provider"
+msgstr ""
+
+#: gtk_llm_chat/model_selector.py:241 gtk_llm_chat/wide_model_selector.py:251
+msgid "No models found for this provider"
+msgstr "此提供者未找到模型"
+
+#: gtk_llm_chat/model_selector.py:288 gtk_llm_chat/wide_model_selector.py:307
+msgid "Enter API Key"
+msgstr "输入 API 密钥"
+
+#: gtk_llm_chat/model_selector.py:289 gtk_llm_chat/wide_model_selector.py:308
+msgid "Enter the API key for"
+msgstr "请输入 API 密钥："
+
+#: gtk_llm_chat/model_selector.py:298 gtk_llm_chat/wide_model_selector.py:317
+msgid "Paste your API key here"
+msgstr "请在此粘贴您的 API 密钥"
+
+#: gtk_llm_chat/model_selector.py:356
+#, fuzzy
+msgid "Model Selector Test"
+msgstr "模型设置"
+
+#: gtk_llm_chat/tray_applet.py:103 gtk_llm_chat/tray_applet.py:239
+#: gtk_llm_chat/welcome.py:59 gtk_llm_chat/llm_client.py:22
+msgid "New Conversation"
+msgstr "新的对话"
+
+#: gtk_llm_chat/tray_applet.py:107 gtk_llm_chat/tray_applet.py:241
+msgid "Quit"
+msgstr "退出"
+
+#: gtk_llm_chat/tray_applet.py:210 gtk_llm_chat/chat_application.py:68
 msgid ""
 "\n"
 "Closing application..."
@@ -174,82 +257,223 @@ msgstr ""
 "\n"
 "正在关闭应用程序..."
 
-#: gtk_llm_chat/gtk_llm_applet.py:100 gtk_llm_chat/llm_client.py:21
-#: gtk_llm_chat/tk_llm_applet.py:65
-msgid "New Conversation"
-msgstr "新的对话"
-
-#: gtk_llm_chat/gtk_llm_applet.py:112 gtk_llm_chat/tk_llm_applet.py:69
-msgid "Quit"
-msgstr "退出"
-
-#: gtk_llm_chat/chat_application.py:99
-msgid "Error: _version.py not found"
-msgstr "错误：找不到 _version.py"
-
-#: gtk_llm_chat/chat_application.py:218
-msgid "Are you sure you want to delete the conversation?"
-msgstr "你确定要删除对话吗？"
-
-#: gtk_llm_chat/chat_application.py:237
-msgid "Gtk LLM Chat"
-msgstr "Gtk LLM 聊天"
-
-#: gtk_llm_chat/chat_application.py:240
-msgid "A frontend for LLM"
-msgstr "LLM 的前端"
-
-#: gtk_llm_chat/llm_client.py:231
-msgid "LLMClient: Ignoring invalid temperature:"
-msgstr "LLMClient：忽略无效温度："
-
-#: gtk_llm_chat/llm_client.py:266
-msgid "LLMClient: Starting stream processing..."
-msgstr "LLMClient：开始流处理..."
-
-#: gtk_llm_chat/llm_client.py:269
-msgid "LLMClient: Stream processing cancelled externally."
-msgstr "LLMClient：流处理已在外部取消。"
-
-#: gtk_llm_chat/llm_client.py:275
-msgid "LLMClient: Stream finished normally."
-msgstr "LLMClient：流已正常完成。"
-
-#: gtk_llm_chat/llm_client.py:325
-msgid "LLMClient: Cancel request received."
-msgstr "LLMClient：收到取消请求。"
-
-#: gtk_llm_chat/llm_client.py:328
-msgid "LLMClient: Terminating active stream thread."
-msgstr "LLMClient：正在终止活动流线程。"
-
-#: gtk_llm_chat/llm_client.py:331
-msgid "LLMClient: No active stream thread to cancel."
-msgstr "LLMClient：没有要取消的活动流线程。"
-
-#: gtk_llm_chat/llm_client.py:368
-msgid "LLMClient: Error - Conversación no disponible para cargar historial."
-msgstr "LLMClient：错误 - 无法加载历史记录，对话不可用。"
-
-#: gtk_llm_chat/llm_client.py:448
-#, fuzzy
-msgid "LLMClient: Historial cargado. Total de respuestas en conversación: "
-msgstr "LLMClient：历史记录已加载。对话中的总回复数："
-
-#: gtk_llm_chat/tk_llm_applet.py:119
+#: gtk_llm_chat/tray_applet.py:225
 #, fuzzy
 msgid "LLM Conversations"
 msgstr "新的对话"
 
-#: gtk_llm_chat/tk_llm_applet.py:143
-msgid "Exiting..."
-msgstr "正在退出..."
+#: gtk_llm_chat/welcome.py:20
+msgid "Tray applet"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:20
+#, fuzzy
+msgid "Default Model"
+msgstr "选择模型"
+
+#: gtk_llm_chat/welcome.py:53
+msgid "Next"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:117
+#, fuzzy
+msgid "Own the conversation."
+msgstr "新的对话"
+
+#: gtk_llm_chat/welcome.py:118
+msgid "Use any model you want. Your conversations are stored locally."
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:119
+msgid "This wizard will guide you through the initial setup"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:125
+msgid "Start"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:157
+msgid "Access conversations from the convenience of your system tray"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:163
+msgid "Would you like to start the applet with your session?"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:173
+msgid "Yes, with my session"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:174
+msgid "No, only when I start the app"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:209
+msgid "Loading model selection..."
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:219
+msgid "Ready to start!"
+msgstr ""
+
+#: gtk_llm_chat/welcome.py:429
+#, fuzzy
+msgid "Set API Key"
+msgstr "设置密钥"
+
+#: gtk_llm_chat/welcome.py:429
+#, fuzzy
+msgid "Change API Key"
+msgstr "更改密钥"
+
+#: gtk_llm_chat/chat_application.py:193
+msgid "Error: _version.py not found"
+msgstr "错误：找不到 _version.py"
+
+#: gtk_llm_chat/chat_application.py:418
+msgid "Are you sure you want to delete the conversation?"
+msgstr "你确定要删除对话吗？"
+
+#: gtk_llm_chat/chat_application.py:421
+msgid "Delete"
+msgstr "删除"
+
+#: gtk_llm_chat/chat_application.py:443
+msgid "Gtk LLM Chat"
+msgstr "Gtk LLM 聊天"
+
+#: gtk_llm_chat/chat_application.py:446
+msgid "A frontend for LLM"
+msgstr "LLM 的前端"
+
+#: gtk_llm_chat/wide_model_selector.py:92
+msgid ""
+"Please select a provider from the list on the left.\n"
+"Then, choose a model from the list that appears here."
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:127
+msgid "Most AI models require an API key"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:134
+msgid ""
+"You'll need to register with each provider to obtain these authentication "
+"tokens."
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:147
+msgid "No Selection"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:162
+#, fuzzy
+msgid "No models or providers found."
+msgstr "未找到模型"
+
+#: gtk_llm_chat/wide_model_selector.py:163
+msgid "Error"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:442
+msgid "Model information not available"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:443
+msgid "Unable to retrieve model details"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:467
+msgid "Aliases"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:478
+#, fuzzy
+msgid "API Key"
+msgstr "输入 API 密钥"
+
+#: gtk_llm_chat/wide_model_selector.py:487
+msgid "Required • Set"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:493
+msgid "Required • Not set"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:499
+msgid "Not required"
+msgstr ""
+
+#: gtk_llm_chat/wide_model_selector.py:510
+#: gtk_llm_chat/wide_model_selector.py:511
+#, fuzzy
+msgid "Unknown"
+msgstr "未知提供者"
+
+#: gtk_llm_chat/wide_model_selector.py:512
+msgid "Plugin"
+msgstr ""
+
+#: gtk_llm_chat/single_instance.py:26 gtk_llm_chat/single_instance.py:32
+msgid "Another instance is already running."
+msgstr ""
+
+#: gtk_llm_chat/llm_client.py:234
+msgid "LLMClient: Ignoring invalid temperature:"
+msgstr "LLMClient：忽略无效温度："
+
+#: gtk_llm_chat/llm_client.py:269
+msgid "LLMClient: Starting stream processing..."
+msgstr "LLMClient：开始流处理..."
+
+#: gtk_llm_chat/llm_client.py:272
+msgid "LLMClient: Stream processing cancelled externally."
+msgstr "LLMClient：流处理已在外部取消。"
+
+#: gtk_llm_chat/llm_client.py:278
+msgid "LLMClient: Stream finished normally."
+msgstr "LLMClient：流已正常完成。"
+
+#: gtk_llm_chat/model_selection.py:119 gtk_llm_chat/model_selection.py:125
+msgid "Local/Other"
+msgstr "本地/其他"
+
+#~ msgid "Settings"
+#~ msgstr "设置"
+
+#~ msgid "Error reading keys file"
+#~ msgstr "读取密钥文件出错"
+
+#~ msgid "Check File"
+#~ msgstr "检查文件"
+
+#~ msgid "Error accessing keys file"
+#~ msgstr "访问密钥文件出错"
+
+#~ msgid "Check Permissions"
+#~ msgstr "检查权限"
+
+#~ msgid "LLMClient: Cancel request received."
+#~ msgstr "LLMClient：收到取消请求。"
+
+#~ msgid "LLMClient: Terminating active stream thread."
+#~ msgstr "LLMClient：正在终止活动流线程。"
+
+#~ msgid "LLMClient: No active stream thread to cancel."
+#~ msgstr "LLMClient：没有要取消的活动流线程。"
+
+#~ msgid "LLMClient: Error - Conversación no disponible para cargar historial."
+#~ msgstr "LLMClient：错误 - 无法加载历史记录，对话不可用。"
+
+#, fuzzy
+#~ msgid "LLMClient: Historial cargado. Total de respuestas en conversación: "
+#~ msgstr "LLMClient：历史记录已加载。对话中的总回复数："
+
+#~ msgid "Exiting..."
+#~ msgstr "正在退出..."
 
 #~ msgid "LLM Chat"
 #~ msgstr "LLM 聊天"
-
-#~ msgid "Delete"
-#~ msgstr "删除"
 
 #~ msgid "Error: conversation_id is required to add to history."
 #~ msgstr "错误：需要 conversation_id 才能添加到历史记录。"

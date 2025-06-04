@@ -8,6 +8,7 @@ import threading
 from platform_utils import debug_print
 from resource_manager import resource_manager
 from style_manager import style_manager
+from chat_application import _
 
 
 class WelcomeWindow(Adw.ApplicationWindow):
@@ -16,7 +17,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self._on_welcome_finished = on_welcome_finished
         self.set_default_size(900, 700)
         self.set_size_request(700, 500)  # Tamaño mínimo razonable para evitar colapsos
-        self.panel_titles = ["", "Tray applet", "Default Model", ""]
+        self.panel_titles = ["", _("Tray applet"), _("Default Model"), ""]
         self.config_data = {}
 
         # Cargar estilos globales y aplicar clase principal
@@ -49,13 +50,13 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.prev_button.connect('clicked', self.on_prev_clicked)
         self.header_bar.pack_start(self.prev_button)
 
-        self.next_button = Gtk.Button(label="Next")
+        self.next_button = Gtk.Button(label=_("Next"))
         self.next_button.add_css_class("suggested-action")
         self.next_button.set_size_request(100, 40)
         self.next_button.connect('clicked', self.on_next_clicked)
         self.header_bar.pack_end(self.next_button)
 
-        self.start_chatting_button = Gtk.Button(label="New Conversation")
+        self.start_chatting_button = Gtk.Button(label=_("New Conversation"))
         self.start_chatting_button.add_css_class("suggested-action")
         self.start_chatting_button.set_halign(Gtk.Align.CENTER)
         self.start_chatting_button.set_size_request(160, 40)
@@ -113,15 +114,15 @@ class WelcomeWindow(Adw.ApplicationWindow):
         app_image.set_size_request(128, 128)
         vbox1.append(app_image)
         
-        page1.set_title("Own the conversation.")
-        page1.set_description("Use any model you want. Your conversations are stored locally.")
-        panel1_desc_label2 = Gtk.Label(label="This wizard will guide you through the initial setup")
+        page1.set_title(_("Own the conversation."))
+        page1.set_description(_("Use any model you want. Your conversations are stored locally."))
+        panel1_desc_label2 = Gtk.Label(label=_("This wizard will guide you through the initial setup"))
         panel1_desc_label2.set_wrap(True)
         panel1_desc_label2.set_justify(Gtk.Justification.CENTER)
         panel1_desc_label2.set_halign(Gtk.Align.CENTER)
         panel1_desc_label2.set_max_width_chars(50)
         vbox1.append(panel1_desc_label2)
-        self.start_button = Gtk.Button(label="Start")
+        self.start_button = Gtk.Button(label=_("Start"))
         self.start_button.add_css_class("suggested-action")
         self.start_button.set_halign(Gtk.Align.CENTER)
         self.start_button.set_valign(Gtk.Align.CENTER)
@@ -153,13 +154,13 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.panel2_app_icon.set_halign(Gtk.Align.CENTER)
         self.panel2_app_icon.set_margin_bottom(12)
         page2_vbox_content.append(self.panel2_app_icon)
-        panel2_desc_label = Gtk.Label(label="Access conversations from the convenience of your system tray")
+        panel2_desc_label = Gtk.Label(label=_("Access conversations from the convenience of your system tray"))
         panel2_desc_label.set_wrap(True)
         panel2_desc_label.set_justify(Gtk.Justification.CENTER)
         panel2_desc_label.set_halign(Gtk.Align.CENTER)
         panel2_desc_label.set_max_width_chars(50)
         page2_vbox_content.append(panel2_desc_label)
-        panel2_desc_label2 = Gtk.Label(label="Would you like to start the applet with your session?")
+        panel2_desc_label2 = Gtk.Label(label=_("Would you like to start the applet with your session?"))
         panel2_desc_label2.set_wrap(True)
         panel2_desc_label2.set_justify(Gtk.Justification.CENTER)
         panel2_desc_label2.set_halign(Gtk.Align.CENTER)
@@ -169,8 +170,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.tray_group.set_hexpand(True)
         self.tray_group.set_halign(Gtk.Align.CENTER)
         self.tray_group.set_margin_top(12)
-        self.tray_radio1 = Gtk.CheckButton(label="Yes, with my session")
-        self.tray_radio2 = Gtk.CheckButton(label="No, only when I start the app")
+        self.tray_radio1 = Gtk.CheckButton(label=_("Yes, with my session"))
+        self.tray_radio2 = Gtk.CheckButton(label=_("No, only when I start the app"))
         self.tray_radio1.set_group(self.tray_radio2)
         self._initialize_tray_options()
         self.tray_radio1.connect('toggled', self._on_tray_option_changed)
@@ -205,7 +206,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.panel3_placeholder.set_hexpand(True)
         self.panel3_placeholder.set_valign(Gtk.Align.CENTER)
         self.panel3_placeholder.set_halign(Gtk.Align.CENTER)
-        placeholder_label = Gtk.Label(label="Loading model selection...")
+        placeholder_label = Gtk.Label(label=_("Loading model selection..."))
         placeholder_label.add_css_class("dim-label")
         self.panel3_placeholder.append(placeholder_label)
         panel3_inner_vbox.append(self.panel3_placeholder)
@@ -215,7 +216,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4 = Adw.StatusPage()
         page4.set_hexpand(True)
         page4.set_halign(Gtk.Align.FILL)
-        page4.set_title("Ready to start!")
+        page4.set_title(_("Ready to start!"))
         page4.set_size_request(700, 450)
         page4_vbox_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page4_vbox_content.set_valign(Gtk.Align.CENTER)
@@ -425,7 +426,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 self.api_key_button.set_visible(False)
                 self.header_bar.pack_start(self.api_key_button)
                 self.api_key_button_packed = True
-            button_text = "Set API Key" if not provider_has_key else "Change API Key"
+            button_text = _("Set API Key") if not provider_has_key else _("Change API Key")
             self.api_key_button.set_label(button_text)
             self.api_key_button.get_style_context().remove_class("suggested-action")
             self.api_key_button.get_style_context().remove_class("destructive-action")
