@@ -119,9 +119,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header.set_title_widget(self.title_widget)
         self.set_title(title)  # Set window title based on initial title
 
-        # Workaround de controles nativos en macOS (con delay de 100ms)
+        # Workaround de controles nativos en macOS (centralizado, con delay para asegurar renderizado)
+        import sys
         if sys.platform == 'darwin':
-            GLib.timeout_add(100, self._macos_native_controls_workaround)
+            def _apply_native_controls():
+                style_manager.apply_macos_native_window_controls(self.header)
+                return False  # Ejecutar solo una vez
+            GLib.idle_add(_apply_native_controls)
 
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
@@ -290,30 +294,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
 
-    def _macos_native_controls_workaround(self):
-        """Busca y activa Gtk.WindowControls existentes en la headerbar (solo macOS, sin crear nuevos)."""
-        self.header.set_decoration_layout('close,minimize,maximize:')
-        if not hasattr(Gtk, 'WindowControls'):
-            return False  # Return False to not repeat the timeout
-            
-        def find_window_controls(parent):
-            if not parent:
-                return None
-            child = parent.get_first_child()
-            while child:
-                # Gtk.WindowControls solo existe en macOS/libadwaita
-                if hasattr(Gtk, 'WindowControls') and isinstance(child, Gtk.WindowControls):
-                    return child
-                found_in_child = find_window_controls(child)
-                if found_in_child:
-                    return found_in_child
-                child = child.get_next_sibling()
-            return None
-            
-        controls = find_window_controls(self.header)
-        if controls:
-            controls.set_use_native_controls(True)
-        return False  # Return False to not repeat the timeout
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):

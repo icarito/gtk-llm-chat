@@ -7,6 +7,7 @@ import os
 import threading
 from platform_utils import debug_print
 from resource_manager import resource_manager
+from style_manager import style_manager
 
 
 class WelcomeWindow(Adw.ApplicationWindow):
@@ -17,15 +18,26 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.panel_titles = ["", "Tray applet", "Default Model", ""]
         self.config_data = {}
 
+        # Cargar estilos globales y aplicar clase principal
+        style_manager.load_styles()
+        style_manager.apply_to_widget(self, "main-container")
+
         # Configurar recursos (solo iconos, sin estilos CSS personalizados)
         resource_manager.setup_icon_theme()
+
+        import sys
+        self.header_bar = Adw.HeaderBar()
+        self.header_bar.set_show_end_title_buttons(True)
+        if sys.platform == 'darwin':
+            def _apply_native_controls():
+                style_manager.apply_macos_native_window_controls(self.header_bar)
+                return False  # Ejecutar solo una vez
+            GLib.idle_add(_apply_native_controls)
 
         # Conectar la señal realize para iniciar la carga de modelos automáticamente
         self.connect('realize', self._on_realize)
         
         root_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.header_bar = Adw.HeaderBar()
-        self.header_bar.set_show_end_title_buttons(True)
         self.prev_button = Gtk.Button()
         self.prev_button.set_icon_name("go-previous-symbolic")
         self.prev_button.add_css_class("flat")

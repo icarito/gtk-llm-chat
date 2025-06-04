@@ -12,6 +12,33 @@ from gi.repository import Gtk, Gdk
 
 
 class StyleManager:
+    def apply_macos_native_window_controls(self, headerbar):
+        """
+        Busca y activa Gtk.WindowControls existentes en la headerbar (solo macOS, sin crear nuevos).
+        Llama a este método después de crear la headerbar y tras mostrar la ventana.
+        """
+        import sys
+        if sys.platform != 'darwin':
+            return False
+        headerbar.set_decoration_layout('close,minimize,maximize:')
+        if not hasattr(Gtk, 'WindowControls'):
+            return False
+        def find_window_controls(parent):
+            if not parent:
+                return None
+            child = parent.get_first_child()
+            while child:
+                if hasattr(Gtk, 'WindowControls') and isinstance(child, Gtk.WindowControls):
+                    return child
+                found_in_child = find_window_controls(child)
+                if found_in_child:
+                    return found_in_child
+                child = child.get_next_sibling()
+            return None
+        controls = find_window_controls(headerbar)
+        if controls:
+            controls.set_use_native_controls(True)
+        return False
     """Gestor centralizado de estilos CSS para la aplicación."""
     
     def __init__(self):
