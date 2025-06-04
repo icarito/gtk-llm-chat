@@ -15,16 +15,11 @@ import threading
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
+from platform_utils import debug_print
 
 from chat_application import _
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
-DEBUG = os.environ.get('DEBUG') or False
-
-
-def debug_print(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
 
 class LLMClient(GObject.Object):
     __gsignals__ = {

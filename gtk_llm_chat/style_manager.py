@@ -4,11 +4,13 @@ style_manager.py - Gestor centralizado de estilos CSS para GTK LLM Chat
 Proporciona estilos consistentes y específicos por plataforma para toda la aplicación.
 """
 
+
 import os
 import sys
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk
+from platform_utils import debug_print
 
 
 class StyleManager:
@@ -65,7 +67,7 @@ class StyleManager:
                 # No se puede hacer globalmente aquí, pero se documenta para aplicar en cada ventana
                 pass
         except Exception as e:
-            print(f"[StyleManager] Error aplicando workaround de plataforma: {e}")
+            debug_print(f"[StyleManager] Error aplicando workaround de plataforma: {e}")
         
     def _detect_platform(self) -> str:
         """Detecta la plataforma actual."""
@@ -445,13 +447,13 @@ class StyleManager:
                     self._css_provider,
                     Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
                 )
-                print(f"✓ CSS styles loaded for platform: {self._platform}")
+                debug_print(f"[OK] CSS styles loaded for platform: {self._platform}")
                 self._styles_loaded = True
             else:
-                print("✗ No default display found for CSS loading")
+                debug_print("[FAIL] No default display found for CSS loading")
                 
         except Exception as e:
-            print(f"✗ Error loading CSS styles: {e}")
+            debug_print(f"[FAIL] Error loading CSS styles: {e}")
     
     def apply_to_widget(self, widget: Gtk.Widget, css_class: str):
         """
@@ -481,19 +483,19 @@ class StyleManager:
     
     def debug_styles(self):
         """Imprime información de debug sobre los estilos."""
-        print("=== STYLE MANAGER DEBUG ===")
-        print(f"Platform: {self._platform}")
-        print(f"Styles loaded: {self._styles_loaded}")
-        print(f"CSS Provider: {self._css_provider is not None}")
+        debug_print("=== STYLE MANAGER DEBUG ===")
+        debug_print(f"Platform: {self._platform}")
+        debug_print(f"Styles loaded: {self._styles_loaded}")
+        debug_print(f"CSS Provider: {self._css_provider is not None}")
         
         if self._css_provider:
             try:
                 # Intentar obtener información del proveedor
-                print("CSS Provider is active")
+                debug_print("CSS Provider is active")
             except Exception as e:
-                print(f"CSS Provider error: {e}")
+                debug_print(f"CSS Provider error: {e}")
         
-        print("=== END STYLE DEBUG ===")
+        debug_print("=== END STYLE DEBUG ===")
 
 
 # Instancia global del gestor de estilos

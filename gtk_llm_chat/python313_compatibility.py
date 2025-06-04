@@ -67,7 +67,7 @@ def patch_add_docstring():
             # Marcar como parchado
             patched_add_docstring._python313_patched = True
             np.add_docstring = patched_add_docstring
-            debug_print("✓ Parche numpy.add_docstring aplicado exitosamente")
+            debug_print("[OK] Parche numpy.add_docstring aplicado exitosamente")
             return True
             
     except ImportError:
@@ -86,12 +86,12 @@ def patch_scipy_extensions():
     try:
         # Intentar parchear problemas conocidos de SciPy
         import scipy
-        debug_print("✓ SciPy detectado, aplicando parches preventivos")
+        debug_print("[OK] SciPy detectado, aplicando parches preventivos")
         
         # Parche para scipy.special si está disponible
         try:
             import scipy.special
-            debug_print("✓ scipy.special importado correctamente")
+            debug_print("[OK] scipy.special importado correctamente")
         except Exception as e:
             if "add_docstring" in str(e):
                 debug_print(f"Problema con scipy.special detectado: {e}")
@@ -122,7 +122,7 @@ def patch_llm_plugin_imports():
         try:
             # Intentar importar el plugin
             plugin = __import__(plugin_name)
-            debug_print(f"✓ Plugin {plugin_name} importado correctamente")
+            debug_print(f"[OK] Plugin {plugin_name} importado correctamente")
             patched_count += 1
             
         except Exception as e:
@@ -139,13 +139,13 @@ def patch_llm_plugin_imports():
                         del sys.modules[plugin_name]
                     
                     plugin = __import__(plugin_name)
-                    debug_print(f"✓ Plugin {plugin_name} recuperado exitosamente")
+                    debug_print(f"OK Plugin {plugin_name} recuperado exitosamente")
                     patched_count += 1
                     
                 except Exception as retry_e:
-                    debug_print(f"✗ Plugin {plugin_name} no pudo ser recuperado: {retry_e}")
+                    debug_print(f"Fail: Plugin {plugin_name} no pudo ser recuperado: {retry_e}")
             else:
-                debug_print(f"✗ Plugin {plugin_name} falló por otra razón: {e}")
+                debug_print(f"Fail: Plugin {plugin_name} falló por otra razón: {e}")
     
     debug_print(f"Plugins LLM procesados exitosamente: {patched_count}/{len(known_problematic_plugins)}")
     return patched_count > 0
@@ -184,7 +184,7 @@ def create_safe_llm_wrapper():
         if not hasattr(llm.get_models, '_python313_patched'):
             llm.get_models = safe_get_models
             llm.get_models._python313_patched = True
-            debug_print("✓ Wrapper seguro LLM.get_models aplicado")
+            debug_print("OK Wrapper seguro LLM.get_models aplicado")
         
         return True
         
@@ -225,7 +225,7 @@ def monkey_patch_c_extensions():
         if sys.version_info >= (3, 13) and not hasattr(__builtins__.__import__, '_python313_patched'):
             __builtins__.__import__ = safe_import
             __builtins__.__import__._python313_patched = True
-            debug_print("✓ Monkey patch de importación aplicado")
+            debug_print("OK Monkey patch de importación aplicado")
             return True
         
     except Exception as e:
@@ -263,7 +263,7 @@ def apply_all_patches():
         debug_print(f"Parches aplicados: {success_count}/{total_count}")
         
         if success_count > 0:
-            debug_print("✓ Sistema de compatibilidad Python 3.13.3 activado")
+            debug_print("OK Sistema de compatibilidad Python 3.13.3 activado")
         else:
             debug_print("⚠ Ningún parche fue aplicado exitosamente")
             

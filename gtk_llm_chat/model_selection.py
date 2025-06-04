@@ -9,11 +9,7 @@ import pathlib
 import json
 
 from chat_application import _
-DEBUG = os.environ.get('DEBUG') or False
-
-def debug_print(*args):
-    if DEBUG:
-        print(*args)
+from platform_utils import debug_print
 
 class ModelSelectionManager(GObject.Object):
     """
@@ -389,12 +385,12 @@ class ModelSelectionManager(GObject.Object):
                 try:
                     keys_path_obj.chmod(0o600)
                 except OSError as chmod_err:
-                    print(f"Error setting permissions for {keys_path}: {chmod_err}")
+                    debug_print(f"Error setting permissions for {keys_path}: {chmod_err}")
 
-            print(f"API Key set for {real_key} in {keys_path}")
+            debug_print(f"API Key set for {real_key} in {keys_path}")
             self.invalidate_keys_cache()
             self.emit('api-key-changed', provider_key)
             return True
         except Exception as e:
-            print(f"Error saving API key: {e}")
+            debug_print(f"Error saving API key: {e}")
             return False

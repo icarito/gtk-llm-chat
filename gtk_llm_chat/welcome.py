@@ -632,7 +632,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.update_navigation_buttons()
         
         if self.model_selector and modelid:
-            print(f"Debug: Intentando seleccionar modelo por defecto: {modelid}")
+            debug_print(f"Debug: Intentando seleccionar modelo por defecto: {modelid}")
             # Verificar si el modelo requiere API key y si está configurada
             provider_key = None
             
@@ -644,7 +644,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                     for model in models:
                         if getattr(model, 'model_id', None) == modelid:
                             provider_key = manager._provider_to_needs_key.get(prov_key)
-                            print(f"Debug: Encontrado modelo {modelid} en proveedor {prov_key}, needs_key: {provider_key}")
+                            debug_print(f"Debug: Encontrado modelo {modelid} en proveedor {prov_key}, needs_key: {provider_key}")
                             break
                     if provider_key is not None:
                         break
@@ -657,10 +657,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
                     for m in all_models:
                         if getattr(m, 'model_id', None) == modelid:
                             provider_key = getattr(m, 'needs_key', None)
-                            print(f"Debug: Encontrado modelo {modelid} directamente, needs_key: {provider_key}")
+                            debug_print(f"Debug: Encontrado modelo {modelid} directamente, needs_key: {provider_key}")
                             break
                 except Exception as e:
-                    print(f"Error buscando modelo en llm.get_models(): {e}")
+                    debug_print(f"Error buscando modelo en llm.get_models(): {e}")
                     provider_key = None
             
             # Consultar el estado de la API key si es necesario
@@ -669,24 +669,24 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 key_status = self.model_manager.check_api_key_status(provider_key)
                 needs_key = key_status.get('needs_key', False)
                 has_key = key_status.get('has_key', False)
-                print(f"Debug: Estado de API key para {provider_key}: needs_key={needs_key}, has_key={has_key}")
+                debug_print(f"Debug: Estado de API key para {provider_key}: needs_key={needs_key}, has_key={has_key}")
                 
                 if needs_key and not has_key:
                     should_select = False
-                    print(f"Debug: No seleccionando modelo {modelid} porque falta API key para {provider_key}")
+                    debug_print(f"Debug: No seleccionando modelo {modelid} porque falta API key para {provider_key}")
             
             # Seleccionar el modelo si es apropiado
             if should_select:
-                print(f"Debug: Seleccionando modelo por defecto: {modelid}")
+                debug_print(f"Debug: Seleccionando modelo por defecto: {modelid}")
                 self.model_selector.pick_model(modelid)
         else:
-            print("Debug: No hay modelo por defecto para seleccionar")
+            debug_print("Debug: No hay modelo por defecto para seleccionar")
             # Intentar seleccionar un modelo disponible
         
         return False
 
     def _on_models_loaded_error(self, error_message):
-        print(f"Background model loading failed: {error_message}")
+        debug_print(f"Background model loading failed: {error_message}")
         return False
 
     def _create_model_selector_if_needed(self, WideModelSelector, ModelSelectionManager):
@@ -712,17 +712,17 @@ class WelcomeWindow(Adw.ApplicationWindow):
             if self.tray_radio1.get_active():
                 success = ensure_load_on_session_startup(True)
                 if success:
-                    print("Autostart habilitado para inicio de sesión")
+                    debug_print("Autostart habilitado para inicio de sesión")
                     self.config_data['tray_startup'] = 'session'
                 else:
-                    print("Error habilitando autostart")
+                    debug_print("Error habilitando autostart")
             else:
                 success = ensure_load_on_session_startup(False)
                 if success:
-                    print("Autostart deshabilitado")
+                    debug_print("Autostart deshabilitado")
                     self.config_data['tray_startup'] = 'application'
                 else:
-                    print("Error deshabilitando autostart")
+                    debug_print("Error deshabilitando autostart")
         except Exception as e:
             debug_print(f"Error configurando autostart: {e}")
 
@@ -733,20 +733,20 @@ class WelcomeWindow(Adw.ApplicationWindow):
             if autostart_enabled:
                 self.tray_radio1.set_active(True)
                 self.config_data['tray_startup'] = 'session'
-                print("Autostart detectado como habilitado")
+                debug_print("Autostart detectado como habilitado")
             else:
                 self.tray_radio2.set_active(True)
                 self.config_data['tray_startup'] = 'application'
-                print("Autostart detectado como deshabilitado")
+                debug_print("Autostart detectado como deshabilitado")
         except Exception as e:
-            print(f"Error verificando estado de autostart: {e}")
+            debug_print(f"Error verificando estado de autostart: {e}")
             self.tray_radio2.set_active(True)
             self.config_data['tray_startup'] = 'application'
 
     def _on_provider_changed(self, stack, pspec):
         """Actualiza los botones cuando se cambia de proveedor."""
         current_provider = stack.get_visible_child_name()
-        print(f"Debug: Proveedor cambiado a: {current_provider}")
+        debug_print(f"Debug: Proveedor cambiado a: {current_provider}")
         if int(round(self.carousel.get_position())) == 2:
             # Usar un timeout pequeño para que el cambio se complete
             GLib.timeout_add(50, self.update_navigation_buttons)
@@ -767,7 +767,7 @@ if __name__ == "__main__":
         settings.set_property("gtk-icon-theme-name", "Adwaita")
     def on_activate(app):
         def welcome_finished_callback(config):
-            print("Welcome flow finished. Config:", config)
+            debug_print("Welcome flow finished. Config:", config)
             app.quit()
         win = WelcomeWindow(app, on_welcome_finished=welcome_finished_callback)
         win.present()

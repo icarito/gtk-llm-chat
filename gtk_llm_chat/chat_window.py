@@ -18,6 +18,7 @@ from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
 from style_manager import style_manager
 from resource_manager import resource_manager
+from platform_utils import debug_print
 import traceback
 
 DEBUG = os.environ.get('DEBUG') or False
@@ -315,7 +316,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             .message-content {
                 padding: 12px 16px;
                 min-width: 300px;
-                word-wrap: break-word;
             }
 
             .user-message .message-content {
@@ -404,9 +404,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 css_provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1  # Mayor prioridad que los estilos base
             )
-            print("✓ Chat-specific CSS loaded successfully")
+            debug_print("[OK] Chat-specific CSS loaded successfully")
         except Exception as e:
-            print(f"✗ Error loading chat CSS: {e}")
+            debug_print(f"[FAIL] Error loading chat CSS: {e}")
 
     def set_conversation_name(self, title):
         """Establece el título de la ventana"""
@@ -748,7 +748,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self.benchmark_startup and self.start_time:
             end_time = time.time()
             elapsed_time = end_time - self.start_time
-            print(f"Startup time: {elapsed_time:.4f} seconds")
+            debug_print(f"Startup time: {elapsed_time:.4f} seconds")
             # Use GLib.idle_add to exit after the current event loop iteration
             GLib.idle_add(self.get_application().quit)
             return  # Don't grab focus if we are exiting

@@ -1,5 +1,3 @@
-# -*- mode: python ; coding: utf-8 -*-
-
 from argparse import ArgumentParser
 from platform import system
 from PyInstaller.building.datastruct import TOC

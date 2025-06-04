@@ -4,7 +4,7 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import sys
 import time
-from platform_utils import launch_tray_applet, fork_or_spawn_applet
+from platform_utils import launch_tray_applet, fork_or_spawn_applet, debug_print
 
 # Aplicar patch de compatibilidad NumPy/Python 3.13 lo antes posible
 def apply_numpy_python313_compatibility_patch():
@@ -37,7 +37,7 @@ def apply_numpy_python313_compatibility_patch():
                         
                     except Exception as e:
                         if "add_docstring" in str(e) and "should be a str" in str(e):
-                            print(f"Intercepted add_docstring error in {name}: {e}")
+                            debug_print(f"Intercepted add_docstring error in {name}: {e}")
                             
                             # Parche de emergencia: buscar y patchear add_docstring globalmente
                             _emergency_patch_add_docstring()
@@ -46,7 +46,7 @@ def apply_numpy_python313_compatibility_patch():
                             try:
                                 return original_import(name, globals, locals, fromlist, level)
                             except Exception as retry_e:
-                                print(f"Failed to import {name} even after emergency patch: {retry_e}")
+                                debug_print(f"Failed to import {name} even after emergency patch: {retry_e}")
                                 raise e
                         else:
                             raise
@@ -92,10 +92,10 @@ def apply_numpy_python313_compatibility_patch():
                                 
                                 safe_add_docstring._python313_safe = True
                                 setattr(obj, attr, safe_add_docstring)
-                                print(f"✓ Patched add_docstring in {module_name}.{attr}")
+                                debug_print(f"[OK] Patched add_docstring in {module_name}.{attr}")
                                 
                             except Exception as patch_e:
-                                print(f"Warning: Could not patch {module_name}.{attr}: {patch_e}")
+                                debug_print(f"Warning: Could not patch {module_name}.{attr}: {patch_e}")
                 
                 def _emergency_patch_add_docstring():
                     """Parche de emergencia que busca add_docstring en todos los módulos."""
@@ -106,10 +106,10 @@ def apply_numpy_python313_compatibility_patch():
                 # Aplicar el wrapper
                 builtins.__import__ = safe_import_wrapper
                 builtins.__import__._numpy_python313_patched = True
-                print("✓ NumPy Python 3.13 compatibility wrapper installed")
+                debug_print("[OK] NumPy Python 3.13 compatibility wrapper installed")
                 
         except Exception as e:
-            print(f"Warning: Could not install NumPy compatibility patch: {e}")
+            debug_print(f"Warning: Could not install NumPy compatibility patch: {e}")
 
 # Ejecutar el patch inmediatamente al cargar este módulo
 apply_numpy_python313_compatibility_patch()

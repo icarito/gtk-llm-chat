@@ -60,12 +60,12 @@ def spawn_tray_applet(config):
         if not config.get('applet'):
             # Relanzar el propio ejecutable con --applet
             args = [sys.executable, "--applet"]
-            print(f"[platform_utils] Lanzando applet (frozen): {args}")
+            debug_print(f"[platform_utils] Lanzando applet (frozen): {args}")
     else:
         # Ejecutar tray_applet.py con el intérprete
         applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
         args = [sys.executable, applet_path, '--applet']
-        print(f"[platform_utils] Lanzando applet (no frozen): {args}")
+        debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
     subprocess.Popen(args)
 
 def send_ipc_open_conversation(cid):
@@ -73,9 +73,9 @@ def send_ipc_open_conversation(cid):
     Envía una señal para abrir una conversación desde el applet a la app principal.
     En Linux usa D-Bus (Gio), en otros sistemas o si D-Bus falla, usa línea de comandos.
     """
-    print(f"Enviando IPC para abrir conversación con CID: '{cid}'")
+    debug_print(f"Enviando IPC para abrir conversación con CID: '{cid}'")
     if cid is not None and not isinstance(cid, str):
-        print(f"ADVERTENCIA: El CID no es un string, es {type(cid)}")
+        debug_print(f"ADVERTENCIA: El CID no es un string, es {type(cid)}")
         try:
             cid = str(cid)
         except Exception:
@@ -91,7 +91,7 @@ def send_ipc_open_conversation(cid):
             if cid is None:
                 cid = ""
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            print(f"D-Bus: Conectado al bus, enviando mensaje OpenConversation con CID: '{cid}'")
+            debug_print(f"D-Bus: Conectado al bus, enviando mensaje OpenConversation con CID: '{cid}'")
             variant = GLib.Variant('(s)', (cid,))
             bus.call_sync(
                 'org.fuentelibre.gtk_llm_Chat',
@@ -104,11 +104,11 @@ def send_ipc_open_conversation(cid):
                 -1,
                 None
             )
-            print("D-Bus: Mensaje enviado correctamente")
+            debug_print("D-Bus: Mensaje enviado correctamente")
             return True
         except Exception as e:
-            print(f"Error enviando IPC D-Bus: {e}")
-            print("Fallback a línea de comandos...")
+            debug_print(f"Error enviando IPC D-Bus: {e}")
+            debug_print("Fallback a línea de comandos...")
 
     # Fallback multiplataforma o si D-Bus falló
     if is_frozen():
@@ -116,7 +116,7 @@ def send_ipc_open_conversation(cid):
         args = [exe]
         if cid:
             args.append(f"--cid={cid}")
-        print(f"Ejecutando fallback (frozen): {args}")
+        debug_print(f"Ejecutando fallback (frozen): {args}")
         subprocess.Popen(args)
     else:
         exe = sys.executable
@@ -124,7 +124,7 @@ def send_ipc_open_conversation(cid):
         args = [exe, main_path]
         if cid:
             args.append(f"--cid={cid}")
-        print(f"Ejecutando fallback (no frozen): {args}")
+        debug_print(f"Ejecutando fallback (no frozen): {args}")
         subprocess.Popen(args)
 
 def fork_or_spawn_applet(config={}):
@@ -425,9 +425,9 @@ def debug_frozen_environment():
     for pkg in core_and_plugins:
         try:
             mod = __import__(pkg)
-            debug_print(f"  ✓ {pkg} importado correctamente: {getattr(mod, '__file__', 'builtin')}")
+            debug_print(f"  [OK] {pkg} importado correctamente: {getattr(mod, '__file__', 'builtin')}")
         except Exception as e:
-            debug_print(f"  ✗ {pkg} ERROR: {e}")
+            debug_print(f"  [FAIL] {pkg} ERROR: {e}")
             # Diagnóstico más profundo del error
             if "add_docstring" in str(e):
                 debug_print(f"    >> Error de add_docstring detectado en {pkg}")
@@ -465,15 +465,15 @@ def debug_frozen_environment():
     # Verificar si hay conflictos de extensiones C
     try:
         import sqlite3
-        debug_print(f"✓ sqlite3 importado correctamente: {sqlite3.version}")
+        debug_print(f"[OK] sqlite3 importado correctamente: {sqlite3.version}")
     except Exception as e:
-        debug_print(f"✗ Error importando sqlite3: {e}")
+        debug_print(f"[FAIL] Error importando sqlite3: {e}")
     
     try:
         import json
-        debug_print(f"✓ json importado correctamente")
+        debug_print(f"[OK] json importado correctamente")
     except Exception as e:
-        debug_print(f"✗ Error importando json: {e}")
+        debug_print(f"[FAIL] Error importando json: {e}")
     
     # Verificar bibliotecas compiladas comunes
     test_imports = ['hashlib', 'ssl', '_socket', 'zlib', 'bz2']
@@ -481,14 +481,14 @@ def debug_frozen_environment():
     for mod in test_imports:
         try:
             __import__(mod)
-            debug_print(f"  ✓ {mod}")
+            debug_print(f"  [OK] {mod}")
         except Exception as e:
-            debug_print(f"  ✗ {mod}: {e}")
+            debug_print(f"  [FAIL] {mod}: {e}")
     
     # Verificar disponibilidad de LLM si se pudo importar
     try:
         import llm
-        debug_print(f"✓ LLM importado correctamente")
+        debug_print(f"[OK] LLM importado correctamente")
         debug_print(f"LLM version: {getattr(llm, '__version__', 'desconocida')}")
         
         # Obtener modelos disponibles
@@ -509,17 +509,17 @@ def debug_frozen_environment():
                 debug_print(f"  {provider}: {count} modelos")
                 
         except Exception as e:
-            debug_print(f"✗ Error obteniendo modelos: {e}")
+            debug_print(f"[FAIL] Error obteniendo modelos: {e}")
             
         # Verificar modelo por defecto
         try:
             default_model = llm.get_default_model()
             debug_print(f"Modelo por defecto del sistema: {default_model}")
         except Exception as e:
-            debug_print(f"✗ Error obteniendo modelo por defecto: {e}")
+            debug_print(f"[FAIL] Error obteniendo modelo por defecto: {e}")
             
     except ImportError as e:
-        debug_print(f"✗ Error importando LLM: {e}")
+        debug_print(f"[FAIL] Error importando LLM: {e}")
     
     debug_print("=== FIN DIAGNÓSTICO ENTORNO CONGELADO ===\n")
 
@@ -540,16 +540,16 @@ def debug_database_monitoring():
         debug_print(f"Ruta logs.db: {logs_db_path}")
         
         if os.path.exists(logs_db_path):
-            debug_print("✓ logs.db existe")
+            debug_print("[OK] logs.db existe")
             stat = os.stat(logs_db_path)
             debug_print(f"  Tamaño: {stat.st_size} bytes")
             debug_print(f"  Última modificación: {stat.st_mtime}")
         else:
-            debug_print("✗ logs.db no existe")
+            debug_print("[FAIL] logs.db no existe")
             
         # Verificar directorio padre
         if os.path.exists(user_dir):
-            debug_print(f"✓ Directorio de usuario existe")
+            debug_print(f"[OK] Directorio de usuario existe")
             try:
                 contents = os.listdir(user_dir)
                 debug_print(f"  Contenido del directorio ({len(contents)} elementos):")
@@ -558,12 +558,12 @@ def debug_database_monitoring():
                 if len(contents) > 10:
                     debug_print(f"    ... y {len(contents) - 10} más")
             except Exception as e:
-                debug_print(f"  ✗ Error listando directorio: {e}")
+                debug_print(f"  [FAIL] Error listando directorio: {e}")
         else:
-            debug_print("✗ Directorio de usuario no existe")
+            debug_print("[FAIL] Directorio de usuario no existe")
             
     except Exception as e:
-        debug_print(f"✗ Error en diagnóstico de base de datos: {e}")
+        debug_print(f"[FAIL] Error en diagnóstico de base de datos: {e}")
     
     debug_print("=== FIN DIAGNÓSTICO BASE DE DATOS ===\n")
 

@@ -289,7 +289,7 @@ class ChatSidebar(Gtk.Box):
              try:
                   self.llm_client.set_temperature(temperature)
              except Exception as e:
-                  print(f"Error setting temperature in LLM client: {e}")
+                  debug_print(f"Error setting temperature in LLM client: {e}")
         self._update_temperature_subtitle() # Actualizar subtítulo de temperatura
 
     def _update_temperature_subtitle(self):

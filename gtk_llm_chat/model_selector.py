@@ -154,7 +154,7 @@ class ModelSelectorWidget(Gtk.Box):
             row.set_activatable(True)
             row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
             row.provider_key = provider_key
-            print(f"DEBUG: Created row for provider '{provider_key}' (type: {type(provider_key)}) with {model_count} models")
+            debug_print(f"DEBUG: Created row for provider '{provider_key}' (type: {type(provider_key)}) with {model_count} models")
             self.provider_list.append(row)
 
     def _clear_list_box(self, list_box):
@@ -170,57 +170,57 @@ class ModelSelectorWidget(Gtk.Box):
         # Usar hasattr para distinguir entre "no tiene atributo" vs "atributo es None"
         if hasattr(row, 'provider_key'):
             provider_key = row.provider_key
-            print(f"DEBUG: Row activated - provider_key: {provider_key} (type: {type(provider_key)})")
-            print(f"DEBUG: Calling _populate_model_list for {provider_key}")
+            debug_print(f"DEBUG: Row activated - provider_key: {provider_key} (type: {type(provider_key)})")
+            debug_print(f"DEBUG: Calling _populate_model_list for {provider_key}")
             self._populate_model_list(provider_key)
-            print(f"DEBUG: Setting stack to 'models' page")
+            debug_print(f"DEBUG: Setting stack to 'models' page")
             self.stack.set_visible_child_name("models")
         else:
-            print(f"DEBUG: Row does not have provider_key attribute, no action taken")
+            debug_print(f"DEBUG: Row does not have provider_key attribute, no action taken")
 
     def _populate_model_list(self, provider_key):
         """Puebla la lista de modelos para el proveedor seleccionado."""
-        print(f"DEBUG: _populate_model_list called with provider_key: {provider_key} (type: {type(provider_key)})")
+        debug_print(f"DEBUG: _populate_model_list called with provider_key: {provider_key} (type: {type(provider_key)})")
         self._clear_list_box(self.model_list)
         self._selected_provider_key = provider_key
         
         # DEBUG: Imprimir información del proveedor
-        print(f"DEBUG: Proveedor seleccionado: {provider_key}")
+        debug_print(f"DEBUG: Proveedor seleccionado: {provider_key}")
         
         # Obtener modelos primero para determinar si necesita API key
         models = self.manager.get_models_for_provider(provider_key)
-        print(f"DEBUG: Modelos encontrados para {provider_key}: {len(models) if models else 0}")
+        debug_print(f"DEBUG: Modelos encontrados para {provider_key}: {len(models) if models else 0}")
         if models:
-            print(f"DEBUG: Primeros 3 modelos: {[getattr(m, 'model_id', 'NO_ID') for m in models[:3]]}")
+            debug_print(f"DEBUG: Primeros 3 modelos: {[getattr(m, 'model_id', 'NO_ID') for m in models[:3]]}")
         
         # Actualizar banner de API key
         key_status = self.manager.check_api_key_status(provider_key)
-        print(f"DEBUG: Key status para {provider_key}: {key_status}")
+        debug_print(f"DEBUG: Key status para {provider_key}: {key_status}")
         
         # Si no hay modelos y el proveedor no es "local/other", asumir que necesita API key
         needs_api_key = key_status.get('needs_key', False)
         if not models and provider_key not in [None, '', 'local', 'local/other', 'ollama']:
-            print(f"DEBUG: No hay modelos para {provider_key}, asumiendo que necesita API key")
+            debug_print(f"DEBUG: No hay modelos para {provider_key}, asumiendo que necesita API key")
             needs_api_key = True
         
         if needs_api_key:
-            print(f"DEBUG: Proveedor {provider_key} necesita API key")
+            debug_print(f"DEBUG: Proveedor {provider_key} necesita API key")
             if key_status.get('has_key', False):
-                print(f"DEBUG: API key ya configurada para {provider_key}")
+                debug_print(f"DEBUG: API key ya configurada para {provider_key}")
                 self.api_key_banner.set_title(_("API Key is configured"))
                 self.api_key_banner.set_button_label(_("Change Key"))
                 self.api_button.remove_css_class("error")
                 self.api_button.add_css_class("success")
             else:
-                print(f"DEBUG: API key NO configurada para {provider_key}")
+                debug_print(f"DEBUG: API key NO configurada para {provider_key}")
                 self.api_key_banner.set_title(_("API Key Required"))
                 self.api_key_banner.set_button_label(_("Set Key"))
                 self.api_button.remove_css_class("success")
                 self.api_button.add_css_class("error")
-            print(f"DEBUG: Mostrando banner para {provider_key}")
+            debug_print(f"DEBUG: Mostrando banner para {provider_key}")
             self.api_key_banner.set_revealed(True)
         else:
-            print(f"DEBUG: Proveedor {provider_key} NO necesita API key, ocultando banner")
+            debug_print(f"DEBUG: Proveedor {provider_key} NO necesita API key, ocultando banner")
             self.api_key_banner.set_revealed(False)
 
         # Emitir señal de cambio de estado de API key
@@ -231,13 +231,13 @@ class ModelSelectorWidget(Gtk.Box):
             # Si no hay modelos pero el proveedor requiere API key, mostrar el banner
             if needs_api_key and not has_key:
                 # El banner ya está configurado arriba, solo añadir mensaje explicativo
-                print(f"DEBUG: Mostrando mensaje de API key requerida")
+                debug_print(f"DEBUG: Mostrando mensaje de API key requerida")
                 row = Adw.ActionRow(title=_("No models available"))
                 row.set_subtitle(_("Configure an API key to access models from this provider"))
                 row.set_selectable(False)
                 self.model_list.append(row)
             else:
-                print(f"DEBUG: Mostrando mensaje genérico de no modelos")
+                debug_print(f"DEBUG: Mostrando mensaje genérico de no modelos")
                 row = Adw.ActionRow(title=_("No models found for this provider"))
                 row.set_selectable(False)
                 self.model_list.append(row)
@@ -367,7 +367,7 @@ if __name__ == '__main__':
             
             # Conectar señal de modelo seleccionado
             def on_model_selected(widget, model_id):
-                print(f"Modelo seleccionado: {model_id}")
+                debug_print(f"Modelo seleccionado: {model_id}")
             
             selector.connect('model-selected', on_model_selected)
             

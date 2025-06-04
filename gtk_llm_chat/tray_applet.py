@@ -8,14 +8,14 @@ import locale
 import gettext
 import threading
 
-from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux, is_mac
+from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux, is_mac, debug_print
 from gtk_llm_chat.db_operations import ChatHistory
 
 try:
     import pystray
     from PIL import Image
 except ImportError:
-    print("pystray y pillow son requeridos para el applet de bandeja.")
+    debug_print("pystray y pillow son requeridos para el applet de bandeja.")
     sys.exit(1)
 
 if is_linux():
@@ -80,7 +80,7 @@ def make_conv_action(cid):
     def action(icon, item):
         # Asegura que el cid es string y nunca un objeto MenuItem
         if not isinstance(cid, str):
-            print(f"[tray_applet] ADVERTENCIA: cid no es string, es {type(cid)}: {cid}")
+            debug_print(f"[tray_applet] ADVERTENCIA: cid no es string, es {type(cid)}: {cid}")
             return
         open_conversation(cid)
     return action
@@ -132,7 +132,7 @@ class DBMonitor:
             file = Gio.File.new_for_path(self.db_path)
             self.file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
             self.file_monitor.connect("changed", self._on_file_changed)
-            print(f"[tray_applet] Monitoreando archivo existente logs.db")
+            debug_print(f"[tray_applet] Monitoreando archivo existente logs.db")
         else:
             # Si no existe logs.db, solo monitoreamos el directorio para su creación
             dir_path = os.path.dirname(self.db_path)
@@ -140,13 +140,13 @@ class DBMonitor:
             self.dir_monitor = dir_file.monitor_directory(Gio.FileMonitorFlags.NONE, None)
             self.dir_monitor.connect("changed", self._on_dir_changed)
             self.file_monitor = None
-            print(f"[tray_applet] Esperando creación de logs.db en {dir_path}")
+            debug_print(f"[tray_applet] Esperando creación de logs.db en {dir_path}")
     
     def _on_dir_changed(self, monitor, file, other_file, event_type):
         """Detecta específicamente cuando se crea el archivo logs.db."""
         # Solo reaccionar si se crea logs.db (ningún otro archivo)
         if file and file.get_basename() == self.db_filename and event_type == Gio.FileMonitorEvent.CREATED:
-            print(f"[tray_applet] logs.db ha sido creado, iniciando monitorización del archivo")
+            debug_print(f"[tray_applet] logs.db ha sido creado, iniciando monitorización del archivo")
             self.dir_monitor.cancel()
             file_obj = Gio.File.new_for_path(self.db_path)
             self.file_monitor = file_obj.monitor_file(Gio.FileMonitorFlags.NONE, None)
@@ -168,7 +168,7 @@ if not is_linux():
             self.db_filename = os.path.basename(db_path)
             self.on_change = on_change
             self._last_change_time = 0
-            print(f"[tray_applet] Iniciando monitor simplificado para: {self.db_path}")
+            debug_print(f"[tray_applet] Iniciando monitor simplificado para: {self.db_path}")
 
         def _safe_on_change(self):
             """Llama on_change de forma segura con limitación de frecuencia"""
@@ -180,10 +180,10 @@ if not is_linux():
             self._last_change_time = current_time
             
             try:
-                print(f"[tray_applet] Detectado cambio en logs.db, actualizando menú")
+                debug_print(f"[tray_applet] Detectado cambio en logs.db, actualizando menú")
                 self.on_change()
             except Exception as e:
-                print(f"[tray_applet] Error al actualizar menú: {e}")
+                debug_print(f"[tray_applet] Error al actualizar menú: {e}")
 
         def on_modified(self, event):
             # Solo reaccionar si es logs.db
@@ -195,7 +195,7 @@ if not is_linux():
             # Solo reaccionar si es logs.db
             if (not event.is_directory and 
                 os.path.basename(event.src_path) == self.db_filename):
-                print(f"[tray_applet] logs.db ha sido creado")
+                debug_print(f"[tray_applet] logs.db ha sido creado")
                 self._safe_on_change()
 
         def on_moved(self, event):

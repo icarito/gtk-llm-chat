@@ -13,6 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, GdkPixbuf, Gio, Gdk
+from platform_utils import debug_print
 
 
 class ResourceManager:
@@ -88,7 +89,7 @@ class ResourceManager:
                 full_path, size, size, True
             )
         except Exception as e:
-            print(f"Error loading icon {full_path}: {e}")
+            debug_print(f"Error loading icon {full_path}: {e}")
             return None
     
     def setup_icon_theme(self):
@@ -97,14 +98,14 @@ class ResourceManager:
             return
             
         if not Gtk.is_initialized():
-            print("✗ GTK not initialized, skipping icon theme setup")
+            debug_print("[FAIL] GTK not initialized, skipping icon theme setup")
             return
             
         try:
             # Obtener el display por defecto
             display = Gdk.Display.get_default()
             if not display:
-                print("✗ No default display available")
+                debug_print("[FAIL] No default display available")
                 return
                 
             icon_theme = Gtk.IconTheme.get_for_display(display)
@@ -127,13 +128,13 @@ class ResourceManager:
             for icon_dir in icon_dirs:
                 if os.path.exists(icon_dir):
                     icon_theme.add_search_path(icon_dir)
-                    print(f"✓ Added icon search path: {icon_dir}")
+                    debug_print(f"[OK] Added icon search path: {icon_dir}")
             
             self._icon_theme_configured = True
-            print("✓ Icon theme configured successfully")
+            debug_print("[OK] Icon theme configured successfully")
             
         except Exception as e:
-            print(f"✗ Error configuring icon theme: {e}")
+            debug_print(f"[FAIL] Error configuring icon theme: {e}")
     
     def create_image_widget(self, image_path: str, size: int = -1) -> Gtk.Image:
         """
@@ -230,9 +231,9 @@ class ResourceManager:
         for resource in test_resources:
             path = self.get_image_path(resource)
             exists = path and os.path.exists(path)
-            print(f"Resource {resource}: {'✓' if exists else '✗'} ({path})")
+            debug_print(f"Resource {resource}: {'[OK]' if exists else '[FAIL]'} ({path})")
         
-        print("=== END RESOURCE DEBUG ===")
+        debug_print("=== END RESOURCE DEBUG ===")
 
 
 # Instancia global del gestor de recursos

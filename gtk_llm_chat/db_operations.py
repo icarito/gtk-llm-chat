@@ -18,7 +18,7 @@ from llm.migrations import migrate
 _ = gettext.gettext
 
 def debug_print(*args, **kwargs):
-    logging.debug(*args, **kwargs)
+    print(*args, **kwargs)
 
 class ChatHistory:
     def __init__(self, db_path: Optional[str] = None):
@@ -212,7 +212,7 @@ class ChatHistory:
                 self._add_fragments(response_id, system_fragments, 'system_fragments')
 
         except sqlite3.Error as e:
-            print(_(f"Error adding entry to history: {e}"))
+            debug_print(_(f"Error adding entry to history: {e}"))
             conn.rollback()
         finally:
             self.close_connection()
@@ -229,7 +229,7 @@ class ChatHistory:
             """, (conversation_id, name, model))
             conn.commit()
         except sqlite3.Error as e:
-            print(_(f"Error creating conversation record: {e}"))
+            debug_print(_(f"Error creating conversation record: {e}"))
             conn.rollback()
         finally:
             self.close_connection()
@@ -247,12 +247,12 @@ class ChatHistory:
                     VALUES (?, ?, ?)
                 """, (response_id, fragment_id, order)) # Usar el ID entero
             except ValueError as e:
-                print(f"Error adding fragment '{fragment_specifier}': {e}")
+                debug_print(f"Error adding fragment '{fragment_specifier}': {e}")
             except sqlite3.IntegrityError as e:
                  # Manejar posibles errores de PK duplicado si la lógica de orden/ID es incorrecta
-                 print(f"Integrity error adding fragment '{fragment_specifier}' for response {response_id}: {e}")
+                 debug_print(f"Integrity error adding fragment '{fragment_specifier}' for response {response_id}: {e}")
             except sqlite3.Error as e:
-                 print(f"Database error adding fragment '{fragment_specifier}': {e}")
+                 debug_print(f"Database error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
         self.close_connection()
 
