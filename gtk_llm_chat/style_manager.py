@@ -18,6 +18,27 @@ class StyleManager:
         self._css_provider = None
         self._styles_loaded = False
         self._platform = self._detect_platform()
+        self._apply_platform_workarounds()
+
+    def _apply_platform_workarounds(self):
+        """
+        Aplica workarounds de plataforma que no pueden resolverse solo con CSS.
+        - Tipografía Segoe UI en Windows
+        - Controles nativos en MacOS (si aplica)
+        """
+        try:
+            if self._platform == 'windows':
+                settings = Gtk.Settings.get_default()
+                if settings:
+                    settings.set_property('gtk-font-name', 'Segoe UI')
+            elif self._platform == 'macos':
+                # Workaround: usar controles nativos en headerbar si es posible
+                # Esto requiere que la ventana tenga un headerbar con set_decoration_layout
+                # y que los controles sean instanciados como Gtk.WindowControls
+                # No se puede hacer globalmente aquí, pero se documenta para aplicar en cada ventana
+                pass
+        except Exception as e:
+            print(f"[StyleManager] Error aplicando workaround de plataforma: {e}")
         
     def _detect_platform(self) -> str:
         """Detecta la plataforma actual."""
@@ -286,20 +307,23 @@ class StyleManager:
             return """
             /* === ESTILOS ESPECÍFICOS PARA WINDOWS === */
             
-            /* Remover sombras que no se ven bien en Windows */
+            /* Remover sombras y bordes redondeados que no se ven bien en Windows */
             window {
                 box-shadow: none;
-            }
-            
-            /* Ajustar márgenes para Windows */
-            .main-container {
-                margin: 0;
+                margin: -12px;
+                border-radius: 0px;
+                padding: 6px;
             }
             
             /* Botones más planos para Windows */
             button {
                 box-shadow: none;
-                border-radius: 4px;
+                border-radius: 0px;
+            }
+
+            /* Usar tipografía Segoe UI (también aplicado vía workaround en Python) */
+            .main-container, body, window, * {
+                font-family: 'Segoe UI', Arial, sans-serif;
             }
             
             /* Scrollbars estilo Windows */
@@ -310,36 +334,19 @@ class StyleManager:
             
             scrollbar slider {
                 background-color: alpha(@theme_fg_color, 0.3);
-                border-radius: 2px;
+                border-radius: 0;
             }
-            
             scrollbar slider:hover {
                 background-color: alpha(@theme_fg_color, 0.5);
             }
             """
-        
         elif self._platform == 'macos':
             return """
             /* === ESTILOS ESPECÍFICOS PARA macOS === */
             
-            /* Ventanas con esquinas redondeadas */
+            /* Ventanas con esquinas redondeadas y ajuste de ángulo */
             window {
-                border-radius: 8px;
-            }
-            
-            /* HeaderBar estilo macOS */
-            headerbar {
-                background: linear-gradient(to bottom,
-                                          alpha(@theme_bg_color, 0.98),
-                                          alpha(@theme_bg_color, 0.95));
-                border-bottom: 1px solid alpha(@theme_fg_color, 0.2);
-                border-radius: 8px 8px 0 0;
-            }
-            
-            /* Botones estilo macOS */
-            button {
-                border-radius: 6px;
-                border: 1px solid alpha(@theme_fg_color, 0.2);
+                border-radius: 10px;
             }
             
             /* Scrollbars estilo macOS */
@@ -359,7 +366,6 @@ class StyleManager:
                 background-color: alpha(@theme_fg_color, 0.6);
             }
             """
-        
         else:  # Linux
             return """
             /* === ESTILOS ESPECÍFICOS PARA LINUX === */

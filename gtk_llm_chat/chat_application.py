@@ -57,11 +57,7 @@ class LLMChatApplication(Adw.Application):
         signal.signal(signal.SIGINT, self._handle_sigint)
         self.connect('shutdown', self.on_shutdown)  # Conectar señal shutdown
 
-        # Windows-specific adjustments
-        if sys.platform == "win32":
-            settings = Gtk.Settings.get_default()
-            if settings:
-                settings.set_property('gtk-font-name', 'Segoe UI')
+
 
         # Force dark mode until we've tested / liked light mode (issue #25)
         style_manager = Adw.StyleManager.get_default()
