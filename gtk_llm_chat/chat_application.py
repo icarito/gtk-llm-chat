@@ -12,6 +12,7 @@ require_versions({"Gtk": "4.0", "Adw": "1"})
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import locale
 import gettext
+import llm
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_operations import ChatHistory
@@ -47,16 +48,16 @@ class LLMChatApplication(Adw.Application):
 
         self._shutting_down = False  # Bandera para controlar proceso de cierre
         self._window_by_cid = {}  # Mapa de CID -> ventana
+        
+        debug_print("LLMChatApplication.__init__: Verificando si se necesita configuración inicial...")
+        self._needs_initial_setup = self._check_initial_setup_needed()
+        debug_print(f"LLMChatApplication.__init__: _needs_initial_setup = {self._needs_initial_setup}")
 
         # Add signal handler
         signal.signal(signal.SIGINT, self._handle_sigint)
         self.connect('shutdown', self.on_shutdown)  # Conectar señal shutdown
 
-        # Windows-specific adjustments
-        if sys.platform == "win32":
-            settings = Gtk.Settings.get_default()
-            if settings:
-                settings.set_property('gtk-font-name', 'Segoe UI')
+
 
         # Force dark mode until we've tested / liked light mode (issue #25)
         style_manager = Adw.StyleManager.get_default()
@@ -234,33 +235,95 @@ class LLMChatApplication(Adw.Application):
                 only_applet = True
             elif arg.startswith("--legacy-applet"):
                 legacy_applet = True
-            # Puedes añadir más parámetros según sea necesario
 
         # Guardar esta configuración para usarla
         debug_print(f"Configuración preparada: {config}")
 
-        # Abrir ventana de conversación con la configuración extraída
+        # Solo proceder con la ventana si no es modo applet
         if not only_applet:
-            # Si no hay argumentos relevantes y la app ya está corriendo, 
-            # crear una nueva ventana vacía. Esto asegura que al invocar la app 
-            # sin argumentos siempre se cree una nueva ventana.
-            if not has_args and self.get_active_window():
-                debug_print("Aplicación ya en ejecución sin argumentos, creando nueva ventana")
-                self.open_conversation_window({})
+            # Verificar si se necesita mostrar el asistente de configuración inicial
+            if self._needs_initial_setup:
+                debug_print("Mostrando asistente de configuración inicial desde command_line")
+                self._show_welcome_window()
             else:
-                self.open_conversation_window(config)
-                
+                # Si no hay argumentos relevantes y la app ya está corriendo, 
+                # crear una nueva ventana vacía
+                if not has_args and self.get_active_window():
+                    debug_print("Aplicación ya en ejecución sin argumentos, creando nueva ventana")
+                    self.open_conversation_window({})
+                else:
+                    self.open_conversation_window(config)
+                    
         if legacy_applet:
             self._applet_loaded = True
 
         return 0
 
+    def _check_initial_setup_needed(self):
+        """
+        Verifica si se necesita mostrar el asistente de configuración inicial.
+        
+        Returns:
+            bool: True si se necesita mostrar el asistente, False si ya hay configuración
+        """
+        try:
+            # Obtener la ruta de la base de datos usando ensure_user_dir_exists()
+            from platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
+            db_path = os.path.join(user_dir, "logs.db")
+            
+            debug_print(f"_check_initial_setup_needed: user_dir = {user_dir}")
+            debug_print(f"_check_initial_setup_needed: db_path = {db_path}")
+            debug_print(f"_check_initial_setup_needed: user_dir exists = {os.path.exists(user_dir)}")
+            debug_print(f"_check_initial_setup_needed: db_path exists = {os.path.exists(db_path)}")
+            
+            # Si no existe el archivo logs.db, es la primera vez
+            if not os.path.exists(db_path):
+                debug_print("_check_initial_setup_needed: Configuración inicial necesaria: logs.db no existe")
+                return True
+            
+            debug_print("_check_initial_setup_needed: Configuración inicial no necesaria: ya existe configuración")
+            return False
+            
+        except Exception as e:
+            debug_print(f"_check_initial_setup_needed: Error verificando configuración inicial: {e}")
+            # En caso de error, proceder normalmente sin el asistente
+            return False
+
     def do_activate(self):
         """Activa la aplicación y crea una nueva ventana utilizando la configuración actual."""
         Adw.Application.do_activate(self)
         debug_print("do_activate invocado")
+        debug_print(f"do_activate: self._needs_initial_setup = {self._needs_initial_setup}")
 
-        self.open_conversation_window()
+        # Verificar si se necesita mostrar el asistente de configuración inicial
+        if self._needs_initial_setup:
+            debug_print("Mostrando asistente de configuración inicial")
+            self._show_welcome_window()
+        else:
+            debug_print("Procediendo con ventana de chat normal")
+            self.open_conversation_window()
+
+    def _show_welcome_window(self):
+        """Muestra el asistente de configuración inicial."""
+        try:
+            from welcome import WelcomeWindow
+            
+            # Definimos un método que se llamará cuando el usuario termine el asistente
+            def on_welcome_finished(config_data=None):
+                """Callback que se ejecuta cuando el usuario completa el asistente."""
+                debug_print("Asistente de configuración completado")
+                
+                # Continuar con la apertura de la ventana de chat
+                self.open_conversation_window()
+            
+            welcome_window = WelcomeWindow(self, on_welcome_finished=on_welcome_finished)
+            welcome_window.present()
+            
+        except Exception as e:
+            debug_print(f"Error mostrando ventana de bienvenida: {e}")
+            # Si hay error con el asistente, proceder con la ventana normal
+            self.open_conversation_window()
 
     def _create_new_window_with_config(self, config):
         """Crea una nueva ventana con la configuración dada."""
@@ -324,7 +387,7 @@ class LLMChatApplication(Adw.Application):
         window.title_entry.grab_focus()
 
     def on_delete_activate(self, action, param):
-        """Deletes the current conversation"""
+        """Elimina la conversación actual solo si tiene historial, si no cierra la ventana directamente."""
         window = self.get_active_window()
 
         # Verificar que tenemos una ventana y acceder a su configuración
@@ -332,27 +395,41 @@ class LLMChatApplication(Adw.Application):
             debug_print("No se puede eliminar: ventana inválida o sin configuración")
             return
 
-        dialog = Gtk.MessageDialog(
+        cid = window.config.get('cid')
+        chat_history = getattr(window, 'chat_history', None)
+        has_history = False
+        if cid and chat_history:
+            try:
+                history_entries = chat_history.get_conversation_history(cid)
+                has_history = bool(history_entries)
+            except Exception as e:
+                debug_print(f"Error consultando historial para CID {cid}: {e}")
+
+        if not has_history:
+            debug_print("No hay historial, cerrando ventana directamente (Ctrl+W)")
+            window.close()
+            return
+
+        # Usar Adw.MessageDialog en vez de Gtk.MessageDialog
+        dialog = Adw.MessageDialog(
             transient_for=window,
             modal=True,
-            message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text=_("Are you sure you want to delete the conversation?")
+            heading=_("Delete Conversation"),
+            body=_("Are you sure you want to delete the conversation?")
         )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("delete", _("Delete"))
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
 
         def on_delete_response(dialog, response):
-            if response == Gtk.ResponseType.YES and hasattr(window, 'chat_history'):
+            if response == "delete" and hasattr(window, 'chat_history'):
                 cid = window.config.get('cid')
                 debug_print(f"Eliminando conversación con CID: {cid}")
                 if cid:
                     window.chat_history.delete_conversation(cid)
-
-                    # Verificar si hay más ventanas abiertas
-                    other_windows = [w for w in self.get_windows() if w != window]
-
                     # Cerrar solo la ventana actual en lugar de toda la aplicación
                     window.close()
-
             dialog.destroy()
 
         dialog.connect("response", on_delete_response)

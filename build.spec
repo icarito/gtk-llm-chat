@@ -1,9 +1,8 @@
-# -*- mode: python ; coding: utf-8 -*-
-
 from argparse import ArgumentParser
 from platform import system
 from PyInstaller.building.datastruct import TOC
 import glob
+import os
 
 libdir = '/usr/lib/x86_64-linux-gnu'
 patterns = [
@@ -62,20 +61,22 @@ a = Analysis(
             }
         }
     },
-    runtime_hooks=[],
+    runtime_hooks=['hooks/rthook_numpy_python313.py'],
     excludes=[],
     noarchive=False,
     optimize=2,
     datas=[
         ('po', 'po'),
         ('gtk_llm_chat/hicolor', 'gtk_llm_chat/hicolor'),
-        ('windows/*.png', 'windows')
+        ('windows/*.png', 'windows'),
+        ('numpy_python313_patch.py', '.')
     ] + typelibs,
     hiddenimports=[
         'gettext',
         'llm',
         'llm.default_plugins',
         'llm.default_plugins.openai_models',
+        'llm.default_plugins.default_tools',
         'llm_groq',
         'llm_gemini',
         'llm_openrouter',
@@ -91,6 +92,8 @@ a = Analysis(
         'gtk_llm_chat.chat_window',
         'gtk_llm_chat.widgets',
         'gtk_llm_chat.markdownview',
+        'gtk_llm_chat.resource_manager',
+        'gtk_llm_chat.style_manager',
         'gtk_llm_chat.llm_client',
         'gtk_llm_chat.tray_applet',
         'gtk_llm_chat._version',

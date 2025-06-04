@@ -67,11 +67,13 @@ class MessageWidget(Gtk.Box):
         # Crear un contenedor con margen para centrar el contenido
         margin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         margin_box.set_hexpand(True)
+        margin_box.set_size_request(180, -1)  # Ancho mínimo para evitar colapsos
 
         # Crear el contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         message_box.add_css_class('message-content')
         message_box.set_hexpand(True)
+        message_box.set_size_request(180, -1)
 
         # Agregar espaciadores flexibles a los lados
         if is_user:
@@ -93,6 +95,7 @@ class MessageWidget(Gtk.Box):
         # Usar MarkdownView para el contenido
         self.content_view = MarkdownView()
         self.content_view.set_hexpand(True)
+        self.content_view.set_size_request(167, -1)  # El warning pedía al menos 167
         self.content_view.set_markdown(content)
         message_box.append(self.content_view)
 
@@ -102,6 +105,7 @@ class MessageWidget(Gtk.Box):
             css_classes=['timestamp']
         )
         time_label.set_halign(Gtk.Align.END)
+        time_label.set_size_request(60, -1)
         message_box.append(time_label)
 
         self.append(margin_box)

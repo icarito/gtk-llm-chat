@@ -18,21 +18,22 @@ from llm.migrations import migrate
 _ = gettext.gettext
 
 def debug_print(*args, **kwargs):
-    logging.debug(*args, **kwargs)
+    print(*args, **kwargs)
 
 class ChatHistory:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            # Use llm.user_dir() to get the directory
-            user_dir = llm.user_dir()
-            # Ensure the directory exists
-            os.makedirs(user_dir, exist_ok=True)
+            # Usar ensure_user_dir_exists para asegurar el directorio
+            from platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
         self.db_path = db_path
         self._thread_local = threading.local()
 
-        # Ensure the database schema is up-to-date using llm's migrations
-        self._run_llm_migrations()
+    def _ensure_db_exists(self):
+        """Asegura que la base de datos existe y está migrada, solo si es necesario."""
+        if not os.path.exists(self.db_path):
+            self._run_llm_migrations()
 
     def _run_llm_migrations(self):
         """Ensures the database schema is managed by llm's migrations."""
@@ -44,8 +45,6 @@ class ChatHistory:
             logging.info(f"LLM migrations applied successfully to {self.db_path}")
         except Exception as e:
             logging.error(f"Error running LLM migrations on {self.db_path}: {e}", exc_info=True)
-            # Considerar si se debe relanzar el error o manejarlo de otra forma
-            # raise RuntimeError(f"Failed to apply LLM migrations: {e}") from e
         finally:
             # Asegurarse de cerrar la conexión usada por sqlite_utils
             if db_utils and hasattr(db_utils, 'conn') and db_utils.conn:
@@ -53,23 +52,20 @@ class ChatHistory:
                     db_utils.conn.close()
                 except Exception as close_err:
                     logging.error(f"Error closing sqlite_utils connection after migration: {close_err}", exc_info=True)
-
+        # Forzar flush a disco cerrando la conexión principal
+        self.close_connection()
 
     def get_connection(self):
         """Gets a sqlite3 connection for the current thread."""
-        # ... (resto del método sin cambios) ...
         if not hasattr(self._thread_local, "conn") or self._thread_local.conn is None:
             try:
-                # Antes de conectar, asegurémonos que la BD y tablas existen
-                # (La migración ya se corrió en __init__, pero esto es una doble verificación
-                # por si algo falló silenciosamente o el archivo fue borrado)
+                # Solo crear la BD si no existe cuando vamos a conectarnos
                 if not os.path.exists(self.db_path):
-                     self._run_llm_migrations() # Intentar correr migraciones de nuevo si no existe
+                    self._run_llm_migrations()
 
                 self._thread_local.conn = sqlite3.connect(self.db_path)
                 self._thread_local.conn.row_factory = sqlite3.Row
             except sqlite3.Error as e:
-                # Podríamos intentar correr migraciones aquí si el error es "no such table"
                 if "no such table" in str(e):
                     logging.warning(f"Table not found error on connect, attempting migrations again: {e}")
                     try:
@@ -78,8 +74,8 @@ class ChatHistory:
                         self._thread_local.conn = sqlite3.connect(self.db_path)
                         self._thread_local.conn.row_factory = sqlite3.Row
                     except Exception as migrate_err:
-                         logging.error(f"Failed to run migrations on 'no such table' error: {migrate_err}", exc_info=True)
-                         raise ConnectionError(_(f"Error al conectar a la base de datos después de fallo de migración: {e}")) from migrate_err
+                        logging.error(f"Failed to run migrations on 'no such table' error: {migrate_err}", exc_info=True)
+                        raise ConnectionError(_(f"Error al conectar a la base de datos después de fallo de migración: {e}")) from migrate_err
                 else:
                     raise ConnectionError(_(f"Error al conectar a la base de datos: {e}")) from e
         return self._thread_local.conn
@@ -91,6 +87,8 @@ class ChatHistory:
             self._thread_local.conn = None
 
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:
+        if not os.path.exists(self.db_path):
+            return []
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -114,6 +112,8 @@ class ChatHistory:
         return history
 
     def get_last_conversation(self):
+        if not os.path.exists(self.db_path):
+            return None
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM conversations ORDER BY id DESC LIMIT 1")
@@ -121,6 +121,8 @@ class ChatHistory:
         return dict(row) if row else None
 
     def get_conversation(self, conversation_id: str):
+        if not os.path.exists(self.db_path):
+            return None
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -144,6 +146,7 @@ class ChatHistory:
             conn.commit()
         finally:
             cursor.close()
+            self.close_connection()
 
     def delete_conversation(self, conversation_id: str):
         conn = self.get_connection()
@@ -156,6 +159,8 @@ class ChatHistory:
         conn.commit()
 
     def get_conversations(self, limit: int, offset: int) -> List[Dict]:
+        if not os.path.exists(self.db_path):
+            return []
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -177,6 +182,8 @@ class ChatHistory:
         self, conversation_id: str, prompt: str, response_text: str,
         model_id: str, fragments: List[str] = None, system_fragments: List[str] = None
     ):
+        # Asegurarse que la BD existe antes de escribir
+        self._ensure_db_exists()
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -205,10 +212,14 @@ class ChatHistory:
                 self._add_fragments(response_id, system_fragments, 'system_fragments')
 
         except sqlite3.Error as e:
-            print(_(f"Error adding entry to history: {e}"))
+            debug_print(_(f"Error adding entry to history: {e}"))
             conn.rollback()
+        finally:
+            self.close_connection()
 
     def create_conversation_if_not_exists(self, conversation_id, name: str, model: Optional[str] = None):
+        # Asegurarse que la BD existe antes de escribir
+        self._ensure_db_exists()
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -218,8 +229,10 @@ class ChatHistory:
             """, (conversation_id, name, model))
             conn.commit()
         except sqlite3.Error as e:
-            print(_(f"Error creating conversation record: {e}"))
+            debug_print(_(f"Error creating conversation record: {e}"))
             conn.rollback()
+        finally:
+            self.close_connection()
 
     def _add_fragments(self, response_id: str, fragments: List[str], table_name: str):
         conn = self.get_connection()
@@ -234,22 +247,23 @@ class ChatHistory:
                     VALUES (?, ?, ?)
                 """, (response_id, fragment_id, order)) # Usar el ID entero
             except ValueError as e:
-                print(f"Error adding fragment '{fragment_specifier}': {e}")
+                debug_print(f"Error adding fragment '{fragment_specifier}': {e}")
             except sqlite3.IntegrityError as e:
                  # Manejar posibles errores de PK duplicado si la lógica de orden/ID es incorrecta
-                 print(f"Integrity error adding fragment '{fragment_specifier}' for response {response_id}: {e}")
+                 debug_print(f"Integrity error adding fragment '{fragment_specifier}' for response {response_id}: {e}")
             except sqlite3.Error as e:
-                 print(f"Database error adding fragment '{fragment_specifier}': {e}")
+                 debug_print(f"Database error adding fragment '{fragment_specifier}': {e}")
         conn.commit()
+        self.close_connection()
 
-    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> int: # &lt;-- Devuelve int
+    def _get_or_create_fragment(self, fragment_content: str, source: str = None) -> int:
         conn = self.get_connection()
         cursor = conn.cursor()
         content_hash = hashlib.sha256(fragment_content.encode('utf-8')).hexdigest()
         cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
         row = cursor.fetchone()
         if row:
-            return row['id'] # Devuelve el ID entero existente
+            fragment_id = row['id'] # Devuelve el ID entero existente
         else:
             # Usar datetime para el timestamp UTC como lo hace llm
             timestamp_utc = datetime.now(timezone.utc).isoformat()
@@ -261,15 +275,16 @@ class ChatHistory:
             # Obtener el ID recién insertado
             fragment_id = cursor.lastrowid
             if fragment_id is None:
-                 # Fallback por si lastrowid no funciona (raro en SQLite con PK entero)
-                 cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
-                 row = cursor.fetchone()
-                 if row:
-                     fragment_id = row['id']
-                 else:
-                     # Esto no debería pasar si la inserción fue exitosa
-                     raise sqlite3.Error("Could not retrieve fragment ID after insertion.")
-            return fragment_id # Devuelve el nuevo ID entero
+                # Fallback por si lastrowid no funciona (raro en SQLite con PK entero)
+                cursor.execute("SELECT id FROM fragments WHERE hash = ?", (content_hash,))
+                row = cursor.fetchone()
+                if row:
+                    fragment_id = row['id']
+                else:
+                    # Esto no debería pasar si la inserción fue exitosa
+                    raise sqlite3.Error("Could not retrieve fragment ID after insertion.")
+        self.close_connection()
+        return fragment_id # Devuelve el nuevo ID entero
 
     def get_fragments_for_response(self, response_id: str, table_name: str) -> List[str]:
         conn = self.get_connection()
