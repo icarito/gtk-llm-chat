@@ -103,9 +103,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller.connect("key-pressed", self._cancel_set_title)
         self.title_entry.add_controller(focus_controller)
 
-        # Add a key controller for Ctrl+W
+        # Add a key controller for global shortcuts (Ctrl+W, Ctrl+M, Ctrl+S, Ctrl+N)
         key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self._on_ctrl_w_pressed)
+        key_controller.connect("key-pressed", self._on_global_shortcuts)
         self.add_controller(key_controller)
 
         self.set_default_size(400, 600)
@@ -445,12 +445,45 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.header.set_title_widget(self.title_widget)
             self.title_entry.set_text(self.title_widget.get_title())
 
-    def _on_ctrl_w_pressed(self, controller, keyval, keycode, state):
-        """Handles Ctrl+W to remove the conversation."""
+
+    def _on_global_shortcuts(self, controller, keyval, keycode, state):
+        """
+        Atajos de teclado globales:
+        Ctrl+W: Borrar conversación (ya implementado)
+        Ctrl+M: Abrir selector de modelo
+        Ctrl+S: Cambiar system prompt
+        Ctrl+N: Nueva conversación
+        """
+        # Ctrl+W: Borrar conversación
         if keyval == Gdk.KEY_w and state & Gdk.ModifierType.CONTROL_MASK:
             app = self.get_application()
             app.on_delete_activate(None, None)
             return True
+
+        # Ctrl+M: Abrir selector de modelo
+        if keyval == Gdk.KEY_m and state & Gdk.ModifierType.CONTROL_MASK:
+            # Mostrar el sidebar y cambiar a la página del selector de modelo
+            self.split_view.set_show_sidebar(True)
+            if hasattr(self.model_sidebar, 'stack'):
+                self.model_sidebar.stack.set_visible_child_name("model_selector")
+            return True
+
+        # Ctrl+S: Cambiar system prompt
+        if keyval == Gdk.KEY_s and state & Gdk.ModifierType.CONTROL_MASK:
+            # Mostrar el sidebar y abrir el diálogo de system prompt
+            self.split_view.set_show_sidebar(True)
+            if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
+                # Simular click en el botón de system prompt
+                self.model_sidebar._on_system_prompt_button_clicked(None)
+            return True
+
+        # Ctrl+N: Nueva conversación
+        if keyval == Gdk.KEY_n and state & Gdk.ModifierType.CONTROL_MASK:
+            app = self.get_application()
+            if hasattr(app, 'open_conversation_window'):
+                app.open_conversation_window({})
+            return True
+
         return False
 
     def set_enabled(self, enabled):
