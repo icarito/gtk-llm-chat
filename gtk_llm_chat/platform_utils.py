@@ -127,10 +127,25 @@ def send_ipc_open_conversation(cid):
         print(f"Ejecutando fallback (no frozen): {args}")
         subprocess.Popen(args)
 
-def fork_or_spawn_applet(config):
-    """Lanza el applet como proceso hijo (fork) en Unix si está disponible, o como subproceso en cualquier plataforma. Devuelve True si el proceso actual debe continuar con la app principal."""
+def fork_or_spawn_applet(config={}):
+    """Lanza el applet como proceso hijo (fork) en Unix si está disponible, o como subproceso en cualquier plataforma.
+    Solo lanza el applet si logs.db existe (lo que significa que ya se ha configurado al menos un modelo).
+    Devuelve True si el proceso actual debe continuar con la app principal."""
     if config.get('no_applet'):
+        debug_print("Applet deshabilitado explícitamente en la configuración.")
         return True
+        
+    # Verificar que logs.db exista antes de lanzar el applet
+    import llm
+    user_dir = llm.user_dir()
+    db_path = os.path.join(user_dir, 'logs.db')
+    
+    if not os.path.exists(db_path):
+        debug_print("No se lanza el applet porque logs.db todavía no existe.")
+        return True
+        
+    debug_print(f"Lanzando applet (logs.db existe en {db_path})")
+    
     # Solo fork en sistemas tipo Unix si está disponible
     if (is_linux() or is_mac()) and hasattr(os, 'fork'):
         pid = os.fork()
@@ -141,6 +156,7 @@ def fork_or_spawn_applet(config):
         # Proceso padre: sigue con la app principal
         return True
     else:
+        # Windows o sistemas sin fork
         spawn_tray_applet(config)
         return True
 

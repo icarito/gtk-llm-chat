@@ -463,6 +463,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 print(f"Modelo por defecto configurado: {model_id}")
             except Exception as e:
                 print(f"Error configurando modelo por defecto: {e}")
+            
+            from platform_utils import spawn_tray_applet
+            spawn_tray_applet({})
         self.update_navigation_buttons()
 
     def save_configuration(self):
