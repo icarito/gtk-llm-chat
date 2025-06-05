@@ -19,6 +19,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.set_size_request(700, 500)  # Tamaño mínimo razonable para evitar colapsos
         self.panel_titles = ["", _("Tray applet"), _("Default Model"), ""]
         self.config_data = {}
+        self._finish_clicked = False # Bandera para controlar el flujo de cierre
 
         # Cargar estilos globales y aplicar clase principal
         style_manager.load_styles()
@@ -462,15 +463,19 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.loading_spinner.set_visible(False)
 
     def on_finish_clicked(self, button):
+        self._finish_clicked = True # Marcar que el flujo se completó
         self.close()
-        self._on_welcome_finished(self.get_configuration())
+        if self._on_welcome_finished:
+            self._on_welcome_finished(self.get_configuration())
 
     def _on_window_close_request(self, window):
         """Maneja el cierre de la ventana de bienvenida."""
-        debug_print("Ventana de bienvenida cerrada sin completar el asistente, terminando aplicación")
-        # Terminar la aplicación para evitar procesos zombie
-        self.app.quit()
-        return False
+        if not self._finish_clicked:
+            debug_print("Ventana de bienvenida cerrada ANTES de completar el asistente, terminando aplicación")
+            self.app.quit() # Terminar la aplicación si el flujo no se completó
+        else:
+            debug_print("Ventana de bienvenida cerrada DESPUÉS de completar el asistente (por self.close()). La app continúa.")
+        return False # Permitir que la ventana se cierre en cualquier caso
 
 
     def _on_model_selected(self, selector, model_id):
