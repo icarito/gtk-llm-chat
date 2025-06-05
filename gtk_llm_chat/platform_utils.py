@@ -166,7 +166,6 @@ def fork_or_spawn_applet(config={}):
     debug_print(f"Lanzando applet (logs.db existe en {db_path})")
     
     # Solo fork en sistemas tipo Unix si está disponible
-    """
     # En algunos ambientes Mac/AppImage es o era necesario/conveniente hacer fork - pero ahora no funciona?
     # Desactivado por ahora --icarito
     if (is_linux() or is_mac()) and hasattr(os, 'fork'):
@@ -178,10 +177,9 @@ def fork_or_spawn_applet(config={}):
         # Proceso padre: sigue con la app principal
         return True
     else:
-    """
-    # Windows o sistemas sin fork
-    spawn_tray_applet(config)
-    return True
+        # Windows o sistemas sin fork
+        spawn_tray_applet(config)
+        return True
 
 def ensure_load_on_session_startup(enable=True):
     """
