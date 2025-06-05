@@ -1,0 +1,32 @@
+# Flatpak manifest for Gtk LLM Chat
+app-id: org.fuentelibre.gtk_llm_Chat
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: gtk-llm-chat
+finish-args:
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --env=GTK_THEME=Adwaita:dark
+modules:
+  - ../shared-modules/ayatana-appindicator/ayatana-appindicator-3.json
+  - name: gtk-llm-chat
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app -r requirements.txt
+      - pip3 install --prefix=/app .
+      - mkdir -p /app/share/icons/hicolor/scalable/apps
+      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/share/icons/hicolor/scalable/apps/
+      - mkdir -p /app/share/applications
+      - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
+    sources:
+      - type: dir
+        path: ../..
+desktop-file-name-suffix: ''
+rename-icon: org.fuentelibre.gtk_llm_Chat
+tags:
+  - Utility
