@@ -12,8 +12,26 @@ finish-args:
   - --filesystem=home
   - --talk-name=org.kde.StatusNotifierWatcher
   - --env=GTK_THEME=Adwaita:dark
+build-options:
+  env:
+    PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
 modules:
   - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
+  - name: fix-ayatana-ido-libdir
+    buildsystem: simple
+    build-commands:
+      - |
+        if [ -d /app/lib64 ]; then
+          mv /app/lib64/* /app/lib/ || true
+          rmdir /app/lib64 || true
+        fi
+        if [ -d /app/lib64/pkgconfig ]; then
+          mkdir -p /app/lib/pkgconfig
+          mv /app/lib64/pkgconfig/* /app/lib/pkgconfig/ || true
+          rmdir /app/lib64/pkgconfig || true
+        fi
+    sources: []
+    only-built-submodules: ["ayatana-ido"]
   - name: gtk-llm-chat
     buildsystem: simple
     build-commands:
