@@ -15,7 +15,7 @@ import threading
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from .db_operations import ChatHistory
-from .platform_utils import debug_print
+from .debug_utils import debug_print
 
 from .chat_application import _
 

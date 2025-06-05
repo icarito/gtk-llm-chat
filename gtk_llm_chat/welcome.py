@@ -5,7 +5,7 @@ import time
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import os
 import threading
-from .platform_utils import debug_print
+from .debug_utils import debug_print
 from .resource_manager import resource_manager
 from .style_manager import style_manager
 from .chat_application import _

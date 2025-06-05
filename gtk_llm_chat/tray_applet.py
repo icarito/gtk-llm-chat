@@ -8,7 +8,8 @@ import locale
 import gettext
 import threading
 
-from .platform_utils import send_ipc_open_conversation, is_linux, is_mac, debug_print
+from .platform_utils import send_ipc_open_conversation, is_linux, is_mac
+from .debug_utils import debug_print
 from .db_operations import ChatHistory
 
 try:

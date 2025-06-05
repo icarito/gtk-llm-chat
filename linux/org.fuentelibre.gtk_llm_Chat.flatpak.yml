@@ -3,6 +3,17 @@ app-id: org.fuentelibre.gtk_llm_Chat
 runtime: org.gnome.Platform
 runtime-version: '48'
 sdk: org.gnome.Sdk
+add-extensions:
+  org.freedesktop.Platform.Icontheme:
+    directory: share/icons
+    subdirectories: true
+    no-autodownload: true
+    version: '23.08'
+  org.gtk.Gtk3theme:
+    directory: share/themes
+    subdirectories: true
+    no-autodownload: true
+    version: '3.22'
 command: gtk-llm-chat
 finish-args:
   - --share=network
@@ -16,11 +27,14 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.ayatana.indicator.application
   - --talk-name=org.kde.StatusNotifierItem
+  - --talk-name=org.freedesktop.Notifications
   - --share=ipc
   - --socket=session-bus
   - --filesystem=xdg-config/gtk-3.0:ro
   - --filesystem=xdg-config/gtk-4.0:ro
   - --env=GTK_THEME=Adwaita:dark
+  - --env=ICON_THEME=Adwaita
+  - --env=LLM_USER_PATH=/var/home/$USER/.config/io.datasette.llm
 build-options:
   env:
     PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
@@ -128,5 +142,11 @@ modules:
         path: ..
 desktop-file-name-suffix: ''
 rename-icon: org.fuentelibre.gtk_llm_Chat
+add-extensions:
+  org.freedesktop.Platform.Icontheme:
+    directory: share/icons
+    subdirectories: true
+    no-autodownload: true
+    version: "22.08"
 tags:
   - Utility

@@ -9,7 +9,7 @@ import pathlib
 import json
 
 from .chat_application import _
-from .platform_utils import debug_print
+from .debug_utils import debug_print
 
 class ModelSelectionManager(GObject.Object):
     """

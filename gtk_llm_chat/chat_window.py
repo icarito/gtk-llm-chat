@@ -18,7 +18,7 @@ from .chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
 from .style_manager import style_manager
 from .resource_manager import resource_manager
-from .platform_utils import debug_print
+from .debug_utils import debug_print
 import traceback
 
 DEBUG = os.environ.get('DEBUG') or False

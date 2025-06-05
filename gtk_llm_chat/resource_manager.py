@@ -13,7 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, GdkPixbuf, Gio, Gdk
-from .platform_utils import debug_print
+from .debug_utils import debug_print
 
 
 class ResourceManager:
