@@ -58,14 +58,20 @@ def launch_tray_applet(config):
 def spawn_tray_applet(config):
     if is_frozen():
         if not config.get('applet'):
-            # Relanzar el propio ejecutable con --applet
-            args = [sys.executable, "--applet"]
-            debug_print(f"[platform_utils] Lanzando applet (frozen): {args}")
-    else:
-        # Ejecutar tray_applet.py con el intérprete
-        applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
-        args = [sys.executable, applet_path, '--applet']
-        debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
+            # Usar la variable de entorno APPIMAGE si está disponible
+            appimage_path = os.environ.get("APPIMAGE")
+            if appimage_path and os.path.exists(appimage_path):
+                args = [appimage_path, "--applet"]
+                debug_print(f"[platform_utils] Lanzando applet (AppImage): {args}")
+            else:
+                args = [sys.executable, "--applet"]
+                debug_print(f"[platform_utils] Lanzando applet (frozen): {args}")
+            subprocess.Popen(args)
+            return
+    # Ejecutar tray_applet.py con el intérprete
+    applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
+    args = [sys.executable, applet_path, '--applet']
+    debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
     subprocess.Popen(args)
 
 def send_ipc_open_conversation(cid):
@@ -112,12 +118,21 @@ def send_ipc_open_conversation(cid):
 
     # Fallback multiplataforma o si D-Bus falló
     if is_frozen():
-        exe = sys.executable
-        args = [exe]
-        if cid:
-            args.append(f"--cid={cid}")
-        debug_print(f"Ejecutando fallback (frozen): {args}")
-        subprocess.Popen(args)
+        # Usar la variable de entorno APPIMAGE si está disponible
+        appimage_path = os.environ.get("APPIMAGE")
+        if appimage_path and os.path.exists(appimage_path):
+            args = [appimage_path]
+            if cid:
+                args.append(f"--cid={cid}")
+            debug_print(f"Ejecutando fallback (AppImage): {args}")
+            subprocess.Popen(args)
+        else:
+            exe = sys.executable
+            args = [exe]
+            if cid:
+                args.append(f"--cid={cid}")
+            debug_print(f"Ejecutando fallback (frozen): {args}")
+            subprocess.Popen(args)
     else:
         exe = sys.executable
         main_path = os.path.join(os.path.dirname(__file__), 'main.py')
@@ -209,7 +224,11 @@ def _setup_autostart_linux(enable):
     
     # Determinar el comando a ejecutar
     if is_frozen():
-        exec_command = f"{sys.executable} --applet"
+        appimage_path = os.environ.get("APPIMAGE")
+        if appimage_path and os.path.exists(appimage_path):
+            exec_command = f"{appimage_path} --applet"
+        else:
+            exec_command = f"{sys.executable} --applet"
     else:
         main_path = os.path.join(os.path.dirname(__file__), 'main.py')
         exec_command = f"{sys.executable} {main_path} --applet"
