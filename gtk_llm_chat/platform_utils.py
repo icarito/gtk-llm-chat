@@ -138,6 +138,10 @@ def fork_or_spawn_applet(config={}):
     # Verificar que logs.db exista antes de lanzar el applet
     from platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
+    if not user_dir:
+        debug_print("No se lanza el applet porque todavía no existe el directorio de usuario.")
+        return True
+
     db_path = os.path.join(user_dir, 'logs.db')
     
     if not os.path.exists(db_path):
