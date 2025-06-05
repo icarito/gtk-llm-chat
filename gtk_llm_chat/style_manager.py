@@ -437,7 +437,7 @@ class StyleManager:
             css_content = self.get_base_styles() + "\n" + self.get_platform_styles()
             
             # Cargar CSS
-            self._css_provider.load_from_data(css_content)
+            self._css_provider.load_from_data(css_content, -1)
             
             # Aplicar al display por defecto
             display = Gdk.Display.get_default()
