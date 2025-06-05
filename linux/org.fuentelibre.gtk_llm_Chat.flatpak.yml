@@ -13,7 +13,7 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   - --env=GTK_THEME=Adwaita:dark
 modules:
-  - ../shared-modules/ayatana-appindicator/ayatana-appindicator-3.json
+  - shared-modules/ayatana-appindicator/ayatana-appindicator-3.json
   - name: gtk-llm-chat
     buildsystem: simple
     build-commands:
