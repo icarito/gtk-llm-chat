@@ -1,19 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<component type="desktop">
+<component type="desktop-application">
   <id>org.fuentelibre.gtk_llm_Chat</id>
-  <name>Gtk LLM Chat</name>
-  <summary>Gtk LLM Chat</summary>
+  <project_license>GPL-3.0+</project_license>
+  <name>GTK LLM Chat</name>
+  <summary>A GTK frontend for chatting with Large Language Models</summary>
   <description>
-    <p>Gtk LLM Chat</p>
+    <p>
+      GTK LLM Chat is a modern, user-friendly desktop application that provides 
+      a graphical interface for interacting with various Large Language Models (LLMs).
+    </p>
+    <p>
+      Features include:
+    </p>
+    <ul>
+      <li>Support for multiple LLM providers</li>
+      <li>Conversation history management</li>
+      <li>System tray integration</li>
+      <li>Modern GTK4/Libadwaita interface</li>
+      <li>Local conversation storage</li>
+    </ul>
   </description>
   <developer_name>Sebastian Silva</developer_name>
   <url type="homepage">https://gtk-llm-chat.fuentelibre.org/</url>
   <url type="bugtracker">https://github.com/fuentelibre/gtk-llm-chat/issues</url>
-  <license>LICENSE</license>
+  <url type="vcs-browser">https://github.com/fuentelibre/gtk-llm-chat</url>
   <provides>
     <binary>gtk-llm-chat</binary>
   </provides>
+  <launchable type="desktop-id">org.fuentelibre.gtk_llm_Chat.desktop</launchable>
   <categories>
     <category>Utility</category>
   </categories>
+  <content_rating type="oars-1.1" />
 </component>

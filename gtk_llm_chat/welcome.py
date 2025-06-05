@@ -109,7 +109,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         # No forzar size_request aquí, dejar que el clamp lo limite
         
         # Usar resource_manager para cargar el icono de la aplicación con tamaño grande
-        app_image = resource_manager.create_image_widget("windows/org.fuentelibre.gtk_llm_Chat.png", 128)
+        app_image = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat", 128)
         app_image.set_valign(Gtk.Align.CENTER)
         app_image.set_halign(Gtk.Align.CENTER)
         app_image.set_size_request(128, 128)

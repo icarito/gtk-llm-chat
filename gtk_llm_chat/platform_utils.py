@@ -93,7 +93,10 @@ def spawn_tray_applet(config):
         args = [sys.executable, applet_path, '--applet']
         debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
     
-    subprocess.Popen(args)
+    try:
+        subprocess.Popen(args)
+    except Exception as e:
+        debug_print(f"[platform_utils] Error lanzando applet: {e}")
 
 def send_ipc_open_conversation(cid):
     """
@@ -257,8 +260,17 @@ def _setup_autostart_linux(enable):
         else:
             exec_command = f"{sys.executable} --applet"
     else:
-        main_path = os.path.join(os.path.dirname(__file__), 'main.py')
-        exec_command = f"{sys.executable} {main_path} --applet"
+        # Detectar si estamos en Flatpak
+        is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+        
+        if is_flatpak:
+            # En Flatpak, usar flatpak run
+            flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
+            exec_command = f"flatpak run {flatpak_id} --applet"
+        else:
+            # En entornos normales
+            main_path = os.path.join(os.path.dirname(__file__), 'main.py')
+            exec_command = f"{sys.executable} {main_path} --applet"
     
     # Contenido del archivo .desktop
     desktop_content = f"""[Desktop Entry]
@@ -453,7 +465,12 @@ def ensure_user_dir_exists():
         
         if is_flatpak:
             # En Flatpak, usar el directorio del host directamente
-            user_dir = os.path.expanduser("~/.config/io.datasette.llm")
+            # La variable LLM_USER_PATH debe estar configurada en el manifest
+            user_dir = os.environ.get('LLM_USER_PATH')
+            if not user_dir:
+                # Fallback a la ruta real del home del usuario 
+                real_home = os.environ.get('HOME', '/var/home/' + os.environ.get('USER', 'user'))
+                user_dir = os.path.join(real_home, '.config', 'io.datasette.llm')
             debug_print(f"Flatpak detectado: usando directorio del host {user_dir}")
             
             # Configurar variables de entorno para que LLM use este directorio

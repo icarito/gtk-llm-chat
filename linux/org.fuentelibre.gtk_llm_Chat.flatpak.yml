@@ -24,17 +24,24 @@ finish-args:
   - --filesystem=xdg-data/io.datasette.llm:rw
   - --filesystem=home/.config/io.datasette.llm:rw
   - --filesystem=home/.local/share/io.datasette.llm:rw
+  - --filesystem=xdg-config/autostart:create
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.ayatana.indicator.application
   - --talk-name=org.kde.StatusNotifierItem
   - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.gnome.Shell
+  - --talk-name=org.kde.plasmashell
+  - --own-name=org.fuentelibre.gtk_llm_Chat.*
   - --share=ipc
   - --socket=session-bus
+  - --socket=system-bus
   - --filesystem=xdg-config/gtk-3.0:ro
   - --filesystem=xdg-config/gtk-4.0:ro
-  - --env=GTK_THEME=Adwaita:dark
+  - --filesystem=xdg-data/icons:ro
+  - --filesystem=xdg-data/themes:ro
+  - --env=GTK_THEME=Adwaita
   - --env=ICON_THEME=Adwaita
-  - --env=LLM_USER_PATH=/var/home/$USER/.config/io.datasette.llm
+  - --env=LLM_USER_PATH=$HOME/.config/io.datasette.llm
 build-options:
   env:
     PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
@@ -134,9 +141,20 @@ modules:
       - pip3 install --prefix=/app -r requirements.txt
       - pip3 install --prefix=/app .
       - mkdir -p /app/share/icons/hicolor/scalable/apps
+      - mkdir -p /app/share/icons/hicolor/48x48/apps
       - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/share/icons/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/48x48/apps/
       - mkdir -p /app/share/applications
       - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
+      - cp desktop/org.fuentelibre.gtk_llm_Applet.desktop /app/share/applications/
+      - mkdir -p /app/share/metainfo
+      - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true
+      - mkdir -p /app/gtk_llm_chat/hicolor/48x48/apps
+      - mkdir -p /app/gtk_llm_chat/hicolor/scalable/apps
+      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/48x48/apps/
+      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/gtk_llm_chat/hicolor/scalable/apps/
     sources:
       - type: dir
         path: ..

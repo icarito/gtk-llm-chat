@@ -33,8 +33,14 @@ class ResourceManager:
             else:
                 return os.path.dirname(sys.executable)
         else:
-            # En desarrollo, usar la ruta del módulo
-            return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            # Detectar si estamos en Flatpak
+            is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+            if is_flatpak:
+                # En Flatpak, los recursos están en /app
+                return '/app'
+            else:
+                # En desarrollo, usar la ruta del módulo
+                return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     def get_image_path(self, relative_path: str) -> Optional[str]:
         """
@@ -121,6 +127,26 @@ class ResourceManager:
                     icon_theme.add_search_path(app_icons_dir)
                     debug_print(f"[OK] Added app icons directory: {app_icons_dir}")
                 # No añadir .../hicolor/ directamente
+            else:
+                # Detectar si estamos en Flatpak
+                is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+                if is_flatpak:
+                    # En Flatpak, los iconos están en rutas estándar de /app
+                    flatpak_icon_paths = [
+                        "/app/share/icons/hicolor/scalable/apps",
+                        "/app/share/icons/hicolor/48x48/apps", 
+                        "/app/share/icons"
+                    ]
+                    for icon_path in flatpak_icon_paths:
+                        if os.path.exists(icon_path):
+                            icon_theme.add_search_path(icon_path)
+                            debug_print(f"[OK] Added Flatpak icon path: {icon_path}")
+                else:
+                    # En desarrollo, añadir rutas locales
+                    app_icons_dir = os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps")
+                    if os.path.exists(app_icons_dir):
+                        icon_theme.add_search_path(app_icons_dir)
+                        debug_print(f"[OK] Added app icons directory: {app_icons_dir}")
             # En desarrollo normalmente no necesitas añadir rutas
 
             self._icon_theme_configured = True
@@ -187,6 +213,8 @@ class ResourceManager:
                     fallback_paths = [
                         f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
                         f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
+                        f"share/icons/hicolor/48x48/apps/{icon_name}.png",
+                        f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
                         f"macos/{icon_name}.icns",
                         f"linux/{icon_name}.png",
                     ]
