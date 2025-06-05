@@ -51,11 +51,11 @@ class ResourceManager:
         
         if self._is_frozen:
             # En entorno congelado, los recursos pueden estar en diferentes ubicaciones
-            possible_paths.extend([
-                os.path.join(self._base_path, relative_path),
-                os.path.join(self._base_path, "_internal", relative_path),
-                os.path.join(self._base_path, "gtk_llm_chat", relative_path.replace("../", "")),
-            ])
+            # Evitar duplicar _internal/_internal o rutas erróneas
+            possible_paths.append(os.path.join(self._base_path, relative_path))
+            # Si el recurso está en gtk_llm_chat/hicolor/48x48/apps/ y se pide solo el nombre, buscar ahí
+            if not os.path.isabs(relative_path) and not relative_path.startswith("gtk_llm_chat/"):
+                possible_paths.append(os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps", relative_path))
         else:
             # En desarrollo
             possible_paths.append(os.path.join(self._base_path, relative_path))
@@ -96,43 +96,36 @@ class ResourceManager:
         """Configura el tema de iconos para incluir los iconos personalizados."""
         if self._icon_theme_configured:
             return
-            
+
         if not Gtk.is_initialized():
             debug_print("[FAIL] GTK not initialized, skipping icon theme setup")
             return
-            
+
         try:
-            # Obtener el display por defecto
             display = Gdk.Display.get_default()
             if not display:
                 debug_print("[FAIL] No default display available")
                 return
-                
+
             icon_theme = Gtk.IconTheme.get_for_display(display)
-            
-            # Añadir directorios de iconos personalizados
-            icon_dirs = []
-            
+
             if self._is_frozen:
-                # En entorno congelado
-                icon_dirs.extend([
-                    os.path.join(self._base_path, "gtk_llm_chat", "hicolor"),
-                    os.path.join(self._base_path, "_internal", "gtk_llm_chat", "hicolor"),
-                    os.path.join(self._base_path, "hicolor"),
-                ])
-            else:
-                # En desarrollo
-                icon_dirs.append(os.path.join(self._base_path, "gtk_llm_chat", "hicolor"))
-            
-            # Añadir directorios que existan
-            for icon_dir in icon_dirs:
-                if os.path.exists(icon_dir):
-                    icon_theme.add_search_path(icon_dir)
-                    debug_print(f"[OK] Added icon search path: {icon_dir}")
-            
+                # Si tienes un tema completo personalizado:
+                custom_theme_dir = os.path.join(self._base_path, "gtk_llm_chat", "my_custom_theme")
+                if os.path.exists(os.path.join(custom_theme_dir, "index.theme")):
+                    icon_theme.add_search_path(custom_theme_dir)
+                    debug_print(f"[OK] Added custom theme path: {custom_theme_dir}")
+                # Si solo tienes iconos sueltos:
+                app_icons_dir = os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps")
+                if os.path.exists(app_icons_dir):
+                    icon_theme.add_search_path(app_icons_dir)
+                    debug_print(f"[OK] Added app icons directory: {app_icons_dir}")
+                # No añadir .../hicolor/ directamente
+            # En desarrollo normalmente no necesitas añadir rutas
+
             self._icon_theme_configured = True
             debug_print("[OK] Icon theme configured successfully")
-            
+
         except Exception as e:
             debug_print(f"[FAIL] Error configuring icon theme: {e}")
     
@@ -188,21 +181,20 @@ class ResourceManager:
             display = Gdk.Display.get_default()
             if display:
                 icon_theme = Gtk.IconTheme.get_for_display(display)
-                
+
                 if not icon_theme.has_icon(icon_name):
-                    # Fallback: intentar cargar desde archivo
+                    # Fallback: intentar cargar desde archivo solo en la ruta estándar de iconos
                     fallback_paths = [
-                        f"windows/{icon_name}.png",
-                        f"linux/{icon_name}.png", 
-                        f"macos/{icon_name}.icns",
-                        f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
                         f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
+                        f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
+                        f"macos/{icon_name}.icns",
+                        f"linux/{icon_name}.png",
                     ]
-                    
+
                     for fallback_path in fallback_paths:
                         if self.get_image_path(fallback_path):
                             return self.create_image_widget(fallback_path, size)
-                    
+
                     # Último fallback: icono genérico
                     print(f"Icon not found: {icon_name}, using application-x-executable")
                     image = Gtk.Image.new_from_icon_name("application-x-executable")
@@ -223,8 +215,7 @@ class ResourceManager:
             
         # Verificar recursos comunes
         test_resources = [
-            "windows/org.fuentelibre.gtk_llm_Chat.png",
-            "linux/org.fuentelibre.gtk_llm_Chat.png",
+            "gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png",
             "gtk_llm_chat/hicolor",
         ]
         
