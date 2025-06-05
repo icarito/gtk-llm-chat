@@ -30,7 +30,7 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
     - `Ctrl+S`: Edit system prompt
     - `Ctrl+N`: New conversation window
 - **Conversation Management:** Rename and delete conversations.
-- **Tray aooket:** Use a system tray applet for quick access to recent conversations.
+- **Tray Applet:** Use a system tray applet for quick access to recent conversations.
 - **Error Handling:** Clear error messages displayed in the chat.
 - **Dynamic Input:** The input area dynamically adjusts its height.
 
