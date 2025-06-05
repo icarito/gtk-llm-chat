@@ -3,8 +3,6 @@ import sys
 import atexit
 import platform
 
-from chat_application import _
-
 if os.name == 'nt':
     import msvcrt
 else:
@@ -23,13 +21,13 @@ class SingleInstance:
                 try:
                     msvcrt.locking(self.fp.fileno(), msvcrt.LK_NBLCK, 1)
                 except OSError:
-                    raise RuntimeError(_("Another instance is already running."))
+                    raise RuntimeError("Another instance is already running.")
             else:
                 # Unix: intenta obtener un bloqueo exclusivo
                 try:
                     fcntl.flock(self.fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError:
-                    raise RuntimeError(_("Another instance is already running."))
+                    raise RuntimeError("Another instance is already running.")
 
             # Guarda el PID en el archivo para fines informativos
             self.fp.write(str(os.getpid()))
