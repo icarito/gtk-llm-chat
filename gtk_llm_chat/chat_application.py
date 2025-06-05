@@ -15,7 +15,7 @@ import gettext
 import llm
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from db_operations import ChatHistory
+from .db_operations import ChatHistory
 
 _ = gettext.gettext
 
@@ -187,7 +187,7 @@ class LLMChatApplication(Adw.Application):
         Gets the application version from _version.py.
         """
         try:
-            from gtk_llm_chat import _version
+            from . import _version
             return _version.__version__
         except ImportError:
             debug_print(_("Error: _version.py not found"))
@@ -268,7 +268,7 @@ class LLMChatApplication(Adw.Application):
         """
         try:
             # Obtener la ruta de la base de datos usando ensure_user_dir_exists()
-            from platform_utils import ensure_user_dir_exists
+            from .platform_utils import ensure_user_dir_exists
             user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
             
@@ -307,7 +307,7 @@ class LLMChatApplication(Adw.Application):
     def _show_welcome_window(self):
         """Muestra el asistente de configuración inicial."""
         try:
-            from welcome import WelcomeWindow
+            from .welcome import WelcomeWindow
             
             # Definimos un método que se llamará cuando el usuario termine el asistente
             def on_welcome_finished(config_data=None):
@@ -329,7 +329,7 @@ class LLMChatApplication(Adw.Application):
         """Crea una nueva ventana con la configuración dada."""
         debug_print(f"Creando nueva ventana con configuración: {config}")
 
-        from chat_window import LLMChatWindow
+        from .chat_window import LLMChatWindow
         chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración

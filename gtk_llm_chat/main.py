@@ -4,7 +4,7 @@ Gtk LLM Chat - A frontend for `llm`
 import argparse
 import sys
 import time
-from platform_utils import launch_tray_applet, fork_or_spawn_applet, debug_print
+from .platform_utils import launch_tray_applet, fork_or_spawn_applet, debug_print
 
 # Aplicar patch de compatibilidad NumPy/Python 3.13 lo antes posible
 def apply_numpy_python313_compatibility_patch():
@@ -170,7 +170,7 @@ def main(argv=None):
 
     # Lanzar la aplicación principal
     # This part is reached by initial GUI instances and fallback GUI instances (with --cid).
-    from chat_application import LLMChatApplication
+    from .chat_application import LLMChatApplication
     chat_app = LLMChatApplication(config)
     cmd_args = []
     if config.get('cid'):

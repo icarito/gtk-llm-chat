@@ -5,10 +5,10 @@ import time
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib
 import os
 import threading
-from platform_utils import debug_print
-from resource_manager import resource_manager
-from style_manager import style_manager
-from chat_application import _
+from .platform_utils import debug_print
+from .resource_manager import resource_manager
+from .style_manager import style_manager
+from .chat_application import _
 
 
 class WelcomeWindow(Adw.ApplicationWindow):
@@ -512,7 +512,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 # Forzar la creación de logs.db para evitar ejecuciones repetidas del asistente
                 try:
                     # Usamos la lógica ya implementada en ChatHistory
-                    from db_operations import ChatHistory
+                    from .db_operations import ChatHistory
                     
                     # Solo necesitamos inicializar ChatHistory y llamar a _ensure_db_exists()
                     temp_history = ChatHistory()
@@ -526,7 +526,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
             except Exception as e:
                 debug_print(f"Error configurando modelo por defecto: {e}")
             
-            from platform_utils import spawn_tray_applet
+            from .platform_utils import spawn_tray_applet
             spawn_tray_applet({})
         self.update_navigation_buttons()
 
@@ -596,8 +596,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
     def _load_models_in_thread(self):
         try:
-            from gtk_llm_chat.wide_model_selector import WideModelSelector, NO_SELECTION_KEY
-            from gtk_llm_chat.model_selection import ModelSelectionManager
+            from .wide_model_selector import WideModelSelector, NO_SELECTION_KEY
+            from .model_selection import ModelSelectionManager
             GLib.idle_add(self._create_model_selector_and_replace_placeholder, WideModelSelector, ModelSelectionManager)
         except Exception as e:
             debug_print(f"Error importing/creating model selector in background: {e}")
@@ -724,7 +724,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         if not checkbutton.get_active():
             return
         try:
-            from platform_utils import ensure_load_on_session_startup
+            from .platform_utils import ensure_load_on_session_startup
             if self.tray_radio1.get_active():
                 success = ensure_load_on_session_startup(True)
                 if success:
@@ -744,7 +744,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
     def _initialize_tray_options(self):
         try:
-            from platform_utils import is_loading_on_session_startup
+            from .platform_utils import is_loading_on_session_startup
             autostart_enabled = is_loading_on_session_startup()
             if autostart_enabled:
                 self.tray_radio1.set_active(True)

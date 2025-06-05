@@ -8,8 +8,8 @@ import locale
 import gettext
 import threading
 
-from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux, is_mac, debug_print
-from gtk_llm_chat.db_operations import ChatHistory
+from .platform_utils import send_ipc_open_conversation, is_linux, is_mac, debug_print
+from .db_operations import ChatHistory
 
 try:
     import pystray
@@ -216,13 +216,13 @@ signal.signal(signal.SIGINT, on_quit_signal)
 def main():
     """Main function for the tray applet."""
     # Import ensure_single_instance here to avoid circular dependencies if platform_utils imports tray_applet
-    from gtk_llm_chat.platform_utils import ensure_single_instance
+    from .platform_utils import ensure_single_instance
     # Ensure this is the only applet instance.
     # The returned object must be kept in scope to maintain the lock.
     _applet_instance_lock = ensure_single_instance("gtk_llm_applet")
 
     # Obtener el path de la base de datos
-    from platform_utils import ensure_user_dir_exists
+    from .platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
     db_path = os.path.join(user_dir, "logs.db")
     

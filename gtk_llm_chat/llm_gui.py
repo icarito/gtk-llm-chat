@@ -11,7 +11,7 @@ def register_commands(cli):
     def run_applet():
         """Runs the system tray applet without the main window"""
         # Lanzamos solo el applet usando nuestro nuevo sistema unificado
-        from gtk_llm_chat.platform_utils import launch_tray_applet
+        from .platform_utils import launch_tray_applet
         launch_tray_applet({})
 
     @cli.command(name="gtk-chat")
@@ -83,7 +83,7 @@ def register_commands(cli):
         
         # Si solo se quiere el applet, lo lanzamos directamente
         if applet and not cid and not continue_last:
-            from gtk_llm_chat.platform_utils import launch_tray_applet
+            from .platform_utils import launch_tray_applet
             launch_tray_applet(config)
             # El applet se lanza en otro proceso, así que tenemos que mantener vivo este
             import time
@@ -91,7 +91,7 @@ def register_commands(cli):
                 time.sleep(1)
         
         # De lo contrario, iniciamos la aplicación completa
-        from gtk_llm_chat.chat_application import LLMChatApplication
+        from .chat_application import LLMChatApplication
         app = LLMChatApplication(config)
         
         # Transformar la configuración en argumentos de línea de comandos

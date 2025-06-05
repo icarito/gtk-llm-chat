@@ -5,7 +5,7 @@ import sys
 import subprocess
 import os
 import tempfile
-from single_instance import SingleInstance
+from .single_instance import SingleInstance
 
 PLATFORM = sys.platform
 
@@ -53,7 +53,7 @@ def launch_tray_applet(config):
     """
     # DO NOT call ensure_single_instance here. tray_applet.main() will.
     try:
-        from gtk_llm_chat.tray_applet import main as tray_main
+        from .tray_applet import main as tray_main
         tray_main()
     except Exception as e:
         debug_print(f"Can't start tray app: {e}")
@@ -154,7 +154,6 @@ def fork_or_spawn_applet(config={}):
         return True
         
     # Verificar que logs.db exista antes de lanzar el applet
-    from platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
     if not user_dir:
         debug_print("No se lanza el applet porque todavía no existe el directorio de usuario.")
@@ -560,7 +559,6 @@ def debug_database_monitoring():
     debug_print("=== DIAGNÓSTICO DE MONITOREO DE BASE DE DATOS ===")
     
     try:
-        from platform_utils import ensure_user_dir_exists
         user_dir = ensure_user_dir_exists()
         debug_print(f"Directorio de usuario LLM: {user_dir}")
         

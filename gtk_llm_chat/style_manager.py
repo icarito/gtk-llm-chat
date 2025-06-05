@@ -10,7 +10,7 @@ import sys
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk
-from platform_utils import debug_print
+from .platform_utils import debug_print
 
 
 class StyleManager:

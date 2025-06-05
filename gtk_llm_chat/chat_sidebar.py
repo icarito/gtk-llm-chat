@@ -4,9 +4,9 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib, Gdk
 import os
 
-from chat_application import _
-from model_selector import ModelSelectorWidget
-from model_selection import ModelSelectionManager
+from .chat_application import _
+from .model_selector import ModelSelectorWidget
+from .model_selection import ModelSelectionManager
 
 def debug_print(*args):
     if DEBUG:

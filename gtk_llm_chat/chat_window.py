@@ -10,15 +10,15 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
 
-from llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
-from widgets import Message, MessageWidget, ErrorWidget
-from db_operations import ChatHistory
-from chat_application import _
-from chat_sidebar import ChatSidebar # <--- Importar la nueva clase
+from .llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
+from .widgets import Message, MessageWidget, ErrorWidget
+from .db_operations import ChatHistory
+from .chat_application import _
+from .chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
-from style_manager import style_manager
-from resource_manager import resource_manager
-from platform_utils import debug_print
+from .style_manager import style_manager
+from .resource_manager import resource_manager
+from .platform_utils import debug_print
 import traceback
 
 DEBUG = os.environ.get('DEBUG') or False

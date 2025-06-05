@@ -3,8 +3,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib
 
-from chat_application import _
-from model_selection import ModelSelectionManager, debug_print
+from .chat_application import _
+from .model_selection import ModelSelectionManager, debug_print
 
 class ModelSelectorWidget(Gtk.Box):
     """
@@ -344,7 +344,7 @@ class ModelSelectorWidget(Gtk.Box):
 
 if __name__ == '__main__':
     import sys
-    from model_selection import ModelSelectionManager
+    from .model_selection import ModelSelectionManager
     
     class TestApp(Adw.Application):
         def __init__(self):
