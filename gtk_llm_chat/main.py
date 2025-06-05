@@ -155,14 +155,21 @@ def main(argv=None):
         argv = sys.argv
     config = parse_args(argv)
 
-    # Si se pide el applet, lanzarlo y salir
     if config.get('applet'):
+        # This process is designated to be the applet.
+        # launch_tray_applet will call tray_applet.main(), 
+        # which in turn calls ensure_single_instance("gtk_llm_applet").
         launch_tray_applet(config)
-        return 0
+        return 0 # The applet process should exit here after launch_tray_applet returns.
     else:
-        fork_or_spawn_applet(config)
+        # This is a GUI process.
+        # GUI processes do not manage a single_instance lock for themselves.
+        # Only the initial GUI launch (no --cid) should spawn the applet.
+        if not config.get('cid'):
+            fork_or_spawn_applet(config)
 
     # Lanzar la aplicación principal
+    # This part is reached by initial GUI instances and fallback GUI instances (with --cid).
     from chat_application import LLMChatApplication
     chat_app = LLMChatApplication(config)
     cmd_args = []

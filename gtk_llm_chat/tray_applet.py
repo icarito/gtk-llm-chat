@@ -27,7 +27,7 @@ else:
         from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
     except ImportError:
-        print("Watchdog is reaquired for tray applet.")
+        debug_print("Watchdog is required for tray applet.")
         sys.exit(1)
 
 
@@ -72,7 +72,7 @@ def load_icon():
 def open_conversation(cid=None):
     # Asegura que el cid es string o None
     if cid is not None and not isinstance(cid, str):
-        print(f"[tray_applet] ADVERTENCIA: open_conversation recibió cid tipo {type(cid)}: {cid}")
+        debug_print(f"[tray_applet] ADVERTENCIA: open_conversation recibió cid tipo {type(cid)}: {cid}")
         return
     send_ipc_open_conversation(cid)
 
@@ -207,15 +207,20 @@ if not is_linux():
 
 # --- Señal para salir limpio ---
 def on_quit_signal(sig, frame):
-    print(_("\nClosing application..."))
+    debug_print(_("\nClosing application..."))
     sys.exit(0)
 
 signal.signal(signal.SIGINT, on_quit_signal)
 
 # --- Main ---
 def main():
-    """Función principal del applet de bandeja simplificado.
-    Solo monitoreará logs.db y mostrará un menú con las conversaciones existentes."""
+    """Main function for the tray applet."""
+    # Import ensure_single_instance here to avoid circular dependencies if platform_utils imports tray_applet
+    from gtk_llm_chat.platform_utils import ensure_single_instance
+    # Ensure this is the only applet instance.
+    # The returned object must be kept in scope to maintain the lock.
+    _applet_instance_lock = ensure_single_instance("gtk_llm_applet")
+
     # Obtener el path de la base de datos
     from platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
@@ -230,8 +235,8 @@ def main():
     
     # Verificar que logs.db existe antes de continuar
     if not os.path.exists(db_path):
-        print(f"[tray_applet] Error: No se encontró logs.db en {db_path}")
-        print(f"[tray_applet] El applet solo debe iniciarse después de que el usuario haya configurado un modelo")
+        debug_print(f"[tray_applet] Error: No se encontró logs.db en {db_path}")
+        debug_print(f"[tray_applet] El applet solo debe iniciarse después de que el usuario haya configurado un modelo")
         
         # Mostrar un menú básico para que el usuario pueda iniciar una nueva conversación
         # (que creará logs.db) o salir
@@ -242,12 +247,12 @@ def main():
         )
     else:
         # Si logs.db existe, cargar las conversaciones
-        print(f"[tray_applet] Encontrado logs.db, cargando conversaciones")
+        debug_print(f"[tray_applet] Encontrado logs.db, cargando conversaciones")
         icon.menu = create_menu()
     
     # Configurar la monitorización de logs.db de forma simplificada
     if is_linux():
-        print("[tray_applet] Iniciando monitorización de logs.db (Linux)")
+        debug_print("[tray_applet] Iniciando monitorización de logs.db (Linux)")
         # Gio requiere loop GLib, ejecutar en un hilo aparte
         def gio_loop():
             DBMonitor(db_path, reload_menu)
@@ -256,7 +261,7 @@ def main():
         threading.Thread(target=gio_loop, daemon=True).start()
     else:
         platform_name = "macOS" if is_mac() else "Windows"
-        print(f"[tray_applet] Iniciando monitorización de logs.db ({platform_name})")
+        debug_print(f"[tray_applet] Iniciando monitorización de logs.db ({platform_name})")
         event_handler = DBChangeHandler(db_path, reload_menu)
         observer = Observer()
         # Solo monitoreamos el directorio que contiene logs.db
@@ -269,6 +274,5 @@ def main():
     icon.run()
 
 if __name__ == '__main__':
-    from platform_utils import ensure_single_instance
-    ensure_single_instance()
+    # ensure_single_instance is now called within main()
     main()

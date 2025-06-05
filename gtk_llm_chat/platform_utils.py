@@ -15,25 +15,27 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
-def ensure_single_instance(lockfile=None):
+def ensure_single_instance(name: str):
     """
-    Asegura que solo haya una instancia de la aplicación en ejecución.
+    Ensures that only one instance of the application component with this 'name' is running.
+    This is intended for use by the tray applet.
+    Exits with sys.exit(1) if an instance is already running.
+    Returns the SingleInstance object on success, to keep the lock.
     """
-    if not lockfile:
-        lockdir = tempfile.gettempdir()
-        lockfile = os.path.join(lockdir, 'gtk_llm_applet.lock')
+    lockdir = tempfile.gettempdir()
+    lockfile_path = os.path.join(lockdir, f"gtk_llm_chat_{name}.lock")
     try:
-        single_instance = SingleInstance(lockfile)
+        single_instance = SingleInstance(lockfile_path)
+        # debug_print(f"Lock acquired for '{name}' at '{lockfile_path}'") # Minimal debug
         return single_instance
     except RuntimeError as e:
-        debug_print(f"{e}")
+        # debug_print(f"Another instance of '{name}' is already running (lock at '{lockfile_path}'). Exiting.") # Minimal debug
         sys.exit(1)
 
 
 
 def is_linux():
     return PLATFORM.startswith('linux')
-
 def is_windows():
     return PLATFORM.startswith('win')
 
@@ -45,15 +47,16 @@ def is_frozen():
 
 def launch_tray_applet(config):
     """
-    Lanza el applet de bandeja
+    Launches the tray applet logic.
+    This function is called INSIDE the process that WILL BE the applet.
+    tray_applet.main() will handle its own single_instance logic.
     """
-    ensure_single_instance()
+    # DO NOT call ensure_single_instance here. tray_applet.main() will.
     try:
-        from gtk_llm_chat.tray_applet import main
-        main()
+        from gtk_llm_chat.tray_applet import main as tray_main
+        tray_main()
     except Exception as e:
         debug_print(f"Can't start tray app: {e}")
-        # spawn_tray_applet(config)
 
 def spawn_tray_applet(config):
     if is_frozen():
