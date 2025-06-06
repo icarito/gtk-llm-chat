@@ -463,33 +463,25 @@ def ensure_user_dir_exists():
     llm_user_path_env = os.environ.get('LLM_USER_PATH')
     flatpak_id = os.environ.get('FLATPAK_ID') # Verificar si estamos en Flatpak
 
-    if flatpak_id:
-        debug_print(f"[DEBUG FLATPAK] Estamos en Flatpak. ID: {flatpak_id}")
-        debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (raw): {llm_user_path_env}")
-
     if llm_user_path_env:
         user_dir = os.path.expanduser(os.path.expandvars(llm_user_path_env))
-        if flatpak_id:
-            debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (expanded): {user_dir}")
+        debug_print(f"[DEBUG] Usando LLM_USER_PATH: {user_dir}")
+    elif flatpak_id:
+        debug_print(f"[DEBUG FLATPAK] Estamos en Flatpak. ID: {flatpak_id}")
+        user_dir = os.path.join(os.path.expanduser("~"), ".var", "app", flatpak_id, "config", "io.datasette.llm")
+        debug_print(f"[DEBUG FLATPAK] Usando ruta XDG Flatpak por defecto: {user_dir}")
     else:
-        if (flatpak_id):
-            user_dir = os.path.join(os.path.expanduser("~"), ".var", "app", flatpak_id, "config", "io.datasette.llm")
-            debug_print(f"[DEBUG FLATPAK] Usando ruta XDG Flatpak por defecto: {user_dir}")
-        else:
-            xdg_config_home = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser("~"), ".config"))
-            user_dir = os.path.join(xdg_config_home, "io.datasette.llm")
-            # debug_print(f"Usando ruta XDG estándar: {user_dir}")
+        xdg_config_home = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser("~"), ".config"))
+        user_dir = os.path.join(xdg_config_home, "io.datasette.llm")
+        # debug_print(f"Usando ruta XDG estándar: {user_dir}")
 
     try:
-        if flatpak_id:
-            debug_print(f"[DEBUG FLATPAK] Intentando crear directorio: {user_dir}")
+        debug_print(f"[DEBUG] Intentando crear directorio: {user_dir}")
         os.makedirs(user_dir, exist_ok=True)
-        if flatpak_id:
-            debug_print(f"[DEBUG FLATPAK] Directorio asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
+        debug_print(f"[DEBUG] Directorio asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
         return user_dir
     except OSError as e:
-        if flatpak_id:
-            debug_print(f"[DEBUG FLATPAK] Error creando/asegurando directorio {user_dir}: {e}")
+        debug_print(f"[DEBUG] Error creando/asegurando directorio {user_dir}: {e}")
         return None
 
 def debug_frozen_environment():
