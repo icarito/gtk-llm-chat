@@ -15,9 +15,6 @@ finish-args:
   - --socket=wayland
   - --device=dri
   - --filesystem=xdg-config/io.datasette.llm:rw
-  - --filesystem=xdg-data/io.datasette.llm:rw
-  - --filesystem=home/.config/io.datasette.llm:rw
-  - --filesystem=home/.local/share/io.datasette.llm:rw
   - --filesystem=xdg-config/autostart:create
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.ayatana.indicator.application
@@ -142,7 +139,7 @@ modules:
       - mkdir -p /app/share/icons/hicolor/symbolic/apps
       - mkdir -p /app/share/icons/hicolor/256x256/apps
       # Usar los iconos PNG disponibles
-      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/256x256/apps/
       - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/share/icons/hicolor/48x48/apps/
       # Icono simbólico para tray
       - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/share/icons/hicolor/symbolic/apps/
@@ -157,17 +154,6 @@ modules:
       # Metadatos
       - mkdir -p /app/share/metainfo
       - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true
-      # Copia adicional en el directorio del paquete para compatibilidad
-      - mkdir -p /app/gtk_llm_chat/hicolor/48x48/apps
-      - mkdir -p /app/gtk_llm_chat/hicolor/scalable/apps
-      - mkdir -p /app/gtk_llm_chat/hicolor/symbolic/apps
-      - mkdir -p /app/gtk_llm_chat/hicolor/256x256/apps
-      # Usar los iconos disponibles
-      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/gtk_llm_chat/hicolor/48x48/apps/
-      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/scalable/apps/
-      - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/gtk_llm_chat/hicolor/symbolic/apps/
-      # También copiar al directorio 256x256
-      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/256x256/apps/
       # Actualizar cache de iconos
       - update-desktop-database /app/share/applications/ || true
       - gtk-update-icon-cache --ignore-theme-index /app/share/icons/hicolor/ || true
@@ -176,11 +162,5 @@ modules:
         path: ..
 desktop-file-name-suffix: ''
 rename-icon: org.fuentelibre.gtk_llm_Chat
-add-extensions:
-  org.freedesktop.Platform.Icontheme:
-    directory: share/icons
-    subdirectories: true
-    no-autodownload: true
-    version: "22.08"
 tags:
   - Utility

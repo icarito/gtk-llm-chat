@@ -85,7 +85,7 @@ def spawn_tray_applet(config):
     if is_flatpak:
         # En Flatpak, usar flatpak run con --applet
         flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
-        args = ['flatpak', 'run', flatpak_id, '--applet']
+        args = ['flatpak-spawn', '--host', 'flatpak', 'run', flatpak_id, '--applet']
         debug_print(f"[platform_utils] Lanzando applet (Flatpak): {args}")
     else:
         # En entornos normales, ejecutar main.py directamente
@@ -161,8 +161,9 @@ def send_ipc_open_conversation(cid):
         # En entorno normal (no frozen), intentar usar el comando de entrada si existe
         # Si estamos en un Flatpak, usar el comando directo de la aplicación
         if os.environ.get('FLATPAK_ID'):
-            # Estamos en Flatpak, usar el comando directo
-            args = ['gtk-llm-chat']  # Comando instalado en /app/bin/
+            # Estamos en Flatpak, usar flatpak-spawn para ejecutar el comando en el host
+            flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
+            args = ['flatpak-spawn', '--host', 'flatpak', 'run', flatpak_id]
             if cid:
                 args.append(f"--cid={cid}")
             debug_print(f"Ejecutando fallback (Flatpak): {args}")

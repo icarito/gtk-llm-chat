@@ -136,6 +136,7 @@ class ResourceManager:
                         "/app/share/icons/hicolor/symbolic/apps",
                         "/app/share/icons/hicolor/scalable/apps",
                         "/app/share/icons/hicolor/48x48/apps", 
+                        "/app/share/icons/hicolor/256x256/apps", # Añadir explícitamente para el icono grande
                         "/app/share/icons",
                         "/app/gtk_llm_chat/hicolor/symbolic/apps",
                         "/app/gtk_llm_chat/hicolor/scalable/apps",
@@ -230,9 +231,11 @@ class ResourceManager:
                         # Fallback para iconos normales
                         fallback_paths = [
                             f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
+                            f"gtk_llm_chat/hicolor/256x256/apps/{icon_name}.png", # Para desarrollo
                             f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
                             f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.png",
                             f"share/icons/hicolor/48x48/apps/{icon_name}.png",
+                            f"share/icons/hicolor/256x256/apps/{icon_name}.png", # Relativo a /app en Flatpak
                             f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
                             f"/app/share/icons/hicolor/48x48/apps/{icon_name}.png",
                             f"/app/share/icons/hicolor/scalable/apps/{icon_name}.svg",
