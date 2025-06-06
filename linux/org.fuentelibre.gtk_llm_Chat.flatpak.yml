@@ -14,7 +14,7 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --device=dri
-  - --filesystem=~/.config/io.datasette.llm:rw
+  - --filesystem=xdg-config/io.datasette.llm:rw
   - --filesystem=xdg-config/autostart:create
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.ayatana.indicator.application
@@ -30,7 +30,6 @@ finish-args:
   - --filesystem=xdg-config/gtk-4.0:ro
   - --filesystem=xdg-data/icons:ro
   # Variables de entorno
-  - --env=LLM_USER_PATH=$HOME/.config/io.datasette.llm
   # Permitir configuración de esquema de color
   - --talk-name=org.freedesktop.portal.Settings
   - --talk-name=org.gnome.Settings

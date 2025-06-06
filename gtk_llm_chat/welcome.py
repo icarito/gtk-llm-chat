@@ -224,7 +224,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4_vbox_content.set_halign(Gtk.Align.CENTER)
         page4_vbox_content.set_hexpand(True)
         checkmark_icon = Gtk.Image.new_from_icon_name("checkmark-symbolic")
-        checkmark_icon.set_pixel_size(256)
+        checkmark_icon.set_pixel_size(128)
         checkmark_icon.set_halign(Gtk.Align.CENTER)
         checkmark_icon.set_margin_bottom(24)
         checkmark_icon.add_css_class("success")

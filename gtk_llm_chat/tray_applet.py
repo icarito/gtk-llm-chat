@@ -250,6 +250,7 @@ def main():
     from .platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
     db_path = os.path.join(user_dir, "logs.db")
+    debug_print(f"[tray_applet] PATH ABSOLUTO DE logs.db MONITORIZADO: {db_path}")
     
     # Inicializar el icon de bandeja
     # En entorno Flatpak, usar un nombre consistente con el ID de la aplicación para el tray
