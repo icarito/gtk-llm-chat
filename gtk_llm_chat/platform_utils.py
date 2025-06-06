@@ -201,17 +201,22 @@ def fork_or_spawn_applet(config={}):
     
     # Solo fork en sistemas tipo Unix si está disponible
     # En algunos ambientes Mac/AppImage es o era necesario/conveniente hacer fork - pero ahora no funciona?
-    # Desactivado por ahora --icarito
-    if (is_linux() or is_mac()) and hasattr(os, 'fork'):
+    can_fork = (is_linux() or is_mac()) and hasattr(os, 'fork')
+    debug_print(f"[platform_utils] fork_or_spawn_applet: is_linux={is_linux()}, is_mac={is_mac()}, hasattr(os, 'fork')={hasattr(os, 'fork')}, can_fork={can_fork}")
+
+    if can_fork:
+        debug_print("[platform_utils] Intentando fork para el applet...")
         pid = os.fork()
         if pid == 0:
             # Proceso hijo: applet
+            debug_print("[platform_utils] Proceso hijo (applet) después del fork.")
             launch_tray_applet(config)
             sys.exit(0)
         # Proceso padre: sigue con la app principal
+        debug_print(f"[platform_utils] Proceso padre continúa después del fork. PID del hijo (applet): {pid}")
         return True
     else:
-        # Windows o sistemas sin fork
+        debug_print("[platform_utils] No se puede hacer fork, usando spawn_tray_applet.")
         spawn_tray_applet(config)
         return True
 

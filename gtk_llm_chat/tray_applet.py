@@ -200,8 +200,10 @@ class DBMonitor:
     
     def _on_file_changed(self, monitor, file, other_file, event_type):
         """Notifica cuando se completan cambios en logs.db."""
+        debug_print(f"[tray_applet] DBMonitor _on_file_changed: Evento {event_type} en '{file.get_path() if file else '???'}' (otro: '{other_file.get_path() if other_file else '???'})")
+
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
-            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGES_DONE_HINT en {file.get_path() if file else 'archivo desconocido'}")
+            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGES_DONE_HINT en '{file.get_path() if file else 'archivo desconocido'}'")
             self.on_change()
         elif event_type == Gio.FileMonitorEvent.DELETED:
             debug_print(f"[tray_applet] DBMonitor: logs.db ({self.db_path}) fue eliminado. Volviendo a monitorear el directorio.")
@@ -214,9 +216,17 @@ class DBMonitor:
             # SQLite a veces mueve archivos. Si el archivo se movió A logs.db, es una creación/modificación.
             # Si se movió DESDE logs.db, es una eliminación.
             # Esta lógica puede ser compleja. Por ahora, si se mueve, re-evaluamos.
-            debug_print(f"[tray_applet] DBMonitor: Detectado MOVED en {file.get_path() if file else 'archivo desconocido'}. Re-evaluando monitor.")
+            debug_print(f"[tray_applet] DBMonitor: Detectado MOVED en '{file.get_path() if file else 'archivo desconocido'}'. Re-evaluando monitor.")
             self._setup_monitor() # Reconfigura el monitor basado en si el archivo existe ahora
             self.on_change() # Actualiza el menú
+        # Log para otros eventos no manejados explícitamente, para diagnóstico
+        elif event_type == Gio.FileMonitorEvent.CREATED:
+            debug_print(f"[tray_applet] DBMonitor: Detectado CREATED (inesperado para archivo ya monitoreado) en '{file.get_path() if file else 'archivo desconocido'}'")
+            self.on_change() # Podría ser útil si SQLite recrea el archivo
+        elif event_type == Gio.FileMonitorEvent.CHANGED:
+            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGED en '{file.get_path() if file else 'archivo desconocido'}' (esperando CHANGES_DONE_HINT)")
+            # No llamar a self.on_change() aquí directamente para evitar actualizaciones excesivas,
+            # a menos que CHANGES_DONE_HINT no llegue consistentemente.
 
 
 if not is_linux():
