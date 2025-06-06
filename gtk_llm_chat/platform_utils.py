@@ -4,6 +4,7 @@ platform_utils.py - utilidades multiplataforma para gtk-llm-chat
 import sys
 import subprocess
 import os
+import llm # Importar llm para usar llm.user_dir()
 import tempfile
 
 try:
@@ -457,31 +458,24 @@ def _check_autostart_macos():
 def ensure_user_dir_exists():
     """
     Asegura que el directorio de configuración/datos del usuario exista y lo devuelve.
-    Prioriza LLM_USER_PATH si está definida.
-    En Flatpak, usa la ruta estándar XDG.
+    Delega a llm.user_dir() que maneja LLM_USER_PATH, XDG y directorios específicos de plataforma.
     """
-    llm_user_path_env = os.environ.get('LLM_USER_PATH')
-    flatpak_id = os.environ.get('FLATPAK_ID') # Verificar si estamos en Flatpak
-
-    if llm_user_path_env:
-        user_dir = os.path.expanduser(os.path.expandvars(llm_user_path_env))
-        debug_print(f"[DEBUG] Usando LLM_USER_PATH: {user_dir}")
-    elif flatpak_id:
-        debug_print(f"[DEBUG FLATPAK] Estamos en Flatpak. ID: {flatpak_id}")
-        user_dir = os.path.join(os.path.expanduser("~"), ".var", "app", flatpak_id, "config", "io.datasette.llm")
-        debug_print(f"[DEBUG FLATPAK] Usando ruta XDG Flatpak por defecto: {user_dir}")
-    else:
-        xdg_config_home = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser("~"), ".config"))
-        user_dir = os.path.join(xdg_config_home, "io.datasette.llm")
-        # debug_print(f"Usando ruta XDG estándar: {user_dir}")
-
     try:
-        debug_print(f"[DEBUG] Intentando crear directorio: {user_dir}")
+        # llm.user_dir() usa LLM_USER_PATH si está seteado.
+        # En Flatpak, el manifiesto setea LLM_USER_PATH a $HOME/.config/io.datasette.llm (del sandbox)
+        # que es un montaje de ~/.config/io.datasette.llm (del host).
+        # En otros sistemas, usa XDG_CONFIG_HOME o defaults de plataforma.
+        user_dir = llm.user_dir()
+        
+        # El path devuelto por llm.user_dir() ya está expandido y es absoluto.
+        debug_print(f"[platform_utils] llm.user_dir() resolvió a: {user_dir}")
+        
         os.makedirs(user_dir, exist_ok=True)
-        debug_print(f"[DEBUG] Directorio asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
+        # debug_print(f"[platform_utils] Directorio de usuario asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
         return user_dir
-    except OSError as e:
-        debug_print(f"[DEBUG] Error creando/asegurando directorio {user_dir}: {e}")
+    except Exception as e: # Captura más genérica para errores inesperados
+        debug_print(f"[platform_utils] Error crítico obteniendo/creando directorio de usuario con llm.user_dir(): {e}")
+        # En caso de error, es mejor retornar None para que el llamador maneje la falla.
         return None
 
 def debug_frozen_environment():

@@ -270,6 +270,10 @@ class LLMChatApplication(Adw.Application):
             # Obtener la ruta de la base de datos usando ensure_user_dir_exists()
             from .platform_utils import ensure_user_dir_exists
             user_dir = ensure_user_dir_exists()
+            if not user_dir: # Si ensure_user_dir_exists falla
+                debug_print("_check_initial_setup_needed: Error obteniendo user_dir, asumiendo que se necesita setup.")
+                return True # Si no podemos obtener el dir, mejor mostrar el welcome.
+            user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
             
             debug_print(f"_check_initial_setup_needed: user_dir = {user_dir}")
@@ -496,4 +500,3 @@ class LLMChatApplication(Adw.Application):
             # Si no hay CID específico, crear siempre una nueva ventana de conversación
             debug_print("Creando nueva ventana sin CID específico")
             return self._create_new_window_with_config(conversation_config)
-

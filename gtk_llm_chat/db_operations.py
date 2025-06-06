@@ -26,6 +26,13 @@ class ChatHistory:
             # Usar ensure_user_dir_exists para asegurar el directorio
             from .platform_utils import ensure_user_dir_exists
             user_dir = ensure_user_dir_exists()
+            if not user_dir: # Manejar el caso donde user_dir no se pudo determinar
+                # Esto es un error crítico, la app no puede funcionar sin BD.
+                error_msg = "No se pudo determinar el directorio de usuario para la base de datos. Verifique los permisos o la variable LLM_USER_PATH."
+                debug_print(f"[ChatHistory] CRITICAL: {error_msg}")
+                # Podríamos lanzar una excepción aquí para detener la inicialización.
+                raise RuntimeError(error_msg)
+            user_dir = ensure_user_dir_exists()
             db_path = os.path.join(user_dir, "logs.db")
         self.db_path = db_path
         self._thread_local = threading.local()
