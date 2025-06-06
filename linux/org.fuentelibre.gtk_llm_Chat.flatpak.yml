@@ -7,13 +7,7 @@ add-extensions:
   org.freedesktop.Platform.Icontheme:
     directory: share/icons
     subdirectories: true
-    no-autodownload: true
     version: '23.08'
-  org.gtk.Gtk3theme:
-    directory: share/themes
-    subdirectories: true
-    no-autodownload: true
-    version: '3.22'
 command: gtk-llm-chat
 finish-args:
   - --share=network
@@ -36,20 +30,10 @@ finish-args:
   - --socket=session-bus
   - --socket=system-bus
   # Acceso a temas y configuración de GTK
-  - --filesystem=xdg-config/gtk-3.0:ro
   - --filesystem=xdg-config/gtk-4.0:ro
   - --filesystem=xdg-data/icons:ro
-  - --filesystem=xdg-data/themes:ro
-  - --filesystem=host-etc:ro
-  - --filesystem=~/.themes:ro
-  - --filesystem=~/.icons:ro
-  # Variables de entorno para temas
-  - --env=GTK_THEME=Adwaita:dark
-  - --env=ICON_THEME=Adwaita
+  # Variables de entorno
   - --env=LLM_USER_PATH=$HOME/.config/io.datasette.llm
-  # Variables para libadwaita
-  - --env=GTK_USE_PORTAL=1
-  - --env=ADW_DISABLE_PORTAL=0
   # Permitir configuración de esquema de color
   - --talk-name=org.freedesktop.portal.Settings
   - --talk-name=org.gnome.Settings

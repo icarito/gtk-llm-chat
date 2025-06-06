@@ -159,10 +159,10 @@ def send_ipc_open_conversation(cid):
             subprocess.Popen(args)
     else:
         # En entorno normal (no frozen), intentar usar el comando de entrada si existe
-        # Si estamos en un Flatpak, usar el comando de la aplicación
+        # Si estamos en un Flatpak, usar el comando directo de la aplicación
         if os.environ.get('FLATPAK_ID'):
-            # Estamos en Flatpak, usar flatpak run
-            args = ['flatpak', 'run', os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')]
+            # Estamos en Flatpak, usar el comando directo
+            args = ['gtk-llm-chat']  # Comando instalado en /app/bin/
             if cid:
                 args.append(f"--cid={cid}")
             debug_print(f"Ejecutando fallback (Flatpak): {args}")

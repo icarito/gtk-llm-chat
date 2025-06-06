@@ -56,14 +56,16 @@ def load_icon():
     # Lista de posibles ubicaciones de iconos (priorizar SVG simbólico para tray)
     icon_paths = [
         # SVG simbólico (preferido para tray)
-        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
         os.path.join('/app', 'share', 'icons', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
-        # PNG como fallback
-        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
+        # PNG 48x48 específico para el tray
+        os.path.join('/app', 'share', 'icons', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.png'),
+        # PNG normal
         os.path.join('/app', 'share', 'icons', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
-        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
-        os.path.join('/app', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
-        os.path.join(base_path, 'linux', 'org.fuentelibre.gtk_llm_Chat.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        # Otras opciones como fallback
+        os.path.join('/app', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.svg'),
     ]
     
     for icon_path in icon_paths:

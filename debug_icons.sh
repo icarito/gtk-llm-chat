@@ -1,8 +1,6 @@
 #!/bin/bash
 # Script para depurar problemas de iconos en el Flatpak
 
-set -e
-
 # Colores para output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,53 +48,6 @@ for dir in "${icon_dirs[@]}"; do
     fi
 done
 
-# Verificar configuración de tema GTK
-echo -e "\n${BLUE}Configuración de tema GTK:${NC}"
-gtk_config_dirs=(
-    "/app/etc/gtk-3.0"
-    "/app/etc/gtk-4.0"
-    "$HOME/.config/gtk-3.0"
-    "$HOME/.config/gtk-4.0"
-)
-
-for dir in "${gtk_config_dirs[@]}"; do
-    if [[ -d "$dir" ]]; then
-        echo -e "${GREEN}✓ $dir${NC}"
-        if [[ -f "$dir/settings.ini" ]]; then
-            echo "  Contenido de settings.ini:"
-            cat "$dir/settings.ini" | grep -E "theme|icon" | while read -r line; do
-                echo "    $line"
-            done
-        else
-            echo "  No hay archivo settings.ini"
-        fi
-    else
-        echo -e "${YELLOW}⚠ $dir (no existe)${NC}"
-    fi
-done
-
-# Verificar bases de datos de iconos
-echo -e "\n${BLUE}Verificando bases de datos de iconos:${NC}"
-icon_cache_files=(
-    "/app/share/icons/hicolor/icon-theme.cache"
-    "/app/share/icons/Adwaita/icon-theme.cache"
-)
-
-for cache in "${icon_cache_files[@]}"; do
-    if [[ -f "$cache" ]]; then
-        echo -e "${GREEN}✓ $cache${NC}"
-        echo "    Tamaño: $(du -h "$cache" | cut -f1)"
-    else
-        echo -e "${YELLOW}⚠ $cache (no existe)${NC}"
-    fi
-done
-
-# Buscar los iconos de la aplicación
-echo -e "\n${BLUE}Buscando iconos de la aplicación:${NC}"
-find /app -name "org.fuentelibre.gtk_llm_Chat*" -type f | sort | while read -r icon; do
-    echo -e "${GREEN}✓ $icon${NC}"
-done
-
 # Verificar si el icono simbólico es válido
 echo -e "\n${BLUE}Verificando validez del icono simbólico:${NC}"
 icon_symbolic="/app/share/icons/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg"
@@ -110,10 +61,3 @@ if [[ -f "$icon_symbolic" ]]; then
 else
     echo -e "${RED}✗ No se encontró icono simbólico en $icon_symbolic${NC}"
 fi
-
-echo -e "\n${BLUE}Consejos para solucionar problemas de iconos:${NC}"
-echo "1. Asegúrese que el icono simbólico termine en '-symbolic.svg'"
-echo "2. Use 'currentColor' en lugar de colores específicos en SVG simbólicos"
-echo "3. Coloque iconos en los directorios correctos según su tipo"
-echo "4. Reconstruya el cache de iconos después de cambios: gtk-update-icon-cache"
-echo "5. Para el sistema tray, asegúrese de usar el nombre correcto del icono en pystray.Icon()"
