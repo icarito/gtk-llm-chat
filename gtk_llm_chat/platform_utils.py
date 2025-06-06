@@ -468,7 +468,7 @@ def ensure_user_dir_exists():
         debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (raw): {llm_user_path_env}")
 
     if llm_user_path_env:
-        user_dir = os.path.expanduser(llm_user_path_env)
+        user_dir = os.path.expanduser(os.path.expandvars(llm_user_path_env))
         if flatpak_id:
             debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (expanded): {user_dir}")
     else:
