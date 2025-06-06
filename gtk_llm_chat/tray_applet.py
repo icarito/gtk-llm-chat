@@ -149,10 +149,30 @@ class DBMonitor:
         self.on_change = on_change
         self._setup_monitor()
     
-    def _setup_monitor(self):
+    def _setup_monitor(self, is_retry_after_delete=False):
         """Configura el monitor para logs.db utilizando Gio.FileMonitor."""
-        # El applet solo debe monitorear logs.db, así que configuramos
-        # directamente la monitorización del archivo
+        # Cancelar monitores existentes
+        if hasattr(self, 'file_monitor') and self.file_monitor:
+            self.file_monitor.cancel()
+            self.file_monitor = None
+        if hasattr(self, 'dir_monitor') and self.dir_monitor:
+            self.dir_monitor.cancel()
+            self.dir_monitor = None
+
+        debug_print(f"[tray_applet] DBMonitor: Configurando monitor para {self.db_path}. Existe: {os.path.exists(self.db_path)}")
+
+        # Si el archivo logs.db existe, monitorearlo directamente.
+        # Si no existe, o si estamos reintentando después de una eliminación,
+        # monitorear el directorio padre para detectar su creación/recreación.
+        #
+        # La lógica original era:
+        # if os.path.exists(self.db_path):
+        #     # Monitorear archivo
+        # else:
+        #     # Monitorear directorio
+        #
+        # La nueva lógica es: si el archivo existe Y NO es un reintento post-delete, monitorear archivo.
+        # En todos los demás casos (archivo no existe, o es reintento post-delete), monitorear directorio.
         if os.path.exists(self.db_path):
             file = Gio.File.new_for_path(self.db_path)
             self.file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
@@ -181,7 +201,23 @@ class DBMonitor:
     def _on_file_changed(self, monitor, file, other_file, event_type):
         """Notifica cuando se completan cambios en logs.db."""
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
+            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGES_DONE_HINT en {file.get_path() if file else 'archivo desconocido'}")
             self.on_change()
+        elif event_type == Gio.FileMonitorEvent.DELETED:
+            debug_print(f"[tray_applet] DBMonitor: logs.db ({self.db_path}) fue eliminado. Volviendo a monitorear el directorio.")
+            # Cancelar monitor de archivo actual (ya se hace en _setup_monitor)
+            # Configurar monitor de directorio
+            self._setup_monitor(is_retry_after_delete=True)
+            # Disparar on_change ya que el archivo ya no existe y el menú debe actualizarse (probablemente a vacío)
+            self.on_change()
+        elif event_type == Gio.FileMonitorEvent.MOVED:
+            # SQLite a veces mueve archivos. Si el archivo se movió A logs.db, es una creación/modificación.
+            # Si se movió DESDE logs.db, es una eliminación.
+            # Esta lógica puede ser compleja. Por ahora, si se mueve, re-evaluamos.
+            debug_print(f"[tray_applet] DBMonitor: Detectado MOVED en {file.get_path() if file else 'archivo desconocido'}. Re-evaluando monitor.")
+            self._setup_monitor() # Reconfigura el monitor basado en si el archivo existe ahora
+            self.on_change() # Actualiza el menú
+
 
 if not is_linux():
     # --- Watchdog simplificado para Windows y macOS ---
