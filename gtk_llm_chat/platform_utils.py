@@ -199,10 +199,14 @@ def fork_or_spawn_applet(config={}):
         
     debug_print(f"Lanzando applet (logs.db existe en {db_path})")
     
+    # Detectar si estamos en Flatpak
+    is_flatpak_env = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+
     # Solo fork en sistemas tipo Unix si está disponible
-    # En algunos ambientes Mac/AppImage es o era necesario/conveniente hacer fork - pero ahora no funciona?
-    can_fork = (is_linux() or is_mac()) and hasattr(os, 'fork')
-    debug_print(f"[platform_utils] fork_or_spawn_applet: is_linux={is_linux()}, is_mac={is_mac()}, hasattr(os, 'fork')={hasattr(os, 'fork')}, can_fork={can_fork}")
+    # En Flatpak, preferimos spawn para evitar problemas con el sandboxing y la monitorización de archivos.
+    can_fork = (is_linux() or is_mac()) and hasattr(os, 'fork') and not is_flatpak_env
+    
+    debug_print(f"[platform_utils] fork_or_spawn_applet: is_linux={is_linux()}, is_mac={is_mac()}, hasattr(os, 'fork')={hasattr(os, 'fork')}, is_flatpak={is_flatpak_env}, can_fork={can_fork}")
 
     if can_fork:
         debug_print("[platform_utils] Intentando fork para el applet...")
@@ -216,7 +220,10 @@ def fork_or_spawn_applet(config={}):
         debug_print(f"[platform_utils] Proceso padre continúa después del fork. PID del hijo (applet): {pid}")
         return True
     else:
-        debug_print("[platform_utils] No se puede hacer fork, usando spawn_tray_applet.")
+        if is_flatpak_env:
+            debug_print("[platform_utils] En entorno Flatpak, usando spawn_tray_applet en lugar de fork.")
+        else:
+            debug_print("[platform_utils] No se puede/debe hacer fork, usando spawn_tray_applet.")
         spawn_tray_applet(config)
         return True
 
