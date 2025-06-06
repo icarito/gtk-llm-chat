@@ -1,0 +1,161 @@
+# Flatpak manifest for Gtk LLM Chat
+app-id: org.fuentelibre.gtk_llm_Chat
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+add-extensions:
+  org.freedesktop.Platform.Icontheme:
+    directory: share/icons
+    subdirectories: true
+    version: '23.08'
+command: gtk-llm-chat
+finish-args:
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=xdg-config/io.datasette.llm:rw
+  - --filesystem=xdg-config/autostart:create
+  - --talk-name=org.ayatana.indicator.application
+  - --talk-name=org.freedesktop.Notifications
+  - --own-name=org.fuentelibre.gtk_llm_Chat.*
+  - --share=ipc
+  - --socket=session-bus
+  - --socket=system-bus
+  # Acceso a temas y configuración de GTK
+  - --filesystem=xdg-config/gtk-4.0:ro
+  - --filesystem=xdg-data/icons:ro
+  # Variables de entorno
+  # Permitir configuración de esquema de color
+  - --talk-name=org.freedesktop.portal.Settings
+  - --talk-name=org.gnome.Settings
+  - --talk-name=com.canonical.AppMenu.Registrar  # Soporte para Unity/Ayatana
+build-options:
+  env:
+    PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
+modules:
+  # intltool (requerido por ayatana-ido)
+  - name: intltool
+    cleanup: ["*"]
+    sources:
+      - type: archive
+        url: https://launchpad.net/intltool/trunk/0.51.0/+download/intltool-0.51.0.tar.gz
+        sha256: 67c74d94196b153b774ab9f89b2fa6c6ba79352407037c8c14d5aeb334e959cd
+      - type: patch
+        path: shared-modules/intltool/intltool-perl5.26-regex-fixes.patch
+
+  # libdbusmenu (requerido por libayatana-appindicator)
+  - name: libdbusmenu
+    buildsystem: autotools
+    build-options:
+      cflags: "-Wno-error"
+    cleanup:
+      - "*.la"
+      - "/include"
+      - "/lib/pkgconfig"
+      - "/libexec"
+      - "/share/doc"
+      - "/share/gtk-doc"
+    config-opts:
+      - "--with-gtk=3"
+      - "--disable-dumper"
+      - "--disable-static"
+      - "--disable-tests"
+      - "--disable-gtk-doc"
+      - "--enable-introspection=no"
+      - "--disable-vala"
+    sources:
+      - type: archive
+        url: https://launchpad.net/libdbusmenu/16.04/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
+        sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
+      - type: patch
+        path: shared-modules/libayatana-appindicator/0001-Fix-HAVE_VALGRIND-AM_CONDITIONAL.patch
+
+  - name: ayatana-ido
+    buildsystem: cmake-ninja
+    cleanup:
+      - "/include"
+      - "/lib/pkgconfig"
+    config-opts:
+      - "-DENABLE_INTROSPECTION=OFF"
+      - "-DCMAKE_INSTALL_LIBDIR=lib"
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/ayatana-ido.git
+        tag: "0.10.4"
+        commit: f968079b09e2310fefc3fc307359025f1c74b3eb
+      - type: patch
+        path: shared-modules/libayatana-appindicator/0001-Make-introspection-configurable.patch
+
+
+
+  - name: libayatana-indicator
+    buildsystem: cmake-ninja
+    cleanup:
+      - "/include"
+      - "/lib/pkgconfig"
+      - "/libexec"
+      - "/share"
+    config-opts:
+      - "-DCMAKE_INSTALL_LIBDIR=lib"
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-indicator.git
+        tag: "0.9.4"
+        commit: 611bb384b73fa6311777ba4c41381a06f5b99dad
+
+  - name: libayatana-appindicator
+    buildsystem: cmake-ninja
+    cleanup:
+      - "/include"
+      - "/lib/pkgconfig"
+    config-opts:
+      - "-DENABLE_BINDINGS_MONO=NO"
+      - "-DENABLE_BINDINGS_VALA=NO"
+      - "-DENABLE_GTKDOC=NO"
+      - "-DCMAKE_INSTALL_LIBDIR=lib"
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
+        tag: "0.5.94"
+        commit: 31e8bb083b307e1cc96af4874a94707727bd1e79
+
+  - name: gtk-llm-chat
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - pip3 install --prefix=/app -r requirements.txt
+      - pip3 install --prefix=/app .
+      # Iconos de aplicación (PNG para menús y lanzadores)
+      - mkdir -p /app/share/icons/hicolor/scalable/apps
+      - mkdir -p /app/share/icons/hicolor/48x48/apps
+      - mkdir -p /app/share/icons/hicolor/symbolic/apps
+      - mkdir -p /app/share/icons/hicolor/256x256/apps
+      # Usar los iconos PNG disponibles
+      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/256x256/apps/
+      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/share/icons/hicolor/48x48/apps/
+      # Icono simbólico para tray
+      - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/share/icons/hicolor/symbolic/apps/
+      # Scripts de diagnóstico
+      - mkdir -p /app/bin
+      - install -Dm755 debug_icons.sh /app/bin/debug_icons.sh
+      - install -Dm755 debug_theme.sh /app/bin/debug_theme.sh
+      # Aplicaciones
+      - mkdir -p /app/share/applications
+      - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
+      - cp desktop/org.fuentelibre.gtk_llm_Applet.desktop /app/share/applications/
+      # Metadatos
+      - mkdir -p /app/share/metainfo
+      - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true
+      # Actualizar cache de iconos
+      - update-desktop-database /app/share/applications/ || true
+      - gtk-update-icon-cache --ignore-theme-index /app/share/icons/hicolor/ || true
+    sources:
+      - type: dir
+        path: ..
+desktop-file-name-suffix: ''
+rename-icon: org.fuentelibre.gtk_llm_Chat
+tags:
+  - Utility

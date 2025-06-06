@@ -1,0 +1,43 @@
+# Flatpak build workflow for Gtk LLM Chat
+name: Flatpak Build
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build-flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt install flatpak flatpak-builder python3-pip appstream-util
+          pip3 install setuptools wheel build
+          pip3 install .
+
+      - name: Add Flathub remote
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak and create bundle
+        run: |
+          flatpak-builder --user --repo=repo --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
+          flatpak build-bundle repo gtk-llm-chat.flatpak org.fuentelibre.gtk_llm_Chat
+
+      - name: Test Flatpak (versión)
+        run: |
+          flatpak install --user --noninteractive gtk-llm-chat.flatpak
+          flatpak run org.fuentelibre.gtk_llm_Chat --help || true
+
+      - name: Upload Flatpak bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: gtk-llm-chat.flatpak

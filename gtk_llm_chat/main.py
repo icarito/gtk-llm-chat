@@ -1,10 +1,32 @@
 """
 Gtk LLM Chat - A frontend for `llm`
 """
+# Si se ejecuta como script directo, configurar paquete para permitir imports relativos
+if __name__ == '__main__' and __package__ is None:
+    import os, sys
+    # Añadir el directorio raíz del proyecto al path para resolver el paquete
+    script_path = os.path.abspath(__file__)
+    package_dir = os.path.dirname(script_path)          # .../gtk_llm_chat
+    project_root = os.path.dirname(package_dir)          # .../gtk-llm-chat
+    sys.path.insert(0, project_root)
+    __package__ = 'gtk_llm_chat'
 import argparse
 import sys
 import time
-from platform_utils import launch_tray_applet, fork_or_spawn_applet, debug_print
+
+# Imports que funcionan tanto como módulo como script directo
+try:
+    # Si se ejecuta como módulo del paquete
+    from .debug_utils import debug_print
+    from .platform_utils import launch_tray_applet, fork_or_spawn_applet
+    # Postponer import de chat_application hasta que sea necesario
+except ImportError:
+    # Si se ejecuta como script directo, añadir el directorio actual al path
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from debug_utils import debug_print
+    from platform_utils import launch_tray_applet, fork_or_spawn_applet
+    # Postponer import de chat_application hasta que sea necesario
 
 # Aplicar patch de compatibilidad NumPy/Python 3.13 lo antes posible
 def apply_numpy_python313_compatibility_patch():
@@ -170,7 +192,13 @@ def main(argv=None):
 
     # Lanzar la aplicación principal
     # This part is reached by initial GUI instances and fallback GUI instances (with --cid).
-    from chat_application import LLMChatApplication
+    # Importamos chat_application aquí para evitar cargar GTK4 innecesariamente si solo se lanza el applet
+    try:
+        from .chat_application import LLMChatApplication
+    except ImportError:
+        # Fallback para script directo
+        from chat_application import LLMChatApplication
+    
     chat_app = LLMChatApplication(config)
     cmd_args = []
     if config.get('cid'):

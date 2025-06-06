@@ -8,8 +8,9 @@ import locale
 import gettext
 import threading
 
-from gtk_llm_chat.platform_utils import send_ipc_open_conversation, is_linux, is_mac, debug_print
-from gtk_llm_chat.db_operations import ChatHistory
+from .platform_utils import send_ipc_open_conversation, is_linux, is_mac
+from .debug_utils import debug_print
+from .db_operations import ChatHistory
 
 try:
     import pystray
@@ -46,27 +47,51 @@ else:
 
 # --- Icono ---
 def load_icon():
+    """Carga el icono para el tray. Prioriza SVG simbólico para tray, PNG para aplicación."""
     if getattr(sys, 'frozen', False):
-        base_path = os.path.join(
-                sys._MEIPASS)
+        base_path = os.path.join(sys._MEIPASS)
     else:
-        base_path = os.path.abspath(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    ".."))
-    icon_path = os.path.join(
-            base_path,
-            'gtk_llm_chat',
-            'hicolor', 
-            'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png')
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     
-    # Can we have the icon in Cornflower blue?
-    # icon_path = os.path.join(
-    #    base_path,
-    #    'windows',
-    #    'org.fuentelibre.gtk_llm_Chat.png'
-    #)
-    return Image.open(icon_path)
+    # Lista de posibles ubicaciones de iconos (priorizar SVG simbólico para tray)
+    icon_paths = [
+        # SVG simbólico (preferido para tray)
+        os.path.join('/app', 'share', 'icons', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
+        # PNG 48x48 específico para el tray
+        os.path.join('/app', 'share', 'icons', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.png'),
+        # PNG normal
+        os.path.join('/app', 'share', 'icons', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        # Otras opciones como fallback
+        os.path.join('/app', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.svg'),
+    ]
+    
+    for icon_path in icon_paths:
+        debug_print(f"[TRAY ICON] Intentando cargar icono para tray: {icon_path}")
+        if os.path.exists(icon_path):
+            try:
+                img = Image.open(icon_path)
+                debug_print(f"Icono PNG cargado exitosamente: {icon_path}")
+                return img
+            except Exception as e:
+                debug_print(f"Error cargando icono desde {icon_path}: {e}")
+                continue
+    
+    # Si no se encuentra ningún icono, crear uno por defecto
+    debug_print("No se encontró icono, creando uno por defecto")
+    # Crear un icono simple de 32x32 píxeles
+    try:
+        img = Image.new('RGBA', (32, 32), (100, 149, 237, 255))  # Cornflower blue
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([8, 8, 24, 24], fill=(255, 255, 255, 255))
+        return img
+    except Exception as e:
+        debug_print(f"Error creando icono por defecto: {e}")
+        # Fallback absoluto
+        return Image.new('RGBA', (32, 32), (100, 149, 237, 255))
 
 # --- Acciones ---
 def open_conversation(cid=None):
@@ -216,18 +241,21 @@ signal.signal(signal.SIGINT, on_quit_signal)
 def main():
     """Main function for the tray applet."""
     # Import ensure_single_instance here to avoid circular dependencies if platform_utils imports tray_applet
-    from gtk_llm_chat.platform_utils import ensure_single_instance
+    from .platform_utils import ensure_single_instance
     # Ensure this is the only applet instance.
     # The returned object must be kept in scope to maintain the lock.
     _applet_instance_lock = ensure_single_instance("gtk_llm_applet")
 
     # Obtener el path de la base de datos
-    from platform_utils import ensure_user_dir_exists
+    from .platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
     db_path = os.path.join(user_dir, "logs.db")
+    debug_print(f"[tray_applet] PATH ABSOLUTO DE logs.db MONITORIZADO: {db_path}")
     
     # Inicializar el icon de bandeja
-    icon = pystray.Icon("LLMChatApplet", load_icon(), _(u"LLM Conversations"))
+    # En entorno Flatpak, usar un nombre consistente con el ID de la aplicación para el tray
+    icon_id = "org.fuentelibre.gtk_llm_Chat" if os.path.exists('/.flatpak-info') else "LLMChatApplet"
+    icon = pystray.Icon(icon_id, load_icon(), _(u"LLM Conversations"))
     
     def reload_menu():
         """Recarga el menú con las conversaciones actualizadas desde logs.db"""

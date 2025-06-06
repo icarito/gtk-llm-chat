@@ -3,8 +3,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib
 
-from chat_application import _
-from model_selection import ModelSelectionManager, debug_print
+from .chat_application import _
+from .model_selection import ModelSelectionManager
+from .debug_utils import debug_print
 
 NO_SELECTION_KEY = "_internal_no_selection_"
 

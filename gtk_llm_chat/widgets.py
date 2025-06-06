@@ -57,7 +57,7 @@ class MessageWidget(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
 
         # Import MarkdownView here
-        from markdownview import MarkdownView
+        from .markdownview import MarkdownView
 
         # Configurar el estilo según el remitente
         is_user = message.sender == "user"

@@ -8,8 +8,8 @@ import os
 import pathlib
 import json
 
-from chat_application import _
-from platform_utils import debug_print
+from .chat_application import _
+from .debug_utils import debug_print
 
 class ModelSelectionManager(GObject.Object):
     """
@@ -166,7 +166,7 @@ class ModelSelectionManager(GObject.Object):
         """Lee y cachea keys.json."""
         if self._keys_cache is None:
             try:
-                from platform_utils import ensure_user_dir_exists
+                from .platform_utils import ensure_user_dir_exists
                 user_dir = ensure_user_dir_exists()
                 keys_path = os.path.join(user_dir, "keys.json")
                 if os.path.exists(keys_path):
@@ -354,7 +354,7 @@ class ModelSelectionManager(GObject.Object):
     def set_api_key(self, provider_key, api_key):
         """Establece la API key para un proveedor."""
         try:
-            from platform_utils import ensure_user_dir_exists
+            from .platform_utils import ensure_user_dir_exists
             user_dir = ensure_user_dir_exists()
             keys_path = os.path.join(user_dir, "keys.json")
             keys_path_obj = pathlib.Path(keys_path)

@@ -13,7 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, GdkPixbuf, Gio, Gdk
-from platform_utils import debug_print
+from .debug_utils import debug_print
 
 
 class ResourceManager:
@@ -21,20 +21,25 @@ class ResourceManager:
     
     def __init__(self):
         self._is_frozen = getattr(sys, 'frozen', False)
-        self._base_path = self._get_base_path()
+        # self._base_path se usa para desarrollo y PyInstaller.
+        # Para Flatpak, la base de recursos principal es /app.
+        if self._is_frozen and hasattr(sys, '_MEIPASS'): # PyInstaller
+            self._base_path = sys._MEIPASS
+        elif not self._is_frozen: # Desarrollo
+            self._base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        else: # Frozen, pero no PyInstaller (podría ser Flatpak si no se maneja explícitamente o Nuitka, etc.)
+            self._base_path = os.path.dirname(sys.executable)
+            
         self._icon_theme_configured = False
         
     def _get_base_path(self) -> str:
         """Obtiene la ruta base de la aplicación según el entorno."""
-        if self._is_frozen:
-            # En entorno congelado, usar la ruta del ejecutable
-            if hasattr(sys, '_MEIPASS'):
-                return sys._MEIPASS
-            else:
-                return os.path.dirname(sys.executable)
-        else:
-            # En desarrollo, usar la ruta del módulo
-            return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Esta función ahora es más simple, ya que la lógica principal está en __init__
+        # y la detección de Flatpak se hace donde se necesita.
+        is_flatpak_env = os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')
+        if is_flatpak_env:
+            return '/app'
+        return self._base_path
     
     def get_image_path(self, relative_path: str) -> Optional[str]:
         """
@@ -46,27 +51,28 @@ class ResourceManager:
         Returns:
             Ruta completa al archivo de imagen o None si no existe
         """
-        # Intentar diferentes ubicaciones posibles
+        current_search_base = self._get_base_path() # Usa la ruta base correcta (ej. /app para flatpak)
+
+        # Si la ruta relativa ya es absoluta (ej. /app/share/...), úsala directamente.
+        if os.path.isabs(relative_path) and os.path.exists(relative_path):
+            return relative_path
+
         possible_paths = []
         
-        if self._is_frozen:
-            # En entorno congelado, los recursos pueden estar en diferentes ubicaciones
-            # Evitar duplicar _internal/_internal o rutas erróneas
-            possible_paths.append(os.path.join(self._base_path, relative_path))
-            # Si el recurso está en gtk_llm_chat/hicolor/48x48/apps/ y se pide solo el nombre, buscar ahí
+        # Ruta directa desde la base actual
+        possible_paths.append(os.path.join(current_search_base, relative_path))
+
+        if self._is_frozen and not (os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')): # PyInstaller
+            # Lógica específica de PyInstaller si es necesario, por ejemplo, si los recursos están anidados
             if not os.path.isabs(relative_path) and not relative_path.startswith("gtk_llm_chat/"):
-                possible_paths.append(os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps", relative_path))
-        else:
-            # En desarrollo
-            possible_paths.append(os.path.join(self._base_path, relative_path))
+                 possible_paths.append(os.path.join(current_search_base, "gtk_llm_chat", "hicolor", "48x48", "apps", relative_path))
         
-        # Buscar el archivo en las ubicaciones posibles
         for path in possible_paths:
             if os.path.exists(path):
                 return path
                 
         debug_print(f"Warning: Resource not found: {relative_path}")
-        debug_print(f"Searched in: {possible_paths}")
+        debug_print(f"Searched in: {possible_paths} (current_search_base: {current_search_base})")
         return None
     
     def get_icon_pixbuf(self, icon_path: str, size: int = 64) -> Optional[GdkPixbuf.Pixbuf]:
@@ -108,21 +114,45 @@ class ResourceManager:
                 return
 
             icon_theme = Gtk.IconTheme.get_for_display(display)
+            
+            is_flatpak_env = os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')
 
-            if self._is_frozen:
-                # Si tienes un tema completo personalizado:
+            if is_flatpak_env:
+                # En Flatpak, los iconos están en /app/share/icons/.
+                # Gtk.IconTheme debería encontrarlos automáticamente debido a XDG_DATA_DIRS
+                # y la caché de iconos actualizada.
+                # Añadir /app/share/icons explícitamente es una medida de seguridad.
+                flatpak_icon_share_dir = "/app/share/icons"
+                if os.path.exists(flatpak_icon_share_dir):
+                    icon_theme.add_search_path(flatpak_icon_share_dir)
+                    debug_print(f"[OK] Added Flatpak icon search path: {flatpak_icon_share_dir}")
+                else:
+                    debug_print(f"[WARN] Flatpak icon share dir not found: {flatpak_icon_share_dir}")
+            
+            elif self._is_frozen: # PyInstaller (no Flatpak)
+                # self._base_path es sys._MEIPASS para PyInstaller
+                # Asumimos que los iconos están en una carpeta 'hicolor' relativa a 'gtk_llm_chat' dentro de MEIPASS
+                pyinstaller_icon_hicolor_path = os.path.join(self._base_path, "gtk_llm_chat", "hicolor")
+                if os.path.exists(pyinstaller_icon_hicolor_path):
+                    icon_theme.add_search_path(pyinstaller_icon_hicolor_path) # Añadir el directorio hicolor
+                    debug_print(f"[OK] Added PyInstaller hicolor search path: {pyinstaller_icon_hicolor_path}")
+                else:
+                    debug_print(f"[WARN] PyInstaller hicolor path not found: {pyinstaller_icon_hicolor_path}")
+                # Considerar también una estructura de tema completo si existe
                 custom_theme_dir = os.path.join(self._base_path, "gtk_llm_chat", "my_custom_theme")
                 if os.path.exists(os.path.join(custom_theme_dir, "index.theme")):
                     icon_theme.add_search_path(custom_theme_dir)
-                    debug_print(f"[OK] Added custom theme path: {custom_theme_dir}")
-                # Si solo tienes iconos sueltos:
-                app_icons_dir = os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps")
-                if os.path.exists(app_icons_dir):
-                    icon_theme.add_search_path(app_icons_dir)
-                    debug_print(f"[OK] Added app icons directory: {app_icons_dir}")
-                # No añadir .../hicolor/ directamente
-            # En desarrollo normalmente no necesitas añadir rutas
+                    debug_print(f"[OK] Added custom theme path for PyInstaller: {custom_theme_dir}")
 
+            else: # Desarrollo
+                # self._base_path es la raíz del proyecto
+                dev_icon_hicolor_path = os.path.join(self._base_path, "gtk_llm_chat", "hicolor")
+                if os.path.exists(dev_icon_hicolor_path):
+                    icon_theme.add_search_path(dev_icon_hicolor_path) # Añadir el directorio hicolor
+                    debug_print(f"[OK] Added development hicolor search path: {dev_icon_hicolor_path}")
+                else:
+                    debug_print(f"[WARN] Development hicolor path not found: {dev_icon_hicolor_path}")
+            
             self._icon_theme_configured = True
             debug_print("[OK] Icon theme configured successfully")
 
@@ -169,38 +199,72 @@ class ResourceManager:
         Returns:
             Widget Gtk.Image
         """
-        # Asegurar que el tema de iconos esté configurado
         self.setup_icon_theme()
         
-        # Intentar cargar el icono personalizado primero
         image = Gtk.Image.new_from_icon_name(icon_name)
         image.set_pixel_size(size)
         
-        # Verificar si el icono se cargó correctamente
+        # Verificar si el icono se cargó correctamente por el tema
         try:
             display = Gdk.Display.get_default()
             if display:
                 icon_theme = Gtk.IconTheme.get_for_display(display)
+                if icon_theme.has_icon(icon_name):
+                    debug_print(f"Icon '{icon_name}' (size {size}) found by Gtk.IconTheme.")
+                    # Opcional: obtener más información sobre el icono encontrado
+                    # icon_info = icon_theme.lookup_icon(icon_name, [], size, 1, Gtk.TextDirection.NONE, None)
+                    # if icon_info and icon_info.get_filename():
+                    #     debug_print(f"  -> Path: {icon_info.get_filename()}")
+                    # else:
+                    #     debug_print(f"  -> Gtk.IconTheme found it, but no direct path from lookup_icon (normal for themed icons).")
 
-                if not icon_theme.has_icon(icon_name):
-                    # Fallback: intentar cargar desde archivo solo en la ruta estándar de iconos
-                    fallback_paths = [
-                        f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
-                        f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
-                        f"macos/{icon_name}.icns",
-                        f"linux/{icon_name}.png",
-                    ]
+                else:
+                    debug_print(f"Icon '{icon_name}' (size {size}) NOT found by Gtk.IconTheme. Attempting fallbacks.")
+                    # La lógica de fallback es compleja y puede no funcionar bien en Flatpak
+                    # si las rutas no están alineadas con cómo get_image_path las resuelve.
+                    # Para Flatpak, el icono debería estar en /app/share/icons/...
+                    
+                    current_search_base = self._get_base_path() # /app para flatpak
+                    is_flatpak_env = os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')
 
-                    for fallback_path in fallback_paths:
-                        if self.get_image_path(fallback_path):
-                            return self.create_image_widget(fallback_path, size)
+                    fallback_paths_to_try = []
+                    if icon_name.endswith('-symbolic'):
+                        if is_flatpak_env:
+                            fallback_paths_to_try.append(f"share/icons/hicolor/symbolic/apps/{icon_name}.svg")
+                        else: # Desarrollo o PyInstaller
+                            fallback_paths_to_try.append(f"gtk_llm_chat/hicolor/symbolic/apps/{icon_name}.svg")
+                    else: # Iconos normales
+                        if is_flatpak_env:
+                            # Estas rutas son relativas a /app si get_image_path usa current_search_base = /app
+                            fallback_paths_to_try.extend([
+                                f"share/icons/hicolor/256x256/apps/{icon_name}.png",
+                                f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
+                                f"share/icons/hicolor/48x48/apps/{icon_name}.png",
+                            ])
+                        else: # Desarrollo o PyInstaller
+                             # Estas rutas son relativas a la raíz del proyecto o MEIPASS
+                            fallback_paths_to_try.extend([
+                                f"gtk_llm_chat/hicolor/256x256/apps/{icon_name}.png",
+                                f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
+                                f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
+                            ])
 
-                    # Último fallback: icono genérico
-                    print(f"Icon not found: {icon_name}, using application-x-executable")
-                    image = Gtk.Image.new_from_icon_name("application-x-executable")
+                    for fallback_path_str in fallback_paths_to_try:
+                        # get_image_path construirá la ruta completa usando current_search_base
+                        resolved_path = self.get_image_path(fallback_path_str)
+                        if resolved_path:
+                            debug_print(f"Attempting fallback for '{icon_name}' with resolved path: {resolved_path}")
+                            # Usamos create_image_widget que carga desde archivo directamente
+                            return self.create_image_widget(resolved_path, size) 
+
+                    debug_print(f"Icon '{icon_name}' not found via Gtk.IconTheme or fallbacks. Using 'image-missing'.")
+                    image = Gtk.Image.new_from_icon_name("image-missing") # Fallback final
                     image.set_pixel_size(size)
+            else:
+                debug_print(f"Icon '{icon_name}': No Gdk.Display for Gtk.IconTheme check.")
         except Exception as e:
-            print(f"Error checking icon availability: {e}")
+            debug_print(f"Error during icon fallback check for '{icon_name}': {e}")
+            # Si hay un error aquí, la imagen ya creada con new_from_icon_name se devuelve.
         
         return image
     

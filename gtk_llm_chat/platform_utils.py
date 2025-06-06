@@ -5,15 +5,22 @@ import sys
 import subprocess
 import os
 import tempfile
-from single_instance import SingleInstance
+
+try:
+    # Si se ejecuta como módulo del paquete
+    from .single_instance import SingleInstance
+    from .debug_utils import debug_print
+    # Postponer import de chat_application hasta que sea necesario
+except ImportError:
+    # Si se ejecuta como script directo, añadir el directorio actual al path
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from single_instance import SingleInstance
+    from debug_utils import debug_print
 
 PLATFORM = sys.platform
 
 DEBUG = os.environ.get('DEBUG') or False
-
-def debug_print(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
 
 def ensure_single_instance(name: str):
     """
@@ -53,7 +60,7 @@ def launch_tray_applet(config):
     """
     # DO NOT call ensure_single_instance here. tray_applet.main() will.
     try:
-        from gtk_llm_chat.tray_applet import main as tray_main
+        from .tray_applet import main as tray_main
         tray_main()
     except Exception as e:
         debug_print(f"Can't start tray app: {e}")
@@ -71,11 +78,25 @@ def spawn_tray_applet(config):
                 debug_print(f"[platform_utils] Lanzando applet (frozen): {args}")
             subprocess.Popen(args)
             return
-    # Ejecutar tray_applet.py con el intérprete
-    applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
-    args = [sys.executable, applet_path, '--applet']
-    debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
-    subprocess.Popen(args)
+    
+    # Detectar si estamos en Flatpak y usar el comando correcto
+    is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+    
+    if is_flatpak:
+        # En Flatpak, usar flatpak run con --applet
+        flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
+        args = ['flatpak-spawn', '--host', 'flatpak', 'run', flatpak_id, '--applet']
+        debug_print(f"[platform_utils] Lanzando applet (Flatpak): {args}")
+    else:
+        # En entornos normales, ejecutar main.py directamente
+        applet_path = os.path.join(os.path.dirname(__file__), 'main.py')
+        args = [sys.executable, applet_path, '--applet']
+        debug_print(f"[platform_utils] Lanzando applet (no frozen): {args}")
+    
+    try:
+        subprocess.Popen(args)
+    except Exception as e:
+        debug_print(f"[platform_utils] Error lanzando applet: {e}")
 
 def send_ipc_open_conversation(cid):
     """
@@ -137,13 +158,23 @@ def send_ipc_open_conversation(cid):
             debug_print(f"Ejecutando fallback (frozen): {args}")
             subprocess.Popen(args)
     else:
-        exe = sys.executable
-        main_path = os.path.join(os.path.dirname(__file__), 'main.py')
-        args = [exe, main_path]
-        if cid:
-            args.append(f"--cid={cid}")
-        debug_print(f"Ejecutando fallback (no frozen): {args}")
-        subprocess.Popen(args)
+        # En entorno normal (no frozen), intentar usar el comando de entrada si existe
+        # Si estamos en un Flatpak, usar el comando directo de la aplicación
+        if os.environ.get('FLATPAK_ID'):
+            # Estamos en Flatpak, usar flatpak-spawn para ejecutar el comando en el host
+            flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
+            args = ['flatpak-spawn', '--host', 'flatpak', 'run', flatpak_id]
+            if cid:
+                args.append(f"--cid={cid}")
+            debug_print(f"Ejecutando fallback (Flatpak): {args}")
+            subprocess.Popen(args)
+        else:
+            # Entorno normal, usar python -m
+            args = [sys.executable, '-m', 'gtk_llm_chat.main']
+            if cid:
+                args.append(f"--cid={cid}")
+            debug_print(f"Ejecutando fallback (módulo): {args}")
+            subprocess.Popen(args)
 
 def fork_or_spawn_applet(config={}):
     """Lanza el applet como proceso hijo (fork) en Unix si está disponible, o como subproceso en cualquier plataforma.
@@ -154,7 +185,6 @@ def fork_or_spawn_applet(config={}):
         return True
         
     # Verificar que logs.db exista antes de lanzar el applet
-    from platform_utils import ensure_user_dir_exists
     user_dir = ensure_user_dir_exists()
     if not user_dir:
         debug_print("No se lanza el applet porque todavía no existe el directorio de usuario.")
@@ -231,8 +261,17 @@ def _setup_autostart_linux(enable):
         else:
             exec_command = f"{sys.executable} --applet"
     else:
-        main_path = os.path.join(os.path.dirname(__file__), 'main.py')
-        exec_command = f"{sys.executable} {main_path} --applet"
+        # Detectar si estamos en Flatpak
+        is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+        
+        if is_flatpak:
+            # En Flatpak, usar flatpak run
+            flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
+            exec_command = f"flatpak run {flatpak_id} --applet"
+        else:
+            # En entornos normales
+            main_path = os.path.join(os.path.dirname(__file__), 'main.py')
+            exec_command = f"{sys.executable} {main_path} --applet"
     
     # Contenido del archivo .desktop
     desktop_content = f"""[Desktop Entry]
@@ -417,17 +456,32 @@ def _check_autostart_macos():
 
 def ensure_user_dir_exists():
     """
-    Asegura que el directorio de usuario de llm existe (llm.user_dir()),
-    creando el directorio si es necesario de forma segura y multiplataforma.
+    Asegura que el directorio de configuración/datos del usuario exista y lo devuelve.
+    Prioriza LLM_USER_PATH si está definida.
+    En Flatpak, usa la ruta estándar XDG.
     """
+    llm_user_path_env = os.environ.get('LLM_USER_PATH')
+    flatpak_id = os.environ.get('FLATPAK_ID') # Verificar si estamos en Flatpak
+
+    if llm_user_path_env:
+        user_dir = os.path.expanduser(os.path.expandvars(llm_user_path_env))
+        debug_print(f"[DEBUG] Usando LLM_USER_PATH: {user_dir}")
+    elif flatpak_id:
+        debug_print(f"[DEBUG FLATPAK] Estamos en Flatpak. ID: {flatpak_id}")
+        user_dir = os.path.join(os.path.expanduser("~"), ".var", "app", flatpak_id, "config", "io.datasette.llm")
+        debug_print(f"[DEBUG FLATPAK] Usando ruta XDG Flatpak por defecto: {user_dir}")
+    else:
+        xdg_config_home = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser("~"), ".config"))
+        user_dir = os.path.join(xdg_config_home, "io.datasette.llm")
+        # debug_print(f"Usando ruta XDG estándar: {user_dir}")
+
     try:
-        import llm
-        user_dir = llm.user_dir()
-        import os
+        debug_print(f"[DEBUG] Intentando crear directorio: {user_dir}")
         os.makedirs(user_dir, exist_ok=True)
+        debug_print(f"[DEBUG] Directorio asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
         return user_dir
-    except Exception as e:
-        debug_print(f"Error asegurando directorio de usuario: {e}")
+    except OSError as e:
+        debug_print(f"[DEBUG] Error creando/asegurando directorio {user_dir}: {e}")
         return None
 
 def debug_frozen_environment():
@@ -560,7 +614,6 @@ def debug_database_monitoring():
     debug_print("=== DIAGNÓSTICO DE MONITOREO DE BASE DE DATOS ===")
     
     try:
-        from platform_utils import ensure_user_dir_exists
         user_dir = ensure_user_dir_exists()
         debug_print(f"Directorio de usuario LLM: {user_dir}")
         
