@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>org.fuentelibre.gtk_llm_Chat</id>
-  <project_license>GPL-3.0+</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <name>GTK LLM Chat</name>
   <summary>A GTK frontend for chatting with Large Language Models</summary>
   <description>
@@ -20,8 +21,10 @@
       <li>Local conversation storage</li>
     </ul>
   </description>
-  <developer_name>Sebastian Silva</developer_name>
-  <url type="homepage">https://gtk-llm-chat.fuentelibre.org/</url>
+  <developer id="org.fuentelibre">
+    <name>Sebastian Silva</name>
+  </developer>
+  <url type="homepage">https://github.com/fuentelibre/gtk-llm-chat</url>
   <url type="bugtracker">https://github.com/fuentelibre/gtk-llm-chat/issues</url>
   <url type="vcs-browser">https://github.com/fuentelibre/gtk-llm-chat</url>
   <provides>
