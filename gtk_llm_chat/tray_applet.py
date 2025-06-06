@@ -47,25 +47,32 @@ else:
 
 # --- Icono ---
 def load_icon():
+    """Carga el icono para el tray. Prioriza SVG simbólico para tray, PNG para aplicación."""
     if getattr(sys, 'frozen', False):
         base_path = os.path.join(sys._MEIPASS)
     else:
         base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     
-    # Lista de posibles ubicaciones de iconos
+    # Lista de posibles ubicaciones de iconos (priorizar SVG simbólico para tray)
     icon_paths = [
-        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        # SVG simbólico (preferido para tray)
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
+        os.path.join('/app', 'share', 'icons', 'hicolor', 'symbolic', 'apps', 'org.fuentelibre.gtk_llm_Chat-symbolic.svg'),
+        # PNG como fallback
         os.path.join(base_path, 'gtk_llm_chat', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
-        os.path.join('/app', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
         os.path.join('/app', 'share', 'icons', 'hicolor', '48x48', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
-        os.path.join(base_path, 'windows', 'org.fuentelibre.gtk_llm_Chat.png'),
+        os.path.join(base_path, 'gtk_llm_chat', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
+        os.path.join('/app', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'org.fuentelibre.gtk_llm_Chat.png'),
         os.path.join(base_path, 'linux', 'org.fuentelibre.gtk_llm_Chat.png'),
     ]
     
     for icon_path in icon_paths:
         if os.path.exists(icon_path):
             try:
-                return Image.open(icon_path)
+                # PNG directo
+                img = Image.open(icon_path)
+                debug_print(f"Icono PNG cargado exitosamente: {icon_path}")
+                return img
             except Exception as e:
                 debug_print(f"Error cargando icono desde {icon_path}: {e}")
                 continue
@@ -73,11 +80,16 @@ def load_icon():
     # Si no se encuentra ningún icono, crear uno por defecto
     debug_print("No se encontró icono, creando uno por defecto")
     # Crear un icono simple de 32x32 píxeles
-    from PIL import Image, ImageDraw
-    img = Image.new('RGBA', (32, 32), (100, 149, 237, 255))  # Cornflower blue
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([8, 8, 24, 24], fill=(255, 255, 255, 255))
-    return img
+    try:
+        img = Image.new('RGBA', (32, 32), (100, 149, 237, 255))  # Cornflower blue
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([8, 8, 24, 24], fill=(255, 255, 255, 255))
+        return img
+    except Exception as e:
+        debug_print(f"Error creando icono por defecto: {e}")
+        # Fallback absoluto
+        return Image.new('RGBA', (32, 32), (100, 149, 237, 255))
 
 # --- Acciones ---
 def open_conversation(cid=None):

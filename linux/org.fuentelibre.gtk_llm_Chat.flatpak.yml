@@ -35,13 +35,22 @@ finish-args:
   - --share=ipc
   - --socket=session-bus
   - --socket=system-bus
+  # Acceso a temas y configuración de GTK
   - --filesystem=xdg-config/gtk-3.0:ro
   - --filesystem=xdg-config/gtk-4.0:ro
   - --filesystem=xdg-data/icons:ro
   - --filesystem=xdg-data/themes:ro
-  - --env=GTK_THEME=Adwaita
+  - --filesystem=host-etc/gtk-3.0:ro
+  - --filesystem=host-etc/gtk-4.0:ro
+  - --filesystem=/usr/share/icons:ro
+  - --filesystem=/usr/share/themes:ro
+  # Variables de entorno para temas
+  - --env=GTK_THEME=Adwaita:dark
   - --env=ICON_THEME=Adwaita
   - --env=LLM_USER_PATH=$HOME/.config/io.datasette.llm
+  # Permitir configuración de esquema de color
+  - --talk-name=org.freedesktop.portal.Settings
+  - --talk-name=org.gnome.Settings
 build-options:
   env:
     PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
@@ -140,21 +149,33 @@ modules:
     build-commands:
       - pip3 install --prefix=/app -r requirements.txt
       - pip3 install --prefix=/app .
+      # Iconos de aplicación (PNG para menús y lanzadores)
       - mkdir -p /app/share/icons/hicolor/scalable/apps
       - mkdir -p /app/share/icons/hicolor/48x48/apps
+      - mkdir -p /app/share/icons/hicolor/symbolic/apps
       - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/share/icons/hicolor/scalable/apps/
       - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/scalable/apps/
       - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/48x48/apps/
+      # Icono simbólico para tray
+      - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/share/icons/hicolor/symbolic/apps/
+      # Aplicaciones
       - mkdir -p /app/share/applications
       - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
       - cp desktop/org.fuentelibre.gtk_llm_Applet.desktop /app/share/applications/
+      # Metadatos
       - mkdir -p /app/share/metainfo
       - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true
+      # Copia adicional en el directorio del paquete para compatibilidad
       - mkdir -p /app/gtk_llm_chat/hicolor/48x48/apps
       - mkdir -p /app/gtk_llm_chat/hicolor/scalable/apps
+      - mkdir -p /app/gtk_llm_chat/hicolor/symbolic/apps
       - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/48x48/apps/
       - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/scalable/apps/
       - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/gtk_llm_chat/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/gtk_llm_chat/hicolor/symbolic/apps/
+      # Actualizar cache de iconos
+      - update-desktop-database /app/share/applications/ || true
+      - gtk-update-icon-cache --ignore-theme-index /app/share/icons/hicolor/ || true
     sources:
       - type: dir
         path: ..
