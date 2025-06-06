@@ -200,10 +200,22 @@ class DBMonitor:
     
     def _on_file_changed(self, monitor, file, other_file, event_type):
         """Notifica cuando se completan cambios en logs.db."""
-        debug_print(f"[tray_applet] DBMonitor _on_file_changed: Evento {event_type} en '{file.get_path() if file else '???'}' (otro: '{other_file.get_path() if other_file else '???'})")
+        # Loguear todos los eventos recibidos para diagnóstico
+        event_name_str = "DESCONOCIDO"
+        try:
+            # Intentar obtener el nombre legible del evento
+            event_name_str = Gio.FileMonitorEvent(event_type).value_name 
+        except ValueError:
+            # Si el valor numérico no corresponde a un miembro conocido de la enumeración
+            event_name_str = f"DESCONOCIDO_EVENTO_VALOR_{event_type}"
+
+        file_path_str = file.get_path() if file else '???'
+        other_file_path_str = other_file.get_path() if other_file else '???'
+        
+        debug_print(f"[tray_applet] DBMonitor _on_file_changed: CRUDO -> Evento {event_type} ({event_name_str}), Archivo: '{file_path_str}', Otro: '{other_file_path_str}'")
 
         if event_type == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
-            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGES_DONE_HINT en '{file.get_path() if file else 'archivo desconocido'}'")
+            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGES_DONE_HINT en '{file_path_str}'")
             self.on_change()
         elif event_type == Gio.FileMonitorEvent.DELETED:
             debug_print(f"[tray_applet] DBMonitor: logs.db ({self.db_path}) fue eliminado. Volviendo a monitorear el directorio.")
@@ -216,17 +228,20 @@ class DBMonitor:
             # SQLite a veces mueve archivos. Si el archivo se movió A logs.db, es una creación/modificación.
             # Si se movió DESDE logs.db, es una eliminación.
             # Esta lógica puede ser compleja. Por ahora, si se mueve, re-evaluamos.
-            debug_print(f"[tray_applet] DBMonitor: Detectado MOVED en '{file.get_path() if file else 'archivo desconocido'}'. Re-evaluando monitor.")
+            debug_print(f"[tray_applet] DBMonitor: Detectado MOVED en '{file_path_str}'. Re-evaluando monitor.")
             self._setup_monitor() # Reconfigura el monitor basado en si el archivo existe ahora
             self.on_change() # Actualiza el menú
         # Log para otros eventos no manejados explícitamente, para diagnóstico
         elif event_type == Gio.FileMonitorEvent.CREATED:
-            debug_print(f"[tray_applet] DBMonitor: Detectado CREATED (inesperado para archivo ya monitoreado) en '{file.get_path() if file else 'archivo desconocido'}'")
+            debug_print(f"[tray_applet] DBMonitor: Detectado CREATED (posiblemente recreación) en '{file_path_str}'")
             self.on_change() # Podría ser útil si SQLite recrea el archivo
         elif event_type == Gio.FileMonitorEvent.CHANGED:
-            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGED en '{file.get_path() if file else 'archivo desconocido'}' (esperando CHANGES_DONE_HINT)")
+            debug_print(f"[tray_applet] DBMonitor: Detectado CHANGED en '{file_path_str}' (esperando CHANGES_DONE_HINT)")
             # No llamar a self.on_change() aquí directamente para evitar actualizaciones excesivas,
             # a menos que CHANGES_DONE_HINT no llegue consistentemente.
+            # Para probar en Flatpak si solo llega CHANGED:
+            # debug_print(f"[tray_applet] DBMonitor: Forzando on_change() por evento CHANGED para prueba.")
+            # self.on_change()
 
 
 if not is_linux():
