@@ -109,10 +109,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
         # No forzar size_request aquí, dejar que el clamp lo limite
         
         # Usar resource_manager para cargar el icono de la aplicación con tamaño grande
-        app_image = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat", 128)
+        app_image = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat", 256)
         app_image.set_valign(Gtk.Align.CENTER)
         app_image.set_halign(Gtk.Align.CENTER)
-        app_image.set_size_request(128, 128)
+        app_image.set_size_request(256, 256)
         vbox1.append(app_image)
         
         page1.set_title(_("Own the conversation."))
@@ -224,7 +224,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4_vbox_content.set_halign(Gtk.Align.CENTER)
         page4_vbox_content.set_hexpand(True)
         checkmark_icon = Gtk.Image.new_from_icon_name("checkmark-symbolic")
-        checkmark_icon.set_pixel_size(128)
+        checkmark_icon.set_pixel_size(256)
         checkmark_icon.set_halign(Gtk.Align.CENTER)
         checkmark_icon.set_margin_bottom(24)
         checkmark_icon.add_css_class("success")

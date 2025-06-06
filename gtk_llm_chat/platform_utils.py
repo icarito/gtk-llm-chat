@@ -456,44 +456,41 @@ def _check_autostart_macos():
 
 def ensure_user_dir_exists():
     """
-    Asegura que el directorio de usuario de llm existe,
-    creando el directorio si es necesario de forma segura y multiplataforma.
-    En entornos Flatpak, fuerza el uso del directorio real del host.
+    Asegura que el directorio de configuración/datos del usuario exista y lo devuelve.
+    Prioriza LLM_USER_PATH si está definida.
+    En Flatpak, usa la ruta estándar XDG.
     """
-    try:
-        # Detectar si estamos en un entorno Flatpak
-        is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
-        
-        if is_flatpak:
-            # En Flatpak, usar el directorio del host directamente
-            # La variable LLM_USER_PATH debe estar configurada en el manifest
-            user_dir = os.environ.get('LLM_USER_PATH')
-            if not user_dir:
-                # Fallback a la ruta real del home del usuario 
-                user_dir = os.path.join(os.environ.get('XDG_CONFIG_HOME', os.path.expanduser("~/.config")), 'io.datasette.llm')
-            debug_print(f"Flatpak detectado: usando directorio del host {user_dir}")
-            
-            # Configurar variables de entorno para que LLM use este directorio
-            os.environ['LLM_USER_PATH'] = user_dir
-            
+    llm_user_path_env = os.environ.get('LLM_USER_PATH')
+    flatpak_id = os.environ.get('FLATPAK_ID') # Verificar si estamos en Flatpak
+
+    if flatpak_id:
+        debug_print(f"[DEBUG FLATPAK] Estamos en Flatpak. ID: {flatpak_id}")
+        debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (raw): {llm_user_path_env}")
+
+    if llm_user_path_env:
+        user_dir = os.path.expanduser(llm_user_path_env)
+        if flatpak_id:
+            debug_print(f"[DEBUG FLATPAK] LLM_USER_PATH (expanded): {user_dir}")
+    else:
+        if (flatpak_id):
+            user_dir = os.path.join(os.path.expanduser("~"), ".var", "app", flatpak_id, "config", "io.datasette.llm")
+            debug_print(f"[DEBUG FLATPAK] Usando ruta XDG Flatpak por defecto: {user_dir}")
         else:
-            # En entornos normales, usar llm.user_dir()
-            import llm
-            user_dir = llm.user_dir()
-            
+            xdg_config_home = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser("~"), ".config"))
+            user_dir = os.path.join(xdg_config_home, "io.datasette.llm")
+            # debug_print(f"Usando ruta XDG estándar: {user_dir}")
+
+    try:
+        if flatpak_id:
+            debug_print(f"[DEBUG FLATPAK] Intentando crear directorio: {user_dir}")
         os.makedirs(user_dir, exist_ok=True)
+        if flatpak_id:
+            debug_print(f"[DEBUG FLATPAK] Directorio asegurado: {user_dir}. Existe: {os.path.exists(user_dir)}")
         return user_dir
-    except Exception as e:
-        debug_print(f"Error asegurando directorio de usuario: {e}")
-        # En caso de error, retornar un directorio por defecto válido
-        fallback_dir = os.path.expanduser("~/.config/io.datasette.llm")
-        try:
-            os.makedirs(fallback_dir, exist_ok=True)
-            debug_print(f"Usando directorio de respaldo: {fallback_dir}")
-            return fallback_dir
-        except:
-            debug_print("Error crítico: no se puede crear ningún directorio de usuario")
-            return fallback_dir  # Retornar la ruta aunque falle, para evitar None
+    except OSError as e:
+        if flatpak_id:
+            debug_print(f"[DEBUG FLATPAK] Error creando/asegurando directorio {user_dir}: {e}")
+        return None
 
 def debug_frozen_environment():
     """
