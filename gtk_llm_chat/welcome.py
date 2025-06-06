@@ -149,7 +149,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         
         self.panel2_app_icon_target_size = 64
         # Usar resource_manager para crear el icono
-        self.panel2_app_icon = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat", 1)
+        self.panel2_app_icon = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat-symbolic", 1)
         self.panel2_app_icon.set_opacity(0.0)
         self.panel2_app_icon.set_size_request(1, 1)
         self.panel2_app_icon.set_halign(Gtk.Align.CENTER)

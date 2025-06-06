@@ -159,14 +159,13 @@ def send_ipc_open_conversation(cid):
             subprocess.Popen(args)
     else:
         # En entorno normal (no frozen), intentar usar el comando de entrada si existe
-        # Si estamos en un Flatpak, usar el ejecutable directamente
+        # Si estamos en un Flatpak, usar el comando de la aplicación
         if os.environ.get('FLATPAK_ID'):
-            # Estamos en Flatpak, no necesitamos 'flatpak run' dentro del sandbox
-            # El ejecutable gtk-llm-chat estará disponible directamente
-            args = ['gtk-llm-chat']
+            # Estamos en Flatpak, usar flatpak run
+            args = ['flatpak', 'run', os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')]
             if cid:
                 args.append(f"--cid={cid}")
-            debug_print(f"Ejecutando dentro del sandbox Flatpak: {args}")
+            debug_print(f"Ejecutando fallback (Flatpak): {args}")
             subprocess.Popen(args)
         else:
             # Entorno normal, usar python -m
@@ -265,14 +264,9 @@ def _setup_autostart_linux(enable):
         is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
         
         if is_flatpak:
-            # En instalación Flatpak, pero configurando desde fuera del sandbox
+            # En Flatpak, usar flatpak run
             flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
-            # Usar flatpak run solo si estamos fuera del sandbox
-            if not os.path.exists('/.flatpak-info'):
-                exec_command = f"flatpak run {flatpak_id} --applet"
-            else:
-                # Si estamos dentro del sandbox, usar el comando directamente
-                exec_command = "gtk-llm-chat --applet"
+            exec_command = f"flatpak run {flatpak_id} --applet"
         else:
             # En entornos normales
             main_path = os.path.join(os.path.dirname(__file__), 'main.py')
@@ -475,8 +469,7 @@ def ensure_user_dir_exists():
             user_dir = os.environ.get('LLM_USER_PATH')
             if not user_dir:
                 # Fallback a la ruta real del home del usuario 
-                real_home = os.environ.get('HOME', '/var/home/' + os.environ.get('USER', 'user'))
-                user_dir = os.path.join(real_home, '.config', 'io.datasette.llm')
+                user_dir = os.path.join(os.environ.get('XDG_CONFIG_HOME', os.path.expanduser("~/.config")), 'io.datasette.llm')
             debug_print(f"Flatpak detectado: usando directorio del host {user_dir}")
             
             # Configurar variables de entorno para que LLM use este directorio
