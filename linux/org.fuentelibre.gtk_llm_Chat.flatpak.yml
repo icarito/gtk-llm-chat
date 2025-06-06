@@ -40,17 +40,20 @@ finish-args:
   - --filesystem=xdg-config/gtk-4.0:ro
   - --filesystem=xdg-data/icons:ro
   - --filesystem=xdg-data/themes:ro
-  - --filesystem=host-etc/gtk-3.0:ro
-  - --filesystem=host-etc/gtk-4.0:ro
-  - --filesystem=/usr/share/icons:ro
-  - --filesystem=/usr/share/themes:ro
+  - --filesystem=host-etc:ro
+  - --filesystem=~/.themes:ro
+  - --filesystem=~/.icons:ro
   # Variables de entorno para temas
   - --env=GTK_THEME=Adwaita:dark
   - --env=ICON_THEME=Adwaita
   - --env=LLM_USER_PATH=$HOME/.config/io.datasette.llm
+  # Variables para libadwaita
+  - --env=GTK_USE_PORTAL=1
+  - --env=ADW_DISABLE_PORTAL=0
   # Permitir configuración de esquema de color
   - --talk-name=org.freedesktop.portal.Settings
   - --talk-name=org.gnome.Settings
+  - --talk-name=com.canonical.AppMenu.Registrar  # Soporte para Unity/Ayatana
 build-options:
   env:
     PKG_CONFIG_PATH: "/app/lib/pkgconfig:/app/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib64/pkgconfig"
@@ -153,11 +156,16 @@ modules:
       - mkdir -p /app/share/icons/hicolor/scalable/apps
       - mkdir -p /app/share/icons/hicolor/48x48/apps
       - mkdir -p /app/share/icons/hicolor/symbolic/apps
-      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/share/icons/hicolor/scalable/apps/
-      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/scalable/apps/
-      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/48x48/apps/
+      - mkdir -p /app/share/icons/hicolor/256x256/apps
+      # Usar los iconos PNG disponibles
+      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/scalable/apps/
+      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/share/icons/hicolor/48x48/apps/
       # Icono simbólico para tray
       - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/share/icons/hicolor/symbolic/apps/
+      # Scripts de diagnóstico
+      - mkdir -p /app/bin
+      - install -Dm755 debug_icons.sh /app/bin/debug_icons.sh
+      - install -Dm755 debug_theme.sh /app/bin/debug_theme.sh
       # Aplicaciones
       - mkdir -p /app/share/applications
       - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
@@ -169,10 +177,13 @@ modules:
       - mkdir -p /app/gtk_llm_chat/hicolor/48x48/apps
       - mkdir -p /app/gtk_llm_chat/hicolor/scalable/apps
       - mkdir -p /app/gtk_llm_chat/hicolor/symbolic/apps
-      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/48x48/apps/
-      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/scalable/apps/
-      - cp gtk_llm_chat/hicolor/scalable/apps/org.fuentelibre.gtk_llm_Chat.svg /app/gtk_llm_chat/hicolor/scalable/apps/
+      - mkdir -p /app/gtk_llm_chat/hicolor/256x256/apps
+      # Usar los iconos disponibles
+      - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/gtk_llm_chat/hicolor/48x48/apps/
+      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/scalable/apps/
       - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/gtk_llm_chat/hicolor/symbolic/apps/
+      # También copiar al directorio 256x256
+      - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/gtk_llm_chat/hicolor/256x256/apps/
       # Actualizar cache de iconos
       - update-desktop-database /app/share/applications/ || true
       - gtk-update-icon-cache --ignore-theme-index /app/share/icons/hicolor/ || true

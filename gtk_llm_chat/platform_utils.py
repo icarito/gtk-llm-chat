@@ -159,13 +159,14 @@ def send_ipc_open_conversation(cid):
             subprocess.Popen(args)
     else:
         # En entorno normal (no frozen), intentar usar el comando de entrada si existe
-        # Si estamos en un Flatpak, usar el comando de la aplicación
+        # Si estamos en un Flatpak, usar el ejecutable directamente
         if os.environ.get('FLATPAK_ID'):
-            # Estamos en Flatpak, usar flatpak run
-            args = ['flatpak', 'run', os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')]
+            # Estamos en Flatpak, no necesitamos 'flatpak run' dentro del sandbox
+            # El ejecutable gtk-llm-chat estará disponible directamente
+            args = ['gtk-llm-chat']
             if cid:
                 args.append(f"--cid={cid}")
-            debug_print(f"Ejecutando fallback (Flatpak): {args}")
+            debug_print(f"Ejecutando dentro del sandbox Flatpak: {args}")
             subprocess.Popen(args)
         else:
             # Entorno normal, usar python -m
@@ -264,9 +265,14 @@ def _setup_autostart_linux(enable):
         is_flatpak = os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
         
         if is_flatpak:
-            # En Flatpak, usar flatpak run
+            # En instalación Flatpak, pero configurando desde fuera del sandbox
             flatpak_id = os.environ.get('FLATPAK_ID', 'org.fuentelibre.gtk_llm_Chat')
-            exec_command = f"flatpak run {flatpak_id} --applet"
+            # Usar flatpak run solo si estamos fuera del sandbox
+            if not os.path.exists('/.flatpak-info'):
+                exec_command = f"flatpak run {flatpak_id} --applet"
+            else:
+                # Si estamos dentro del sandbox, usar el comando directamente
+                exec_command = "gtk-llm-chat --applet"
         else:
             # En entornos normales
             main_path = os.path.join(os.path.dirname(__file__), 'main.py')

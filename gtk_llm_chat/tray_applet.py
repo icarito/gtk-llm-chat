@@ -250,7 +250,9 @@ def main():
     db_path = os.path.join(user_dir, "logs.db")
     
     # Inicializar el icon de bandeja
-    icon = pystray.Icon("LLMChatApplet", load_icon(), _(u"LLM Conversations"))
+    # En entorno Flatpak, usar un nombre consistente con el ID de la aplicación para el tray
+    icon_id = "org.fuentelibre.gtk_llm_Chat" if os.path.exists('/.flatpak-info') else "LLMChatApplet"
+    icon = pystray.Icon(icon_id, load_icon(), _(u"LLM Conversations"))
     
     def reload_menu():
         """Recarga el menú con las conversaciones actualizadas desde logs.db"""

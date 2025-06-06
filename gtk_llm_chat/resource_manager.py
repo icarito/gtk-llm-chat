@@ -133,9 +133,13 @@ class ResourceManager:
                 if is_flatpak:
                     # En Flatpak, los iconos están en rutas estándar de /app
                     flatpak_icon_paths = [
+                        "/app/share/icons/hicolor/symbolic/apps",
                         "/app/share/icons/hicolor/scalable/apps",
                         "/app/share/icons/hicolor/48x48/apps", 
-                        "/app/share/icons"
+                        "/app/share/icons",
+                        "/app/gtk_llm_chat/hicolor/symbolic/apps",
+                        "/app/gtk_llm_chat/hicolor/scalable/apps",
+                        "/app/gtk_llm_chat/hicolor/48x48/apps"
                     ]
                     for icon_path in flatpak_icon_paths:
                         if os.path.exists(icon_path):
@@ -143,10 +147,15 @@ class ResourceManager:
                             debug_print(f"[OK] Added Flatpak icon path: {icon_path}")
                 else:
                     # En desarrollo, añadir rutas locales
-                    app_icons_dir = os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps")
-                    if os.path.exists(app_icons_dir):
-                        icon_theme.add_search_path(app_icons_dir)
-                        debug_print(f"[OK] Added app icons directory: {app_icons_dir}")
+                    icon_dirs = [
+                        os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "symbolic", "apps"),
+                        os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "scalable", "apps"),
+                        os.path.join(self._base_path, "gtk_llm_chat", "hicolor", "48x48", "apps")
+                    ]
+                    for icon_dir in icon_dirs:
+                        if os.path.exists(icon_dir):
+                            icon_theme.add_search_path(icon_dir)
+                            debug_print(f"[OK] Added app icons directory: {icon_dir}")
             # En desarrollo normalmente no necesitas añadir rutas
 
             self._icon_theme_configured = True
@@ -209,15 +218,27 @@ class ResourceManager:
                 icon_theme = Gtk.IconTheme.get_for_display(display)
 
                 if not icon_theme.has_icon(icon_name):
-                    # Fallback: intentar cargar desde archivo solo en la ruta estándar de iconos
-                    fallback_paths = [
-                        f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
-                        f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
-                        f"share/icons/hicolor/48x48/apps/{icon_name}.png",
-                        f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
-                        f"macos/{icon_name}.icns",
-                        f"linux/{icon_name}.png",
-                    ]
+                    # Separar el ícono simbólico del normal
+                    if icon_name.endswith('-symbolic'):
+                        # Fallback para iconos simbólicos
+                        fallback_paths = [
+                            f"gtk_llm_chat/hicolor/symbolic/apps/{icon_name}.svg",
+                            f"share/icons/hicolor/symbolic/apps/{icon_name}.svg",
+                            f"/app/share/icons/hicolor/symbolic/apps/{icon_name}.svg",
+                        ]
+                    else:
+                        # Fallback para iconos normales
+                        fallback_paths = [
+                            f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
+                            f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
+                            f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.png",
+                            f"share/icons/hicolor/48x48/apps/{icon_name}.png",
+                            f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
+                            f"/app/share/icons/hicolor/48x48/apps/{icon_name}.png",
+                            f"/app/share/icons/hicolor/scalable/apps/{icon_name}.svg",
+                            f"macos/{icon_name}.icns",
+                            f"linux/{icon_name}.png",
+                        ]
 
                     for fallback_path in fallback_paths:
                         if self.get_image_path(fallback_path):

@@ -11,3 +11,4 @@ llm-anthropic
 llm-openrouter
 pystray
 watchdog
+pillow
