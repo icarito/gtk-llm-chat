@@ -69,9 +69,9 @@ def load_icon():
     ]
     
     for icon_path in icon_paths:
+        debug_print(f"[TRAY ICON] Intentando cargar icono para tray: {icon_path}")
         if os.path.exists(icon_path):
             try:
-                # PNG directo
                 img = Image.open(icon_path)
                 debug_print(f"Icono PNG cargado exitosamente: {icon_path}")
                 return img
