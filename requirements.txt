@@ -12,3 +12,4 @@ llm-openrouter
 pystray
 watchdog
 pillow
+pyxdg; sys_platform == "linux"

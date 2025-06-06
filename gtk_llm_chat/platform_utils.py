@@ -241,8 +241,20 @@ def ensure_load_on_session_startup(enable=True):
 
 def _setup_autostart_linux(enable):
     """Configura autostart en Linux usando archivos .desktop"""
-    autostart_dir = os.path.expanduser("~/.config/autostart")
-    desktop_file = os.path.join(autostart_dir, "gtk-llm-chat-applet.desktop")
+    xdg_config_home = None
+    try:
+        from xdg.BaseDirectory import xdg_config_home as xdg_config_home_path
+        xdg_config_home = xdg_config_home_path
+        debug_print(f"[platform_utils] Usando pyxdg para XDG_CONFIG_HOME: {xdg_config_home}")
+    except ImportError:
+        debug_print("[platform_utils] pyxdg no encontrado, usando fallback para XDG_CONFIG_HOME.")
+        xdg_config_home_str = os.environ.get("XDG_CONFIG_HOME")
+        if not xdg_config_home_str:
+            xdg_config_home_str = os.path.expanduser("~/.config")
+        xdg_config_home = xdg_config_home_str
+
+    autostart_dir = os.path.join(str(xdg_config_home), "autostart")
+    desktop_file = os.path.join(str(autostart_dir), "gtk-llm-chat-applet.desktop")
     
     if not enable:
         # Deshabilitar: eliminar archivo
@@ -423,8 +435,20 @@ def is_loading_on_session_startup():
 
 def _check_autostart_linux():
     """Verifica autostart en Linux verificando archivo .desktop"""
-    autostart_dir = os.path.expanduser("~/.config/autostart")
-    desktop_file = os.path.join(autostart_dir, "gtk-llm-chat-applet.desktop")
+    xdg_config_home = None
+    try:
+        from xdg.BaseDirectory import xdg_config_home as xdg_config_home_path
+        xdg_config_home = xdg_config_home_path
+        # debug_print(f"[platform_utils] Check: Usando pyxdg para XDG_CONFIG_HOME: {xdg_config_home}")
+    except ImportError:
+        # debug_print("[platform_utils] Check: pyxdg no encontrado, usando fallback para XDG_CONFIG_HOME.")
+        xdg_config_home_str = os.environ.get("XDG_CONFIG_HOME")
+        if not xdg_config_home_str:
+            xdg_config_home_str = os.path.expanduser("~/.config")
+        xdg_config_home = xdg_config_home_str
+        
+    autostart_dir = os.path.join(str(xdg_config_home), "autostart")
+    desktop_file = os.path.join(str(autostart_dir), "gtk-llm-chat-applet.desktop")
     return os.path.exists(desktop_file)
 
 def _check_autostart_windows():
