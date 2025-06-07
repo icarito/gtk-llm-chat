@@ -487,7 +487,7 @@ def main():
         _("LLM Conversations"))
 
     icon_id = "org.fuentelibre.gtk_llm_Chat" if os.path.exists('/.flatpak-info') else "LLMChatApplet"
-    icon = pystray.Icon(icon_id, load_icon(), _(u"LLM Conversations"))
+    icon = pystray.Icon(icon_id, icon_spec, _(u"LLM Conversations"))
     
     def reload_menu():
         """Recarga el menú con las conversaciones actualizadas desde logs.db"""
