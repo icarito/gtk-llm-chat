@@ -78,7 +78,7 @@ if getattr(sys, 'frozen', False) and sys.version_info >= (3, 13):
                         if hasattr(current_module, 'add_docstring') and not hasattr(current_module.add_docstring, '_patched'):
                             current_module.add_docstring = create_safe_add_docstring(current_module.add_docstring)
                             current_module.add_docstring._patched = True
-                            print(f"OK Pre-patched add_docstring in {name}")
+                            #print(f"OK Pre-patched add_docstring in {name}")
                             
                 except Exception as e:
                     pass  # Ignorar errores de pre-patch
@@ -88,7 +88,7 @@ if getattr(sys, 'frozen', False) and sys.version_info >= (3, 13):
                 module = original_import(name, globals, locals, fromlist, level)
             except Exception as e:
                 if "add_docstring" in str(e) and "should be a str" in str(e):
-                    print(f"⚠ Caught add_docstring error during import of {name}: {e}")
+                    #print(f"⚠ Caught add_docstring error during import of {name}: {e}")
                     
                     # Intentar aplicar parche de emergencia
                     try:
@@ -104,7 +104,7 @@ if getattr(sys, 'frozen', False) and sys.version_info >= (3, 13):
                         
                         # Reintentar importación
                         module = original_import(name, globals, locals, fromlist, level)
-                        print(f"OK Successfully imported {name} after emergency patch")
+                        #print(f"OK Successfully imported {name} after emergency patch")
                         
                     except Exception as retry_e:
                         print(f"Fail: Failed to import {name} even after emergency patch: {retry_e}")
@@ -128,7 +128,7 @@ if getattr(sys, 'frozen', False) and sys.version_info >= (3, 13):
                         if mod and hasattr(mod, 'add_docstring') and not hasattr(mod.add_docstring, '_post_patched'):
                             mod.add_docstring = create_safe_add_docstring(mod.add_docstring)
                             mod.add_docstring._post_patched = True
-                            print(f"OK Post-patched add_docstring in {getattr(mod, '__name__', 'unknown')}")
+                            #print(f"OK Post-patched add_docstring in {getattr(mod, '__name__', 'unknown')}")
                             
                 except Exception as e:
                     pass  # Ignorar errores de post-patch
@@ -137,7 +137,7 @@ if getattr(sys, 'frozen', False) and sys.version_info >= (3, 13):
         
         # Aplicar el hook de importación agresivo
         builtins.__import__ = aggressive_numpy_patch_import
-        print("OK Aggressive NumPy Python 3.13 compatibility hook installed")
+        #print("OK Aggressive NumPy Python 3.13 compatibility hook installed")
         
     except Exception as e:
         warnings.warn(f"Failed to install NumPy Python 3.13 compatibility hook: {e}", RuntimeWarning)

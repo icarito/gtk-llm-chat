@@ -76,7 +76,7 @@ def patch_numpy_add_docstring():
         # Aplicar el patch
         overrides_module.add_docstring = patched_add_docstring
         
-        print("OK Numpy add_docstring patch aplicado correctamente para Python 3.13")
+        # print("OK Numpy add_docstring patch aplicado correctamente para Python 3.13")
         
     except Exception as e:
         # Si hay cualquier error en el patching, solo emitir una advertencia
@@ -118,10 +118,10 @@ def apply_llm_compatibility_patches():
             else:
                 print(f"ⓘ Plugin {plugin} no pudo ser importado (probablemente no instalado): {e}")
     
-    print(f"OK Patches de compatibilidad aplicados a {patched_count} plugins LLM")
+    #print(f"OK Patches de compatibilidad aplicados a {patched_count} plugins LLM")
 
 
 if __name__ == "__main__":
-    print("Aplicando patches de compatibilidad NumPy/Python 3.13...")
+    #print("Aplicando patches de compatibilidad NumPy/Python 3.13...")
     apply_llm_compatibility_patches()
-    print("Patches aplicados.")
+    #print("Patches aplicados.")
