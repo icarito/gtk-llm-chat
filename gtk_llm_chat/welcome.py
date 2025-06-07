@@ -21,12 +21,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.config_data = {}
         self._finish_clicked = False # Bandera para controlar el flujo de cierre
 
-        # Cargar estilos globales y aplicar clase principal
-        style_manager.load_styles()
+        # Aplicar clase principal (configuración de recursos se hace más tarde)
         style_manager.apply_to_widget(self, "main-container")
-
-        # Configurar recursos (solo iconos, sin estilos CSS personalizados)
-        resource_manager.setup_icon_theme()
 
         import sys
         self.header_bar = Adw.HeaderBar()
@@ -39,6 +35,8 @@ class WelcomeWindow(Adw.ApplicationWindow):
 
         # Conectar la señal realize para iniciar la carga de modelos automáticamente
         self.connect('realize', self._on_realize)
+        # Conectar la señal show para configurar recursos de forma segura
+        self.connect('show', self._on_window_show)
         
         root_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root_vbox.set_hexpand(True)
@@ -770,6 +768,17 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def _on_realize(self, widget):
         """Callback cuando la ventana se realiza - inicia la carga de modelos."""
         self.start_lazy_loading()
+
+    def _on_window_show(self, window):
+        """Configurar recursos de forma segura cuando se muestra la ventana."""
+        if not hasattr(self, '_resources_configured'):
+            try:
+                style_manager.load_styles()
+                resource_manager.setup_icon_theme()
+                self._resources_configured = True
+                debug_print("Welcome: Recursos configurados correctamente al mostrar ventana")
+            except Exception as e:
+                debug_print(f"Welcome: Error configurando recursos: {e}")
 
 if __name__ == "__main__":
     import sys

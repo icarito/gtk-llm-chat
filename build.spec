@@ -6,10 +6,37 @@ import os
 
 libdir = '/usr/lib/x86_64-linux-gnu'
 patterns = [
-  'libadwaita-1.so*',
-  'libgtk-4.so*',
-  'libgdk-4.so*',
-  'libpangocairo-1.0.so*',
+    # GTK y Adwaita
+    'libadwaita-1.so*',
+    'libgtk-4.so*',
+    'libgdk-4.so*',
+    'libgsk-4.so*',
+    
+    # Pango y sus dependencias
+    'libpango-1.0.so*',
+    'libpangocairo-1.0.so*',
+    'libpangoft2-1.0.so*',
+    
+    # Cairo
+    'libcairo.so*',
+    'libcairo-gobject.so*',
+    
+    # GLib y sus componentes
+    'libgobject-2.0.so*',
+    'libglib-2.0.so*',
+    'libgio-2.0.so*',
+    'libgmodule-2.0.so*',
+    
+    # Dependencias de renderizado de texto y fuentes
+    'libharfbuzz.so*',
+    'libfontconfig.so*',
+    'libfreetype.so*',
+    'libfribidi.so*',
+    
+    # Otras dependencias gráficas importantes
+    'libgdk_pixbuf-2.0.so*',
+    'libepoxy.so*',
+    'libgraphene-1.0.so*',
 ]
 binaries = []
 for pat in patterns:

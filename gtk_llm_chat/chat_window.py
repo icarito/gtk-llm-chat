@@ -38,11 +38,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.insert_action_group('app', self.get_application())
 
-        # Cargar estilos CSS y configurar recursos
-        style_manager.load_styles()
-        resource_manager.setup_icon_theme()
-        
-        # Aplicar clase CSS para la ventana principal
+        # Aplicar clase CSS para la ventana principal - sin cargar recursos aún
         style_manager.apply_to_widget(self, "main-container")
 
         # Conectar señal de cierre de ventana
@@ -746,6 +742,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_window_show(self, window):
         """Set focus to the input text when the window is shown."""
+        # Configurar recursos de forma segura cuando la ventana se muestra
+        if not hasattr(self, '_resources_configured'):
+            try:
+                # Configurar recursos en el hilo principal sin threading adicional
+                from .resource_manager import resource_manager
+                if not resource_manager._icon_theme_configured:
+                    resource_manager.setup_icon_theme()
+                self._resources_configured = True
+                debug_print("Recursos configurados al mostrar ventana")
+            except Exception as e:
+                debug_print(f"Error configurando recursos en window show: {e}")
+        
         # Handle benchmark startup
         if self.benchmark_startup and self.start_time:
             end_time = time.time()

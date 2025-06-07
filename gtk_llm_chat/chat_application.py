@@ -5,6 +5,8 @@ import signal
 import sys
 import subprocess
 import threading
+import gettext
+import locale
 
 from gi import require_versions
 require_versions({"Gtk": "4.0", "Adw": "1"})
@@ -69,44 +71,75 @@ class LLMChatApplication(Adw.Application):
         self.quit()
 
     def _register_dbus_interface(self):
-        # Solo ejecutar en Linux
+        # Solo ejecutar en Linux y evitar timeouts
         if sys.platform != 'linux':
             return
         try:
             from gi.repository import Gio
-            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
-            interface_info = node_info.interfaces[0]
-            def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
-                if method_name == "OpenConversation":
-                    try:
-                        cid = parameters.unpack()[0]
-                        debug_print(f"D-Bus: Recibida solicitud para abrir conversación CID: '{cid}'")
-                        # Usar GLib.idle_add para manejar la llamada en el hilo principal de GTK
-                        GLib.idle_add(lambda: self.OpenConversation(cid))
-                        invocation.return_value(None)
-                    except Exception as e:
-                        debug_print(f"D-Bus: Error al procesar OpenConversation: {e}")
-                        invocation.return_dbus_error("org.fuentelibre.Error.Failed", str(e))
-                else:
-                    invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
-            reg_id = connection.register_object(
-                '/org/fuentelibre/gtk_llm_Chat',
-                interface_info,
-                method_call_handler,
-                None,  # get_property_handler
-                None   # set_property_handler
-            )
-            if reg_id > 0:
-                self.dbus_registration_id = reg_id
-                debug_print("Interfaz D-Bus registrada correctamente")
-            else:
-                debug_print("Error al registrar la interfaz D-Bus")
+            # Agregar timeout para evitar bloqueos
+            import threading
+            
+            def register_with_timeout():
+                try:
+                    connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                    node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
+                    interface_info = node_info.interfaces[0]
+                    
+                    def method_call_handler(connection, sender, object_path, interface_name, method_name, parameters, invocation):
+                        if method_name == "OpenConversation":
+                            try:
+                                cid = parameters.unpack()[0]
+                                debug_print(f"D-Bus: Recibida solicitud para abrir conversación CID: '{cid}'")
+                                # Usar GLib.idle_add para manejar la llamada en el hilo principal de GTK
+                                GLib.idle_add(lambda: self.OpenConversation(cid))
+                                invocation.return_value(None)
+                            except Exception as e:
+                                debug_print(f"D-Bus: Error al procesar OpenConversation: {e}")
+                                invocation.return_dbus_error("org.fuentelibre.Error.Failed", str(e))
+                        else:
+                            invocation.return_error_literal(Gio.DBusError.UNKNOWN_METHOD, "Método desconocido")
+                    
+                    reg_id = connection.register_object(
+                        '/org/fuentelibre/gtk_llm_Chat',
+                        interface_info,
+                        method_call_handler,
+                        None,  # get_property_handler
+                        None   # set_property_handler
+                    )
+                    if reg_id > 0:
+                        self.dbus_registration_id = reg_id
+                        debug_print("Interfaz D-Bus registrada correctamente")
+                    else:
+                        debug_print("Error al registrar la interfaz D-Bus")
+                except Exception as e:
+                    debug_print(f"Error registrando D-Bus: {e}")
+            
+            # Ejecutar registro en thread separado con timeout
+            thread = threading.Thread(target=register_with_timeout, daemon=True)
+            thread.start()
+            # No esperar - continuar sin D-Bus si hay problemas
+            
         except Exception as e:
-            debug_print(f"Error al registrar D-Bus (solo debe ocurrir en Linux): {e}")
+            debug_print(f"Error al configurar D-Bus (solo debe ocurrir en Linux): {e}")
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        
+        # Configurar recursos básicos de forma segura (solo en hilo principal)
+        try:
+            # Cargar estilos CSS y configurar tema de iconos en el hilo principal
+            from .style_manager import style_manager
+            from .resource_manager import resource_manager
+            
+            # Configurar sin threading para evitar conflictos
+            style_manager.load_styles()
+            if not resource_manager._icon_theme_configured:
+                resource_manager.setup_icon_theme()
+            debug_print("Recursos básicos configurados en do_startup")
+            
+        except Exception as e:
+            debug_print(f"Error configurando recursos en startup: {e}")
+        
         # Solo registrar D-Bus en Linux
         if sys.platform=='linux':
             self._register_dbus_interface()

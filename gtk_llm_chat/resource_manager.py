@@ -12,7 +12,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Gdk', '4.0')
-from gi.repository import Gtk, GdkPixbuf, Gio, Gdk
+from gi.repository import Gtk, GdkPixbuf, Gio, Gdk, GLib
 from .debug_utils import debug_print
 
 
@@ -100,12 +100,23 @@ class ResourceManager:
     
     def setup_icon_theme(self):
         """Configura el tema de iconos para incluir los iconos personalizados."""
+        # Thread-safe check y configuración
         if self._icon_theme_configured:
             return
 
         if not Gtk.is_initialized():
             debug_print("[FAIL] GTK not initialized, skipping icon theme setup")
             return
+
+        # Asegurar que esto solo se ejecute en el hilo principal de GTK
+        try:
+            from gi.repository import GLib
+            if not GLib.main_context_default().is_owner():
+                debug_print("[WARN] setup_icon_theme called from non-main thread, scheduling for main thread")
+                GLib.idle_add(self.setup_icon_theme)
+                return
+        except Exception as e:
+            debug_print(f"[WARN] Could not check main thread context: {e}")
 
         try:
             display = Gdk.Display.get_default()
