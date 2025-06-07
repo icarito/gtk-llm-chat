@@ -109,7 +109,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         key_controller.connect("key-pressed", self._on_global_shortcuts)
         self.add_controller(key_controller)
 
-        self.set_default_size(400, 600)
+        # Fijar tamaño por defecto y mínimo para evitar problemas de layout/segfault
+        self.set_default_size(420, 550)
+        self.set_size_request(400, 300)  # tamaño mínimo seguro
 
         # Mantener referencia al último mensaje enviado
         self.last_message = None

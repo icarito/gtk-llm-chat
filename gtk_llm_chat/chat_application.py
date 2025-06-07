@@ -351,9 +351,13 @@ class LLMChatApplication(Adw.Application):
             self._window_by_cid[cid] = window
             debug_print(f"Ventana registrada para CID: {cid}")
 
-        # Presentar la ventana
-        window.present()
-
+        # Presentar la ventana con logs de diagnóstico
+        debug_print("Presentando ventana de chat...")
+        try:
+            window.present()
+            debug_print("Ventana de chat presentada correctamente.")
+        except Exception as e:
+            debug_print(f"[ERROR] Fallo al presentar la ventana: {e}")
         return window
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
