@@ -474,7 +474,18 @@ def main():
             debug_print(f"[tray_applet] Error listando user_dir: {e}")
     
     # Inicializar el icon de bandeja
-    # En entorno Flatpak, usar un nombre consistente con el ID de la aplicación para el tray
+    if is_linux():
+        # La forma correcta y moderna: pasar el nombre.
+        # El escritorio lo encontrará y le aplicará el tema correcto.
+        icon_spec = "org.fuentelibre.gtk_llm_Chat-symbolic" 
+    else:
+        icon_spec = load_icon()
+
+    icon = pystray.Icon(
+        "org.fuentelibre.gtk_llm_Chat",
+        icon_spec,
+        _("LLM Conversations"))
+
     icon_id = "org.fuentelibre.gtk_llm_Chat" if os.path.exists('/.flatpak-info') else "LLMChatApplet"
     icon = pystray.Icon(icon_id, load_icon(), _(u"LLM Conversations"))
     
