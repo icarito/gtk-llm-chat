@@ -6,6 +6,9 @@ import subprocess
 import os
 import llm # Importar llm para usar llm.user_dir()
 import tempfile
+import sqlite3
+import glob
+import traceback
 
 try:
     # Si se ejecuta como módulo del paquete
@@ -193,8 +196,28 @@ def fork_or_spawn_applet(config={}):
 
     db_path = os.path.join(user_dir, 'logs.db')
     
+    # Debug detallado para diagnosticar problemas de path en entornos empaquetados
+    debug_print(f"[platform_utils] Diagnóstico logs.db:")
+    debug_print(f"  user_dir (llm.user_dir()): {user_dir}")
+    debug_print(f"  db_path completo: {db_path}")
+    debug_print(f"  db_path existe: {os.path.exists(db_path)}")
+    debug_print(f"  user_dir existe: {os.path.exists(user_dir)}")
+    debug_print(f"  is_frozen: {is_frozen()}")
+    debug_print(f"  FLATPAK_ID: {os.environ.get('FLATPAK_ID', 'None')}")
+    debug_print(f"  LLM_USER_PATH: {os.environ.get('LLM_USER_PATH', 'None')}")
+    
     if not os.path.exists(db_path):
         debug_print("No se lanza el applet porque logs.db todavía no existe.")
+        debug_print(f"  Contenido de {user_dir}:")
+        try:
+            if os.path.exists(user_dir):
+                contents = os.listdir(user_dir)
+                for item in contents[:10]:  # Mostrar primeros 10 elementos
+                    debug_print(f"    {item}")
+            else:
+                debug_print("    (directorio no existe)")
+        except Exception as e:
+            debug_print(f"    Error listando directorio: {e}")
         return True
         
     debug_print(f"Lanzando applet (logs.db existe en {db_path})")
@@ -655,6 +678,19 @@ def debug_database_monitoring():
             stat = os.stat(logs_db_path)
             debug_print(f"  Tamaño: {stat.st_size} bytes")
             debug_print(f"  Última modificación: {stat.st_mtime}")
+            
+            # Probar operaciones de lectura básicas
+            try:
+                import sqlite3
+                conn = sqlite3.connect(logs_db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = cursor.fetchall()
+                debug_print(f"  Tablas en la BD: {[t[0] for t in tables]}")
+                conn.close()
+                debug_print("  [OK] Acceso de lectura a la BD funcional")
+            except Exception as e:
+                debug_print(f"  [FAIL] Error accediendo a la BD: {e}")
         else:
             debug_print("[FAIL] logs.db no existe")
             
@@ -665,7 +701,10 @@ def debug_database_monitoring():
                 contents = os.listdir(user_dir)
                 debug_print(f"  Contenido del directorio ({len(contents)} elementos):")
                 for item in contents[:10]:  # Mostrar solo primeros 10
-                    debug_print(f"    {item}")
+                    item_path = os.path.join(user_dir, item)
+                    is_dir = os.path.isdir(item_path)
+                    item_type = "(DIR)" if is_dir else "(FILE)"
+                    debug_print(f"    {item} {item_type}")
                 if len(contents) > 10:
                     debug_print(f"    ... y {len(contents) - 10} más")
             except Exception as e:
@@ -673,8 +712,41 @@ def debug_database_monitoring():
         else:
             debug_print("[FAIL] Directorio de usuario no existe")
             
+        # Verificar permisos
+        try:
+            import tempfile
+            test_file = os.path.join(user_dir, "test_write.tmp")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            debug_print("[OK] Permisos de escritura en directorio de usuario")
+        except Exception as e:
+            debug_print(f"[FAIL] Error de permisos de escritura: {e}")
+            
+        # Verificar variables de entorno relevantes
+        debug_print("Variables de entorno relevantes:")
+        env_vars = ['LLM_USER_PATH', 'XDG_CONFIG_HOME', 'HOME', 'FLATPAK_ID', 'APPIMAGE']
+        for var in env_vars:
+            value = os.environ.get(var, 'None')
+            debug_print(f"  {var}: {value}")
+            
+        # Información sobre el sistema de archivos
+        try:
+            import platform
+            debug_print(f"Sistema operativo: {platform.system()} {platform.release()}")
+            debug_print(f"Arquitectura: {platform.machine()}")
+            
+            if user_dir:
+                import shutil
+                total, used, free = shutil.disk_usage(user_dir)
+                debug_print(f"Espacio en disco - Total: {total//1024//1024}MB, Usado: {used//1024//1024}MB, Libre: {free//1024//1024}MB")
+        except Exception as e:
+            debug_print(f"Error obteniendo info del sistema: {e}")
+            
     except Exception as e:
         debug_print(f"[FAIL] Error en diagnóstico de base de datos: {e}")
+        import traceback
+        traceback.print_exc()
     
     debug_print("=== FIN DIAGNÓSTICO BASE DE DATOS ===\n")
 
