@@ -195,7 +195,7 @@ class ResourceManager:
         else:
             # Fallback a icono del sistema
             image = Gtk.Image.new_from_icon_name("image-missing")
-            print(f"Using fallback icon for: {image_path}")
+            debug_print(f"Using fallback icon for: {image_path}")
         
         return image
     

@@ -13,3 +13,4 @@ pystray
 watchdog
 pillow
 pyxdg; sys_platform == "linux"
+git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name#egg=pystray

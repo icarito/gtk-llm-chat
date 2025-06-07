@@ -475,20 +475,20 @@ def main():
     
     # Inicializar el icon de bandeja
     if is_linux():
-        # La forma correcta y moderna: pasar el nombre.
-        # El escritorio lo encontrará y le aplicará el tema correcto.
         icon_spec = "org.fuentelibre.gtk_llm_Chat-symbolic" 
+        icon = pystray.Icon(
+            icon_spec,
+            title=_("LLM Conversations"),
+            icon=icon_spec,
+            freedesktop_icon_name=icon_spec,
+            )
     else:
-        icon_spec = load_icon()
+        icon = pystray.Icon(
+            "org.fuentelibre.gtk_llm_Chat",
+            icon=load_icon(),
+            title=_("LLM Conversations")
+            )
 
-    icon = pystray.Icon(
-        "org.fuentelibre.gtk_llm_Chat",
-        icon_spec,
-        _("LLM Conversations"))
-
-    icon_id = "org.fuentelibre.gtk_llm_Chat" if os.path.exists('/.flatpak-info') else "LLMChatApplet"
-    icon = pystray.Icon(icon_id, icon_spec, _(u"LLM Conversations"))
-    
     def reload_menu():
         """Recarga el menú con las conversaciones actualizadas desde logs.db"""
         debug_print(f"[tray_applet] reload_menu() llamado - recargando conversaciones desde {db_path}")

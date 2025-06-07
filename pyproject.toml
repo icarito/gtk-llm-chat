@@ -21,7 +21,7 @@ dependencies = [
     "llm-openrouter",
     "markdown-it-py",
     "python-ulid",
-    "pystray",
+    "pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name",
     "watchdog",
     "pyxdg"
 ]
