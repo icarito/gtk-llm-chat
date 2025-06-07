@@ -155,7 +155,7 @@ modules:
       - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true
       # Actualizar cache de iconos
       - update-desktop-database /app/share/applications/ || true
-      - gtk-update-icon-cache --ignore-theme-index /app/share/icons/hicolor/ || true
+      - gtk-update-icon-cache -f --ignore-theme-index /app/share/icons/hicolor/ || true
     sources:
       - type: dir
         path: ..
