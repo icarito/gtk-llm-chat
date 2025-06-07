@@ -8,7 +8,7 @@ import locale
 import gettext
 import threading
 
-from .platform_utils import send_ipc_open_conversation, is_linux, is_mac
+from .platform_utils import send_ipc_open_conversation, is_linux, is_mac, is_flatpak
 from .debug_utils import debug_print
 from .db_operations import ChatHistory
 
@@ -474,7 +474,7 @@ def main():
             debug_print(f"[tray_applet] Error listando user_dir: {e}")
     
     # Inicializar el icon de bandeja
-    if is_linux():
+    if is_flatpak():
         icon_spec = "org.fuentelibre.gtk_llm_Chat-symbolic" 
         icon = pystray.Icon(
             icon_spec,
@@ -484,7 +484,7 @@ def main():
             )
     else:
         icon = pystray.Icon(
-            "org.fuentelibre.gtk_llm_Chat",
+            "org.fuentelibre.gtk_llm_Chat-symbolic",
             icon=load_icon(),
             title=_("LLM Conversations")
             )

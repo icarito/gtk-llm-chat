@@ -53,6 +53,10 @@ def is_windows():
 def is_mac():
     return PLATFORM == 'darwin'
 
+def is_flatpak():
+    """Detecta si estamos ejecutando dentro de un Flatpak"""
+    return os.path.exists('/.flatpak-info') or os.environ.get('FLATPAK_ID')
+
 def is_frozen():
     return getattr(sys, 'frozen', False)
 
