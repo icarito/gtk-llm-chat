@@ -1,3 +1,6 @@
 [submodule "linux/shared-modules"]
 	path = linux/shared-modules
 	url = https://github.com/flathub/shared-modules.git
+[submodule "linux/pystray"]
+	path = linux/pystray
+	url = git@github.com:icarito/pystray.git
