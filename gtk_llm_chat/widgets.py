@@ -7,7 +7,7 @@ from gi.repository import Gtk
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+from .resource_manager import resource_manager
 
 class Message:
     """
@@ -33,7 +33,7 @@ class ErrorWidget(Gtk.Box):
         self.set_margin_bottom(3)
 
         # Icono de advertencia
-        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        icon = resource_manager.create_icon_widget("dialog-warning-symbolic")
         icon.add_css_class('error-icon')
         self.append(icon)
 

@@ -6,6 +6,7 @@ from gi.repository import Gtk, Adw, GObject, GLib
 from .chat_application import _
 from .model_selection import ModelSelectionManager
 from .debug_utils import debug_print
+from .resource_manager import resource_manager
 
 NO_SELECTION_KEY = "_internal_no_selection_"
 
@@ -95,7 +96,7 @@ class WideModelSelector(Gtk.Box):
         page_content.append(info_label)
 
         # Añadir el icono "brain-augmented-symbolic"
-        self.no_selection_icon = Gtk.Image.new_from_icon_name("brain-augmented-symbolic")
+        self.no_selection_icon = resource_manager.create_icon_widget("brain-augmented-symbolic")
         self.no_selection_icon.set_pixel_size(self.no_selection_icon_target_size)
         page_content.append(self.no_selection_icon)
 
@@ -120,7 +121,7 @@ class WideModelSelector(Gtk.Box):
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header_box.set_halign(Gtk.Align.CENTER)
         
-        warning_icon = Gtk.Image.new_from_icon_name("dialog-information")
+        warning_icon = resource_manager.create_icon_widget("dialog-information")
         warning_icon.set_pixel_size(16)
         header_box.append(warning_icon)
         
@@ -227,7 +228,7 @@ class WideModelSelector(Gtk.Box):
         info_panel.set_valign(Gtk.Align.CENTER)
         
         # Placeholder icon 
-        placeholder_icon = Gtk.Image.new_from_icon_name("brain-symbolic")
+        placeholder_icon = resource_manager.create_icon_widget("brain-symbolic")
         placeholder_icon.set_pixel_size(64)
         placeholder_icon.set_halign(Gtk.Align.CENTER)
         placeholder_icon.set_valign(Gtk.Align.CENTER)
@@ -425,7 +426,7 @@ class WideModelSelector(Gtk.Box):
         
         # Avatar con icono brain-symbolic
         avatar = Adw.Avatar(size=64)
-        avatar.set_icon_name("brain-symbolic")
+        resource_manager.set_widget_icon_name(avatar, "brain-symbolic")
         avatar.set_halign(Gtk.Align.CENTER)
         avatar.set_margin_bottom(12)
         main_vbox.append(avatar)
@@ -457,7 +458,7 @@ class WideModelSelector(Gtk.Box):
                 model_row.set_subtitle(f"{model_name} ({model_id})")
             else:
                 model_row.set_subtitle(model_id)
-            model_row.set_icon_name("brain-symbolic")
+            resource_manager.set_widget_icon_name(model_row, "brain-symbolic")
             details_listbox.append(model_row)
             
             # Aliases Row (solo si existen)
@@ -467,7 +468,7 @@ class WideModelSelector(Gtk.Box):
                 aliases_row = Adw.ActionRow()
                 aliases_row.set_title(_("Aliases"))
                 aliases_row.set_subtitle(aliases_text)
-                aliases_row.set_icon_name("tag-symbolic")
+                resource_manager.set_widget_icon_name(aliases_row, "tag-symbolic")
                 details_listbox.append(aliases_row)
             
             # API Key Row
@@ -477,7 +478,7 @@ class WideModelSelector(Gtk.Box):
             
             api_key_row = Adw.ActionRow()
             api_key_row.set_title(_("API Key"))
-            api_key_row.set_icon_name("dialog-password-symbolic")
+            resource_manager.set_widget_icon_name(api_key_row, "dialog-password-symbolic")
             api_key_row.set_activatable(True)  # Make it clickable
             
             # Connect to show API key dialog when clicked
@@ -487,13 +488,13 @@ class WideModelSelector(Gtk.Box):
                 if has_key:
                     api_key_row.set_subtitle(_("Required • Set"))
                     # Icono de éxito
-                    check_icon = Gtk.Image.new_from_icon_name("padlock2-open-symbolic")
+                    check_icon = resource_manager.create_icon_widget("padlock2-open-symbolic")
                     check_icon.add_css_class("success")
                     api_key_row.add_suffix(check_icon)
                 else:
                     api_key_row.set_subtitle(_("Required • Not set"))
                     # Icono de advertencia
-                    warning_icon = Gtk.Image.new_from_icon_name("padlock2-symbolic")
+                    warning_icon = resource_manager.create_icon_widget("padlock2-symbolic")
                     warning_icon.add_css_class("error")
                     api_key_row.add_suffix(warning_icon)
             else:
@@ -505,7 +506,7 @@ class WideModelSelector(Gtk.Box):
             # Plugin/Provider Row
             plugin_info = getattr(model_obj, 'plugin_info', None)
             provider_row = Adw.ActionRow()
-            provider_row.set_icon_name("application-x-addon-symbolic")
+            resource_manager.set_widget_icon_name(provider_row, "application-x-addon-symbolic")
             
             if plugin_info:
                 plugin_name = plugin_info.get('name', _('Unknown'))

@@ -133,13 +133,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
-        self.sidebar_button.set_icon_name("open-menu-symbolic") # O "view-reveal-symbolic"
+        resource_manager.set_widget_icon_name(self.sidebar_button, "open-menu-symbolic") # O "view-reveal-symbolic"
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
 
         # Crear botón Rename
         rename_button = Gtk.Button()
-        rename_button.set_icon_name("document-edit-symbolic")
+        resource_manager.set_widget_icon_name(rename_button, "document-edit-symbolic")
         rename_button.set_tooltip_text(_("Rename"))
         rename_button.connect('clicked', lambda x: self.get_application().on_rename_activate(None, None))
 

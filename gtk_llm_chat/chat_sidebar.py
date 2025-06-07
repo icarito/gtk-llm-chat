@@ -7,6 +7,7 @@ import os
 from .chat_application import _
 from .model_selector import ModelSelectorWidget
 from .model_selection import ModelSelectionManager
+from .resource_manager import resource_manager
 
 def debug_print(*args):
     if DEBUG:
@@ -56,7 +57,7 @@ class ChatSidebar(Gtk.Box):
 
         # Avatar con icono brain-symbolic (como en info_panel)
         avatar = Adw.Avatar(size=64)
-        avatar.set_icon_name("brain-symbolic")
+        resource_manager.set_widget_icon_name(avatar, "brain-symbolic")
         avatar.set_halign(Gtk.Align.CENTER)
         avatar.set_margin_bottom(12)
         main_vbox.append(avatar)
@@ -68,14 +69,14 @@ class ChatSidebar(Gtk.Box):
         model_id = self.config.get('model') or self.llm_client.get_model_id() if self.llm_client else None
         self.model_row = Adw.ActionRow(title=_("Change Model"),
                                        subtitle=f"{_('Provider')}: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
-        self.model_row.set_icon_name("brain-symbolic")
+        resource_manager.set_widget_icon_name(self.model_row, "brain-symbolic")
         # NO establecer subtítulo aquí, lo hará model-loaded
         self.model_row.set_activatable(True)  # Hacerla accionable
         self.model_row.connect("activated", self._on_model_button_clicked)
         
         # Añadir botón "Set as Default Model" al row del modelo
         self.default_model_button = Gtk.Button()
-        self.default_model_button.set_icon_name("starred-symbolic")
+        resource_manager.set_widget_icon_name(self.default_model_button, "starred-symbolic")
         self.default_model_button.set_tooltip_text(_("Set as Default Model"))
         self.default_model_button.add_css_class("flat")
         self.default_model_button.add_css_class("warning")  # Estrella amarilla
@@ -86,7 +87,7 @@ class ChatSidebar(Gtk.Box):
 
         # Fila para Parámetros del Modelo
         parameters_action_row = Adw.ActionRow(title=_("Model Parameters"))
-        parameters_action_row.set_icon_name("brain-augmented-symbolic")
+        resource_manager.set_widget_icon_name(parameters_action_row, "brain-augmented-symbolic")
         parameters_action_row.set_activatable(True)
         parameters_action_row.connect("activated", self._on_model_parameters_button_clicked)
         model_group.add(parameters_action_row)
@@ -99,7 +100,7 @@ class ChatSidebar(Gtk.Box):
         # Delete Conversation - uso de ícono "user-trash-symbolic"
         delete_row = Adw.ActionRow(title=_("Delete Conversation"))
         delete_row.add_css_class("destructive")
-        delete_row.set_icon_name("user-trash-symbolic")
+        resource_manager.set_widget_icon_name(delete_row, "user-trash-symbolic")
         delete_row.set_activatable(True)  # Hacerla accionable
         delete_row.connect("activated", lambda x: self.get_root().get_application().on_delete_activate(None, None))
         conversation_group.add(delete_row)
@@ -110,7 +111,7 @@ class ChatSidebar(Gtk.Box):
         about_group = Adw.PreferencesGroup(title=_("Information"))
         # About - uso de ícono "help-about-symbolic"
         about_row = Adw.ActionRow(title=_("About"))
-        about_row.set_icon_name("help-about-symbolic")
+        resource_manager.set_widget_icon_name(about_row, "help-about-symbolic")
         about_row.set_activatable(True)  # Hacerla accionable
         about_row.connect("activated", lambda x: self.get_root().get_application().on_about_activate(None, None))
         about_group.add(about_row)
@@ -143,7 +144,7 @@ class ChatSidebar(Gtk.Box):
 
         # Mover la Fila de Temperatura aquí
         self.temperature_row = Adw.ActionRow(title=_("Temperature"))
-        self.temperature_row.set_icon_name("temperature-symbolic") # O un ícono más adecuado
+        resource_manager.set_widget_icon_name(self.temperature_row, "temperature-symbolic") # O un ícono más adecuado
         initial_temp = self.config.get('temperature', 0.7)
         self.adjustment = Gtk.Adjustment(value=initial_temp, lower=0.0, upper=1.0, step_increment=0.05, page_increment=0.1) # Ajustado upper y step
         self.adjustment.connect("value-changed", self._on_temperature_changed)
@@ -156,7 +157,7 @@ class ChatSidebar(Gtk.Box):
 
         # Nueva Fila para System Prompt
         self.system_prompt_row = Adw.ActionRow(title=_("System Prompt"))
-        self.system_prompt_row.set_icon_name("open-book-symbolic") # O un ícono más adecuado
+        resource_manager.set_widget_icon_name(self.system_prompt_row, "open-book-symbolic") # O un ícono más adecuado
         self.system_prompt_row.set_activatable(True)
         self.system_prompt_row.connect("activated", self._on_system_prompt_button_clicked)
         parameters_group.add(self.system_prompt_row)

@@ -334,11 +334,12 @@ class LLMChatApplication(Adw.Application):
         debug_print(f"Creando nueva ventana con configuración: {config}")
 
         from .chat_window import LLMChatWindow
+        from .resource_manager import resource_manager
         chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración
         window = LLMChatWindow(application=self, config=config, chat_history=chat_history)
-        window.set_icon_name("org.fuentelibre.gtk_llm_Chat")
+        resource_manager.set_widget_icon_name(window, "org.fuentelibre.gtk_llm_Chat")
 
         # Configurar el manejador de eventos de teclado
         key_controller = Gtk.EventControllerKey()

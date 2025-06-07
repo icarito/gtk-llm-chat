@@ -188,6 +188,20 @@ class ResourceManager:
         
         return image
     
+    def set_widget_icon_name(self, widget, icon_name: str, fallback: str = "image-missing"):
+        """
+        Establece el icono de un widget (que soporte set_icon_name) de forma segura.
+        Si el icono no existe en el tema, usa un fallback y registra una advertencia.
+        """
+        self.setup_icon_theme()
+        display = Gdk.Display.get_default()
+        icon_theme = Gtk.IconTheme.get_for_display(display) if display else None
+        if icon_theme and icon_theme.has_icon(icon_name):
+            widget.set_icon_name(icon_name)
+        else:
+            debug_print(f"[WARN] Icono '{icon_name}' no encontrado, usando fallback '{fallback}'")
+            widget.set_icon_name(fallback)
+
     def create_icon_widget(self, icon_name: str, size: int = 48) -> Gtk.Image:
         """
         Crea un widget Gtk.Image desde un nombre de icono.
@@ -200,72 +214,43 @@ class ResourceManager:
             Widget Gtk.Image
         """
         self.setup_icon_theme()
-        
-        image = Gtk.Image.new_from_icon_name(icon_name)
-        image.set_pixel_size(size)
-        
-        # Verificar si el icono se cargó correctamente por el tema
-        try:
-            display = Gdk.Display.get_default()
-            if display:
-                icon_theme = Gtk.IconTheme.get_for_display(display)
-                if icon_theme.has_icon(icon_name):
-                    debug_print(f"Icon '{icon_name}' (size {size}) found by Gtk.IconTheme.")
-                    # Opcional: obtener más información sobre el icono encontrado
-                    # icon_info = icon_theme.lookup_icon(icon_name, [], size, 1, Gtk.TextDirection.NONE, None)
-                    # if icon_info and icon_info.get_filename():
-                    #     debug_print(f"  -> Path: {icon_info.get_filename()}")
-                    # else:
-                    #     debug_print(f"  -> Gtk.IconTheme found it, but no direct path from lookup_icon (normal for themed icons).")
-
-                else:
-                    debug_print(f"Icon '{icon_name}' (size {size}) NOT found by Gtk.IconTheme. Attempting fallbacks.")
-                    # La lógica de fallback es compleja y puede no funcionar bien en Flatpak
-                    # si las rutas no están alineadas con cómo get_image_path las resuelve.
-                    # Para Flatpak, el icono debería estar en /app/share/icons/...
-                    
-                    current_search_base = self._get_base_path() # /app para flatpak
-                    is_flatpak_env = os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')
-
-                    fallback_paths_to_try = []
-                    if icon_name.endswith('-symbolic'):
-                        if is_flatpak_env:
-                            fallback_paths_to_try.append(f"share/icons/hicolor/symbolic/apps/{icon_name}.svg")
-                        else: # Desarrollo o PyInstaller
-                            fallback_paths_to_try.append(f"gtk_llm_chat/hicolor/symbolic/apps/{icon_name}.svg")
-                    else: # Iconos normales
-                        if is_flatpak_env:
-                            # Estas rutas son relativas a /app si get_image_path usa current_search_base = /app
-                            fallback_paths_to_try.extend([
-                                f"share/icons/hicolor/256x256/apps/{icon_name}.png",
-                                f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
-                                f"share/icons/hicolor/48x48/apps/{icon_name}.png",
-                            ])
-                        else: # Desarrollo o PyInstaller
-                             # Estas rutas son relativas a la raíz del proyecto o MEIPASS
-                            fallback_paths_to_try.extend([
-                                f"gtk_llm_chat/hicolor/256x256/apps/{icon_name}.png",
-                                f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
-                                f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
-                            ])
-
-                    for fallback_path_str in fallback_paths_to_try:
-                        # get_image_path construirá la ruta completa usando current_search_base
-                        resolved_path = self.get_image_path(fallback_path_str)
-                        if resolved_path:
-                            debug_print(f"Attempting fallback for '{icon_name}' with resolved path: {resolved_path}")
-                            # Usamos create_image_widget que carga desde archivo directamente
-                            return self.create_image_widget(resolved_path, size) 
-
-                    debug_print(f"Icon '{icon_name}' not found via Gtk.IconTheme or fallbacks. Using 'image-missing'.")
-                    image = Gtk.Image.new_from_icon_name("image-missing") # Fallback final
-                    image.set_pixel_size(size)
+        display = Gdk.Display.get_default()
+        icon_theme = Gtk.IconTheme.get_for_display(display) if display else None
+        if icon_theme and icon_theme.has_icon(icon_name):
+            image = Gtk.Image.new_from_icon_name(icon_name)
+            image.set_pixel_size(size)
+            return image
+        # Intentar fallbacks de archivo si el icono no existe en el tema
+        debug_print(f"[WARN] Icono '{icon_name}' no encontrado en el tema GTK. Intentando rutas alternativas...")
+        current_search_base = self._get_base_path()
+        is_flatpak_env = os.environ.get('FLATPAK_ID') or os.path.exists('/.flatpak-info')
+        fallback_paths_to_try = []
+        if icon_name.endswith('-symbolic'):
+            if is_flatpak_env:
+                fallback_paths_to_try.append(f"share/icons/hicolor/symbolic/apps/{icon_name}.svg")
             else:
-                debug_print(f"Icon '{icon_name}': No Gdk.Display for Gtk.IconTheme check.")
-        except Exception as e:
-            debug_print(f"Error during icon fallback check for '{icon_name}': {e}")
-            # Si hay un error aquí, la imagen ya creada con new_from_icon_name se devuelve.
-        
+                fallback_paths_to_try.append(f"gtk_llm_chat/hicolor/symbolic/apps/{icon_name}.svg")
+        else:
+            if is_flatpak_env:
+                fallback_paths_to_try.extend([
+                    f"share/icons/hicolor/256x256/apps/{icon_name}.png",
+                    f"share/icons/hicolor/scalable/apps/{icon_name}.svg",
+                    f"share/icons/hicolor/48x48/apps/{icon_name}.png",
+                ])
+            else:
+                fallback_paths_to_try.extend([
+                    f"gtk_llm_chat/hicolor/256x256/apps/{icon_name}.png",
+                    f"gtk_llm_chat/hicolor/scalable/apps/{icon_name}.svg",
+                    f"gtk_llm_chat/hicolor/48x48/apps/{icon_name}.png",
+                ])
+        for fallback_path_str in fallback_paths_to_try:
+            resolved_path = self.get_image_path(fallback_path_str)
+            if resolved_path:
+                debug_print(f"[OK] Fallback para '{icon_name}' encontrado: {resolved_path}")
+                return self.create_image_widget(resolved_path, size)
+        debug_print(f"[FAIL] Icono '{icon_name}' no encontrado en ningún lado. Usando 'image-missing'.")
+        image = Gtk.Image.new_from_icon_name("image-missing")
+        image.set_pixel_size(size)
         return image
     
     def debug_resources(self):

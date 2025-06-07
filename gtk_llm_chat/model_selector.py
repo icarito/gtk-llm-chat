@@ -6,6 +6,7 @@ from gi.repository import Gtk, Adw, GObject, GLib
 from .chat_application import _
 from .model_selection import ModelSelectionManager
 from .debug_utils import debug_print
+from .resource_manager import resource_manager
 
 class ModelSelectorWidget(Gtk.Box):
     """
@@ -153,7 +154,7 @@ class ModelSelectorWidget(Gtk.Box):
                     row.set_subtitle(_("No models"))
             
             row.set_activatable(True)
-            row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+            row.add_suffix(resource_manager.create_icon_widget("go-next-symbolic"))
             row.provider_key = provider_key
             debug_print(f"DEBUG: Created row for provider '{provider_key}' (type: {type(provider_key)}) with {model_count} models")
             self.provider_list.append(row)
