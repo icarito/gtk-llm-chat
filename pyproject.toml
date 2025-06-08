@@ -10,20 +10,22 @@ classifiers = [
 ]
 keywords = ["gtk", "chat", "llm", "ai"]
 dependencies = [
-    "pygobject",
-    "llm",
-    "llm-gemini",
-    "llm-groq",
-    "llm-grok",
-    "llm-deepseek",
-    "llm-perplexity",
-    "llm-anthropic",
-    "llm-openrouter",
-    "markdown-it-py",
-    "python-ulid",
-    "pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name",
-    "watchdog",
-    "pyxdg"
+    'pygobject',
+    'llm',
+    'llm-gemini',
+    'llm-groq',
+    'llm-grok',
+    'llm-deepseek',
+    'llm-perplexity',
+    'llm-anthropic',
+    'llm-openrouter',
+    'markdown-it-py',
+    'python-ulid',
+    'pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name#egg=pystray ; sys_platform == "linux"',
+    'watchdog',
+    'pyxdg; sys_platform == "linux"',
+    'pystray; sys_platform == "darwin"',
+    'pystray; sys_platform == "win32"',
 ]
 
 requires-python = ">=3.8"
