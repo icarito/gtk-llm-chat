@@ -1,5 +1,5 @@
-# Build workflow for Gtk LLM Chat
-name: Build
+# Linux build workflow for Gtk LLM Chat
+name: Build Linux
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build-linux:
@@ -15,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: |
@@ -38,11 +41,12 @@ jobs:
             libdbus-glib-1-dev \
             gir1.2-dbusmenu-glib-0.4 \
             gir1.2-dbusmenu-gtk3-0.4 \
-            gir1.2-glib-2.0
+            gir1.2-glib-2.0 \
+            flatpak flatpak-builder appstream-util
 
           sudo pip install --upgrade pip meson
 
-      - name: Compila Gtk and friends
+      - name: Compile Gtk and friends
         run: |
           echo "Compiling gobject-introspection into /usr"
           echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
@@ -123,65 +127,38 @@ jobs:
           name: linux-dist
           path: dist/
 
-  build-windows:
-    name: Build for Windows
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-
-      - name: Install dependencies
-        run: |
-          ./windows/bootstrap.sh
-
-      - name: Fetch all history for all tags and branches
-        run: git fetch --prune --unshallow
-
-      - name: Set up environment
-        run: |
-          cp .env.ci .env
-
-      - name: Build package
-        run: |
-          python3 build-ci.py
-
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-dist
-          path: dist/
-
-  build-python:
-    name: Build Python Package
+  build-flatpak:
+    name: Build Flatpak
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          submodules: recursive
+          fetch-depth: 0
 
-      - name: Install build dependencies
+      - name: Install Flatpak dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install build
+          sudo apt install flatpak flatpak-builder python3-pip appstream-util
+          pip3 install setuptools wheel build
+          pip3 install .
 
-      - name: Build Python package
+      - name: Add Flathub remote
         run: |
-          python3 -m build
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: Store Python dist
+      - name: Build Flatpak and create bundle
+        run: |
+          flatpak-builder --user --repo=repo --force-clean --install-deps-from=flathub build-dir linux/org.fuentelibre.gtk_llm_Chat.flatpak.yml
+          flatpak build-bundle repo gtk-llm-chat.flatpak org.fuentelibre.gtk_llm_Chat
+
+      - name: Test Flatpak (versión)
+        run: |
+          flatpak install --user --noninteractive gtk-llm-chat.flatpak
+          flatpak run org.fuentelibre.gtk_llm_Chat --help || true
+
+      - name: Upload Flatpak bundle
         uses: actions/upload-artifact@v4
         with:
-          name: python-dist
-          path: dist/
+          name: flatpak-bundle
+          path: gtk-llm-chat.flatpak

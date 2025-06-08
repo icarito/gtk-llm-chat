@@ -1,0 +1,40 @@
+# Python package build workflow for Gtk LLM Chat
+name: Build Python Package
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build-python:
+    name: Build Python Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install build dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install build setuptools-scm
+
+      - name: Build Python package
+        run: |
+          python3 -m build
+
+      - name: Store Python dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/

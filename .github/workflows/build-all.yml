@@ -1,0 +1,26 @@
+# Main build workflow for Gtk LLM Chat
+name: Build All Platforms
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Linux
+    uses: ./.github/workflows/build-linux.yml
+
+  build-windows:
+    name: Build Windows
+    uses: ./.github/workflows/build-windows.yml
+
+  build-macos:
+    name: Build macOS
+    uses: ./.github/workflows/build-macos.yml
+
+  build-python:
+    name: Build Python Package
+    uses: ./.github/workflows/build-python.yml
