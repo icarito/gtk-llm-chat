@@ -1,4 +1,5 @@
-name: Create GitHub Release
+# Release workflow for Gtk LLM Chat
+name: Release
 
 on:
   push:
@@ -15,20 +16,29 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          sudo add-apt-repository -y ppa:kubuntu-ppa/backports-extra
           sudo apt-get update
-          sudo apt-get install -y build-essential ninja-build git
-          sudo pip install --upgrade pip meson
+          sudo apt-get install -y build-essential ninja-build git \
+            libxft-dev libepoxy-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libpolkit-agent-1-dev libpolkit-gobject-1-dev libunwind-dev \
+            libx11-dev libxext-dev libdrm-dev libcups2-dev libsass-dev \
+            linux-headers-$(uname -r) libcurl4-nss-dev libxcursor-dev \
+            libxkbcommon-dev libxml2-utils libxrandr-dev libxi-dev \
+            libwayland-dev libxinerama-dev \
+            gperf libappstream-dev libxmlb-dev libxdamage-dev gettext valac \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            gir1.2-gtk-3.0 \
+            gir1.2-ayatanaappindicator3-0.1 \
+            libglib2.0-0 \
+            libgirepository-1.0-1 \
+            libdbus-1-dev \
+            libdbus-glib-1-dev \
+            gir1.2-dbusmenu-glib-0.4 \
+            gir1.2-dbusmenu-gtk3-0.4 \
+            gir1.2-glib-2.0
 
-# Couldn't get this to work:
-#      - name: Instalar Vulkan SDK (para glslc)
-#        run: |
-#          wget -qO- https://sdk.lunarg.com/sdk/download/1.4.309.0/linux/vulkansdk-linux-x86_64-1.4.309.0.tar.xz | tar xJ
-#          export VULKAN_SDK=$(pwd)/1.4.309.0/x86_64
-#          export PATH=$VULKAN_SDK/bin:$PATH
-#          echo "PATH actualizado: $PATH"
-#          glslc --version
-#          echo "LD_LIBRARY_PATH=${{ github.workspace }}/1.4.309.0/x86_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-#          echo $VULKAN_SDK/bin >> $GITHUB_PATH
+          sudo pip install --upgrade pip meson
 
       - name: Compila Gtk and friends
         run: |
@@ -38,54 +48,62 @@ jobs:
           wget "https://download.gnome.org/sources/gobject-introspection/${GOBJECT_INTROSPECTION_VERSION%.*}/gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
           tar -xf "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
           cd "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}"
-          # Configura Meson para instalar en /usr.
-          # Necesita encontrar Python3 y tu GLib.
           meson setup _build --prefix=/usr \
             --buildtype=release \
-            -Ddoctool=disabled # Si no necesitas las herramientas de documentación
+            -Ddoctool=disabled
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           git clone https://gitlab.gnome.org/GNOME/glib.git --branch glib-2-82 --depth 1
           cd glib
-          meson setup _build --prefix=/usr -Dintrospection=enabled --buildtype=release -Ddocumentation=false -Dtests=false -Dman=false
+          meson setup _build --prefix=/usr \
+            -Dintrospection=enabled \
+            --buildtype=release -Ddocumentation=false -Dtests=false -Dman=false
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           git clone https://gitlab.gnome.org/GNOME/pango.git --branch 1.52.2 --depth 1
           cd pango
-          meson setup _build --prefix=/usr --buildtype=release -Dintrospection=enabled -Dfontconfig=enabled -Dfreetype=enabled
+          meson setup _build --prefix=/usr \
+            --buildtype=release -Dintrospection=enabled \
+            -Dfontconfig=enabled -Dfreetype=enabled
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           wget "https://download.gnome.org/sources/graphene/1.8/graphene-1.8.6.tar.xz"
           tar -xf "graphene-1.8.6.tar.xz"
           cd "graphene-1.8.6"
-          meson setup _build --prefix=/usr --buildtype=release -Dtests=false
+          meson setup _build --prefix=/usr \
+            --buildtype=release \
+            -Dtests=false
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git --branch 2.15.0 --depth 1
           cd fontconfig
-          meson setup _build --prefix=/usr --buildtype=release -Ddoc=disabled -Dtests=disabled -Dtools=disabled
+          meson setup _build --prefix=/usr \
+            --buildtype=release -Ddoc=disabled -Dtests=disabled -Dtools=disabled
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           git clone https://gitlab.gnome.org/GNOME/gtk.git --branch gtk-4-18 --depth 1
           cd gtk
-          meson setup _build --prefix=/usr --buildtype=release -Dmedia-gstreamer=disabled -Dbuild-tests=false -Dbuild-examples=false -Dbuild-demos=false -Dintrospection=enabled -Dvulkan=disabled
+          meson setup _build --prefix=/usr \
+            --buildtype=release \
+            -Dmedia-gstreamer=disabled \
+            -Dbuild-tests=false \
+            -Dbuild-examples=false \
+            -Dbuild-demos=false \
+            -Dintrospection=enabled \
+            -Dvulkan=disabled
           ninja -C _build
           sudo ninja -C _build install
           cd ..
-          
           git clone https://gitlab.gnome.org/GNOME/libadwaita.git --branch libadwaita-1-7 --depth 1
           cd libadwaita
-          meson setup _build --prefix=/usr -Dintrospection=enabled --buildtype=release
+          meson setup _build --prefix=/usr \
+            -Dintrospection=enabled \
+            --buildtype=release
           ninja -C _build
           sudo ninja -C _build install
 
@@ -140,7 +158,7 @@ jobs:
           path: dist/
 
   build-macos:
-    name: Build for macOS (Intel)
+    name: Build for macOS
     runs-on: macos-13
     steps:
       - name: Checkout
@@ -175,7 +193,7 @@ jobs:
           path: dist/
 
   build-macos-arm:
-    name: Build for macOS (ARM)
+    name: Build for macOS ARM
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -215,60 +233,50 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+
       - name: Install build dependencies
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install build
+
       - name: Build Python package
         run: |
           python3 -m build
+
       - name: Store Python dist
         uses: actions/upload-artifact@v4
         with:
           name: python-dist
           path: dist/
 
-  publish-pypi:
-    name: Publish to PyPI
-    needs: build-python
-    runs-on: ubuntu-latest
-    # Publica solo si el tag es v#.#.# (release) o v#.#.#dev/alpha/beta (prerelease)
-    if: >-
-      ${{ startsWith(github.ref_name, 'v') && (
-        (
-          contains(github.ref_name, 'dev') ||
-          contains(github.ref_name, 'alpha') ||
-          contains(github.ref_name, 'beta') ||
-          (!contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta'))
-        )
-      ) }}
-    steps:
-      - name: Download Python dist
-        uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist/
-      - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+  build-flatpak:
+    name: Build Flatpak
+    uses: ./.github/workflows/flatpak.yml
 
   publish-pypi-release:
     name: Publish to PyPI (Release)
     needs: build-python
     runs-on: ubuntu-latest
+    # Solo versiones sin sufijos (v1.2.3)
     if: >-
-      ${{ startsWith(github.ref_name, 'v') && !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') && !contains(github.ref_name, 'test') }}
+      ${{ startsWith(github.ref_name, 'v') && 
+          !contains(github.ref_name, 'dev') && 
+          !contains(github.ref_name, 'alpha') && 
+          !contains(github.ref_name, 'beta') && 
+          !contains(github.ref_name, 'test') &&
+          !contains(github.ref_name, 'rc') }}
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
       - name: Publish package to PyPI (Release)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -278,66 +286,75 @@ jobs:
     name: Publish to PyPI (Prerelease)
     needs: build-python
     runs-on: ubuntu-latest
+    # Solo versiones con sufijos (v1.2.3dev, v1.2.3alpha1, v1.2.3beta1, v1.2.3rc1)
     if: >-
-      ${{ startsWith(github.ref_name, 'v') && (contains(github.ref_name, 'dev') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta')) }}
+      ${{ startsWith(github.ref_name, 'v') && 
+          (contains(github.ref_name, 'dev') || 
+           contains(github.ref_name, 'alpha') || 
+           contains(github.ref_name, 'beta') ||
+           contains(github.ref_name, 'rc')) }}
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
       - name: Publish package to PyPI (Prerelease)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          # No se requiere flag extra, PyPI detecta prerelease por el nombre de la versión
 
   github-release:
-    name: GitHub Release
-    needs: [build-linux, build-windows, build-macos, build-macos-arm, build-python]
+    name: Create GitHub Release
+    needs: [build-all, build-windows, build-macos, build-macos-arm, build-python, build-flatpak]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
-      - name: Download all artifacts
+      - name: Download Linux dist
         uses: actions/download-artifact@v4
-
-      - name: Determine if prerelease
-        id: prerelease
-        run: |
-          if [[ "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
         with:
           name: linux-dist
           path: dist/
+
       - name: Download Windows dist
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
           path: dist/
+
       - name: Download macOS dist
         uses: actions/download-artifact@v4
         with:
           name: macos-dist
           path: dist/
+
       - name: Download macOS ARM dist
         uses: actions/download-artifact@v4
         with:
           name: macos-arm-dist
           path: dist/
+
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
+      - name: Download Flatpak bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: dist/
+
       - name: Create GitHub Pre-release
-        if: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') }}
+        if: >-
+          ${{ contains(github.ref_name, 'alpha') || 
+              contains(github.ref_name, 'beta') || 
+              contains(github.ref_name, 'dev') ||
+              contains(github.ref_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -345,8 +362,14 @@ jobs:
           '${{ github.ref_name }}'
           --repo '${{ github.repository }}'
           --generate-notes --prerelease
+
       - name: Create GitHub Release
-        if: ${{ !(contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'test')) }}
+        if: >-
+          ${{ !(contains(github.ref_name, 'alpha') || 
+                contains(github.ref_name, 'beta') || 
+                contains(github.ref_name, 'dev') || 
+                contains(github.ref_name, 'test') ||
+                contains(github.ref_name, 'rc')) }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -354,6 +377,7 @@ jobs:
           '${{ github.ref_name }}'
           --repo '${{ github.repository }}'
           --generate-notes
+
       - name: Upload dists to GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}

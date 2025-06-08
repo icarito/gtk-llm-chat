@@ -1,11 +1,16 @@
 # Flatpak build workflow for Gtk LLM Chat
-name: Flatpak Build
+name: Build Flatpak
 
 on:
   push:
     tags:
       - '*'
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact-name:
+        description: 'Name of the flatpak artifact'
+        value: ${{ jobs.build-flatpak.outputs.artifact-name }}
 
 jobs:
   build-flatpak:
