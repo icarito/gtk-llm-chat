@@ -474,26 +474,30 @@ def main():
             debug_print(f"[tray_applet] Error listando user_dir: {e}")
     
     # Inicializar el icon de bandeja
+    ICON_NAME_SYMBOLIC = "org.fuentelibre.gtk_llm_Chat-symbolic"
+    ICON_NAME_REGULAR = "org.fuentelibre.gtk_llm_Chat"
+
     if is_flatpak():
-        icon_spec = "org.fuentelibre.gtk_llm_Chat-symbolic" 
+        # Para Linux, es mejor pasar el nombre del icono y dejar que pystray/sistema lo maneje.
+        # Esto permite que el tema del sistema coloree correctamente los iconos simbólicos.
         icon = pystray.Icon(
-            icon_spec,
+            ICON_NAME_SYMBOLIC, # Usar el nombre del icono simbólico
+            icon=ICON_NAME_SYMBOLIC, # load_icon() devuelve un PIL.Image
             title=_("LLM Conversations"),
-            icon=icon_spec,
-            freedesktop_icon_name=icon_spec,
-            )
-    else:
+            freedesktop_icon_name=ICON_NAME_SYMBOLIC
+        )
+    else: # Windows, macOS
         icon = pystray.Icon(
-            "org.fuentelibre.gtk_llm_Chat-symbolic",
-            icon=load_icon(),
+            ICON_NAME_SYMBOLIC, # Usar un nombre único para la instancia
+            icon=load_icon(), # load_icon() devuelve un PIL.Image
             title=_("LLM Conversations")
-            )
+        )
 
     def reload_menu():
         """Recarga el menú con las conversaciones actualizadas desde logs.db"""
         debug_print(f"[tray_applet] reload_menu() llamado - recargando conversaciones desde {db_path}")
         icon.menu = create_menu()
-    
+
     # Verificar que logs.db existe antes de continuar
     if not os.path.exists(db_path):
         debug_print(f"[tray_applet] ADVERTENCIA: No se encontró logs.db en {db_path}")
