@@ -343,6 +343,14 @@ class StyleManager:
                 border-radius: 0px;
                 padding: 6px;
             }
+            .menu {
+                margin: -30px;
+                border-radius: 0px;
+            }
+            .menu > * {
+                padding: 10px;
+            }
+
             
             /* Botones más planos para Windows */
             button {
@@ -352,7 +360,7 @@ class StyleManager:
 
             /* Usar tipografía Segoe UI (también aplicado vía workaround en Python) */
             .main-container, body, window, * {
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: 'Segoe UI', 'Trebuchet MS', Tahoma, sans-serif;
             }
             
             /* Scrollbars estilo Windows */
