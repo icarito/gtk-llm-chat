@@ -21,10 +21,9 @@ dependencies = [
     'llm-openrouter',
     'markdown-it-py',
     'python-ulid',
-    'pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name',
+    'pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name#egg=pystray ; sys_platform == "linux"',
     'watchdog',
     'pyxdg; sys_platform == "linux"',
-    'pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name; sys_platform == "linux"',
     'pystray; sys_platform == "darwin"',
     'pystray; sys_platform == "win32"',
 ]

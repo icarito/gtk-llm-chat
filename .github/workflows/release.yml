@@ -1,350 +1,80 @@
-name: Create GitHub Release
+# Release workflow for Gtk LLM Chat
+name: Release
 
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
 
 jobs:
   build-linux:
-    name: Build for Linux
-    runs-on: ubuntu-22.04
-#    env:
-#      VULKAN_SDK: ${{ github.workspace }}/1.4.309.0/x86_64
-#      VK_LAYER_PATH: ${{ github.workspace }}/1.4.309.0/x86_64/share/vulkan/explicit_layer.d
-#      VK_ADD_LAYER_PATH: ${{ github.workspace }}/1.4.309.0/x86_64/share/vulkan/explicit_layer.d
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo add-apt-repository -y ppa:kubuntu-ppa/backports-extra
-          sudo apt-get update
-          sudo apt-get install -y build-essential ninja-build git \
-            libxft-dev libepoxy-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libpolkit-agent-1-dev libpolkit-gobject-1-dev libunwind-dev \
-            libx11-dev libxext-dev libdrm-dev libcups2-dev libsass-dev \
-            linux-headers-$(uname -r) libcurl4-nss-dev libxcursor-dev \
-            libxkbcommon-dev libxml2-utils libxrandr-dev libxi-dev \
-            libwayland-dev libxinerama-dev \
-            gperf libappstream-dev libxmlb-dev libxdamage-dev gettext valac \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            gir1.2-gtk-3.0 \
-            gir1.2-ayatanaappindicator3-0.1 \
-            libglib2.0-0 \
-            libgirepository-1.0-1 \
-            libdbus-1-dev \
-            libdbus-glib-1-dev \
-            gir1.2-dbusmenu-glib-0.4 \
-            gir1.2-dbusmenu-gtk3-0.4 \
-            gir1.2-glib-2.0
-
-          sudo pip install --upgrade pip meson
-
-# Couldn't get this to work:
-#      - name: Instalar Vulkan SDK (para glslc)
-#        run: |
-#          wget -qO- https://sdk.lunarg.com/sdk/download/1.4.309.0/linux/vulkansdk-linux-x86_64-1.4.309.0.tar.xz | tar xJ
-#          export VULKAN_SDK=$(pwd)/1.4.309.0/x86_64
-#          export PATH=$VULKAN_SDK/bin:$PATH
-#          echo "PATH actualizado: $PATH"
-#          glslc --version
-#          echo "LD_LIBRARY_PATH=${{ github.workspace }}/1.4.309.0/x86_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-#          echo $VULKAN_SDK/bin >> $GITHUB_PATH
-
-      - name: Compila Gtk and friends
-        run: |
-          echo "Compiling gobject-introspection into /usr"
-          echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH" # Debería encontrar tu glib-2.0.pc
-          GOBJECT_INTROSPECTION_VERSION="1.80.0" # Elige una versión compatible con tu GLib y GTK4
-                                               # GLib 2.82 podría necesitar una versión reciente.
-                                               # 1.80.0 es una versión relativamente nueva. Revisa compatibilidades.
-          wget "https://download.gnome.org/sources/gobject-introspection/${GOBJECT_INTROSPECTION_VERSION%.*}/gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
-          tar -xf "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}.tar.xz"
-          cd "gobject-introspection-${GOBJECT_INTROSPECTION_VERSION}"
-          # Configura Meson para instalar en /usr.
-          # Necesita encontrar Python3 y tu GLib.
-          meson setup _build --prefix=/usr \
-            --buildtype=release \
-            -Ddoctool=disabled # Si no necesitas las herramientas de documentación
-          ninja -C _build
-          sudo ninja -C _build install # Instala en /usr
-          cd ..
-          git clone https://gitlab.gnome.org/GNOME/glib.git --branch glib-2-82 --depth 1
-          cd glib
-          meson setup _build --prefix=/usr \
-            -Dintrospection=enabled \
-            --buildtype=release -Ddocumentation=false -Dtests=false -Dman=false
-          ninja -C _build
-          sudo ninja -C _build install
-          cd ..
-          git clone https://gitlab.gnome.org/GNOME/pango.git --branch 1.52.2 --depth 1
-          cd pango
-          meson setup _build --prefix=/usr \
-            --buildtype=release -Dintrospection=enabled \
-            -Dfontconfig=enabled -Dfreetype=enabled
-          ninja -C _build
-          sudo ninja -C _build install
-          cd ..
-          wget "https://download.gnome.org/sources/graphene/1.8/graphene-1.8.6.tar.xz"
-          tar -xf "graphene-1.8.6.tar.xz"
-          cd "graphene-1.8.6"
-          meson setup _build --prefix=/usr \
-            --buildtype=release \
-            -Dtests=false
-          ninja -C _build
-          sudo ninja -C _build install
-          cd ..
-          git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git --branch 2.15.0 --depth 1
-          cd fontconfig
-          meson setup _build --prefix=/usr \
-            --buildtype=release -Ddoc=disabled -Dtests=disabled -Dtools=disabled
-          ninja -C _build
-          sudo ninja -C _build install
-          cd ..
-          git clone https://gitlab.gnome.org/GNOME/gtk.git --branch gtk-4-18 --depth 1
-          cd gtk
-          meson setup _build --prefix=/usr \
-            --buildtype=release \
-            -Dmedia-gstreamer=disabled \
-            -Dbuild-tests=false \
-            -Dbuild-examples=false \
-            -Dbuild-demos=false \
-            -Dintrospection=enabled \
-            -Dvulkan=disabled
-          ninja -C _build
-          sudo ninja -C _build install
-          cd ..
-          git clone https://gitlab.gnome.org/GNOME/libadwaita.git --branch libadwaita-1-7 --depth 1
-          cd libadwaita
-          meson setup _build --prefix=/usr \
-            -Dintrospection=enabled \
-            --buildtype=release
-          ninja -C _build
-          sudo ninja -C _build install
-
-      - name: Set environment for build
-        run: |
-          cp .env.ci .env
-      - name: Build package
-        run: |
-          python3 build-ci.py
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-dist
-          path: dist/
+    name: Build Linux
+    uses: ./.github/workflows/build-linux.yml
 
   build-windows:
-    name: Build for Windows
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-      - name: Install dependencies
-        run: |
-          ./windows/bootstrap.sh
-      - name: Fetch all history for all tags and branches
-        run: git fetch --prune --unshallow
-      - name: Set up environment
-        run: |
-          cp .env.ci .env
-      - name: Build package
-        run: |
-          python3 build-ci.py
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-dist
-          path: dist/
+    name: Build Windows
+    uses: ./.github/workflows/build-windows.yml
 
   build-macos:
-    name: Build for macOS
-    runs-on: macos-13
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ./macos/bootstrap.sh
-          python3 -m pip install pycairo
-          python3 -m pip install PyGObject
-
-      - name: Set up environment
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
-          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
-          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
-          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
-          MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
-        run: |
-          cp .env.ci .env
-          # NOTE: Comment out or remove the following commands to disable code signing and notarization
-#           # Decode certificate
-#           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
-#           # Create keychain
-#           security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           security default-keychain -s build.keychain
-#           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-#           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           # Create keychain profile
-#           xcrun notarytool store-credentials "notarytool-profile" --apple-id "$MACOS_NOTARIZATION_APPLE_ID" --team-id "$MACOS_NOTARIZATION_TEAM_ID" --password "$MACOS_NOTARIZATION_PWD"
-#           # Store info in environment file
-#           echo 'CERT="'$MACOS_CERTIFICATE_NAME'"' >> .env
-#           echo 'KEYC=notarytool-profile' >> .env
-      - name: Build package
-        run: |
-          python3 build-ci.py
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-dist
-          path: dist/
-
-  build-macos-arm:
-    name: Build for macOS ARM
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          sudo python3 -m pip config --global set global.break-system-packages true
-          python3 -m pip install pycairo PyGObject
-          sh ./macos/bootstrap.sh
-      - name: Set up environment
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
-          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
-          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
-          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
-          MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
-        run: |
-          cp .env.ci .env
-          # NOTE: Comment out or remove the following commands to disable code signing and notarization
-#           # Decode certificate
-#           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
-#           # Create keychain
-#           security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           security default-keychain -s build.keychain
-#           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-#           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-#           # Create keychain profile
-#           xcrun notarytool store-credentials "notarytool-profile" --apple-id "$MACOS_NOTARIZATION_APPLE_ID" --team-id "$MACOS_NOTARIZATION_TEAM_ID" --password "$MACOS_NOTARIZATION_PWD"
-#           # Store info in environment file
-#           echo 'CERT="'$MACOS_CERTIFICATE_NAME'"' >> .env
-#           echo 'KEYC=notarytool-profile' >> .env
-      - name: Build package
-        run: |
-          python3 build-ci.py
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-arm-dist
-          path: dist/
+    name: Build macOS
+    uses: ./.github/workflows/build-macos.yml
 
   build-python:
     name: Build Python Package
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - name: Install build dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install build
-      - name: Build Python package
-        run: |
-          python3 -m build
-      - name: Store Python dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-dist
-          path: dist/
-
-  publish-pypi:
-    name: Publish to PyPI
-    needs: build-python
-    runs-on: ubuntu-latest
-    # Publica solo si el tag es v#.#.# (release) o v#.#.#dev/alpha/beta (prerelease)
-    if: >-
-      ${{ startsWith(github.ref_name, 'v') && (
-        (
-          contains(github.ref_name, 'dev') ||
-          contains(github.ref_name, 'alpha') ||
-          contains(github.ref_name, 'beta') ||
-          (!contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta'))
-        )
-      ) }}
-    steps:
-      - name: Download Python dist
-        uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist/
-      - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+    uses: ./.github/workflows/build-python.yml
 
   publish-pypi-release:
     name: Publish to PyPI (Release)
     needs: build-python
     runs-on: ubuntu-latest
+    # Solo versiones sin sufijos (v1.2.3)
     if: >-
-      ${{ startsWith(github.ref_name, 'v') && !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') && !contains(github.ref_name, 'test') }}
+      ${{ startsWith(github.ref_name, 'v') && 
+          !contains(github.ref_name, 'dev') && 
+          !contains(github.ref_name, 'alpha') && 
+          !contains(github.ref_name, 'beta') && 
+          !contains(github.ref_name, 'test') &&
+          !contains(github.ref_name, 'rc') }}
+    permissions:
+      id-token: write
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
       - name: Publish package to PyPI (Release)
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-prerelease:
     name: Publish to PyPI (Prerelease)
     needs: build-python
     runs-on: ubuntu-latest
+    # Solo versiones con sufijos (v1.2.3dev, v1.2.3alpha1, v1.2.3beta1, v1.2.3rc1)
     if: >-
-      ${{ startsWith(github.ref_name, 'v') && (contains(github.ref_name, 'dev') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta')) }}
+      ${{ startsWith(github.ref_name, 'v') && 
+          (contains(github.ref_name, 'dev') || 
+           contains(github.ref_name, 'alpha') || 
+           contains(github.ref_name, 'beta') ||
+           contains(github.ref_name, 'rc')) }}
+    permissions:
+      id-token: write
     steps:
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
       - name: Publish package to PyPI (Prerelease)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          # No se requiere flag extra, PyPI detecta prerelease por el nombre de la versión
+          repository-url: https://test.pypi.org/legacy/
 
   github-release:
-    name: GitHub Release
-    needs: [build-linux, build-windows, build-macos, build-macos-arm, build-python]
+    name: Create GitHub Release
+    needs: [build-linux, build-windows, build-macos, build-python]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -355,28 +85,43 @@ jobs:
         with:
           name: linux-dist
           path: dist/
+
       - name: Download Windows dist
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
           path: dist/
-      - name: Download macOS dist
+
+      - name: Download macOS Intel dist
         uses: actions/download-artifact@v4
         with:
-          name: macos-dist
+          name: macos-intel-dist
           path: dist/
+
       - name: Download macOS ARM dist
         uses: actions/download-artifact@v4
         with:
           name: macos-arm-dist
           path: dist/
+
       - name: Download Python dist
         uses: actions/download-artifact@v4
         with:
           name: python-dist
           path: dist/
+
+      - name: Download Flatpak bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: dist/
+
       - name: Create GitHub Pre-release
-        if: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') }}
+        if: >-
+          ${{ contains(github.ref_name, 'alpha') || 
+              contains(github.ref_name, 'beta') || 
+              contains(github.ref_name, 'dev') ||
+              contains(github.ref_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -384,8 +129,14 @@ jobs:
           '${{ github.ref_name }}'
           --repo '${{ github.repository }}'
           --generate-notes --prerelease
+
       - name: Create GitHub Release
-        if: ${{ !(contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'test')) }}
+        if: >-
+          ${{ !(contains(github.ref_name, 'alpha') || 
+                contains(github.ref_name, 'beta') || 
+                contains(github.ref_name, 'dev') || 
+                contains(github.ref_name, 'test') ||
+                contains(github.ref_name, 'rc')) }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -393,6 +144,7 @@ jobs:
           '${{ github.ref_name }}'
           --repo '${{ github.repository }}'
           --generate-notes
+
       - name: Upload dists to GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}

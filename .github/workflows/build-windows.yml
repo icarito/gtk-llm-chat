@@ -1,0 +1,46 @@
+# Windows build workflow for Gtk LLM Chat
+name: Build Windows
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build-windows:
+    name: Build for Windows
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+
+      - name: Install dependencies
+        run: |
+          ./windows/bootstrap.sh
+
+      - name: Set up environment
+        run: |
+          cp .env.ci .env
+
+      - name: Build package
+        run: |
+          python3 build-ci.py
+
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/
