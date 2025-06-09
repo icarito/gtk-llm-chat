@@ -8,7 +8,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-keywords = ["gtk", "chat", "llm", "ai"]
+keywords = ["gtk", "chat", "llm", "ai", "openai", "gemini", "groq",
+            "grok", "deepseek", "perplexity", "anthropic", "openrouter"]
 dependencies = [
     'pygobject',
     'llm',
@@ -21,7 +22,7 @@ dependencies = [
     'llm-openrouter',
     'markdown-it-py',
     'python-ulid',
-    'pystray @ git+https://github.com/icarito/pystray.git@support-freedesktop-icon-name#egg=pystray ; sys_platform == "linux"',
+    'pystray-freedesktop>=0.19.6a1; sys_platform == "linux"',
     'watchdog',
     'pyxdg; sys_platform == "linux"',
     'pystray; sys_platform == "darwin"',
@@ -32,7 +33,7 @@ requires-python = ">=3.8"
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/icarito/gtk_llm_chat"
+Homepage = "https://gtk-llm-chat.fuentelibre.org/"
 Issues = "https://github.com/icarito/gtk_llm_chat/issues"
 Repository = "https://github.com/icarito/gtk_llm_chat.git"
 
