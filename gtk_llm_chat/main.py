@@ -10,9 +10,35 @@ if __name__ == '__main__' and __package__ is None:
     project_root = os.path.dirname(package_dir)          # .../gtk-llm-chat
     sys.path.insert(0, project_root)
     __package__ = 'gtk_llm_chat'
+
 import argparse
 import sys
 import time
+import os
+
+# Interceptar argumentos tempranamente para activar modo stub antes de cualquier importación
+def check_no_llm_mode():
+    """
+    Verifica si el modo --no-llm está activado y configura el stub antes de cualquier importación.
+    """
+    # Parseo rápido solo para --no-llm
+    for arg in sys.argv:
+        if arg == '--no-llm':
+            # Configurar stub ANTES de cualquier importación
+            script_path = os.path.abspath(__file__)
+            package_dir = os.path.dirname(script_path)
+            project_root = os.path.dirname(package_dir)
+            stubs_dir = os.path.join(project_root, 'stubs')
+            
+            if os.path.exists(stubs_dir):
+                sys.path.insert(0, stubs_dir)
+                print("[NO-LLM] Modo sin LLM activado - stub configurado")
+            else:
+                print(f"[ERROR] Directorio de stubs no encontrado: {stubs_dir}")
+            break
+
+# Activar interceptación temprana si es necesario
+check_no_llm_mode()
 
 # Imports que funcionan tanto como módulo como script directo
 try:
@@ -22,7 +48,6 @@ try:
     # Postponer import de chat_application hasta que sea necesario
 except ImportError:
     # Si se ejecuta como script directo, añadir el directorio actual al path
-    import os
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from debug_utils import debug_print
     from platform_utils import launch_tray_applet, fork_or_spawn_applet
@@ -153,6 +178,7 @@ def parse_args(argv):
     parser.add_argument('-f', '--fragment', action='append', metavar='FRAGMENT', help='Fragmento (alias, URL, hash o ruta de archivo) para agregar al prompt')
     parser.add_argument('--benchmark-startup', action='store_true', help='Mide el tiempo hasta que la ventana se muestra y sale.')
     parser.add_argument('--applet', action='store_true', help='Inicia el applet de bandeja')
+    parser.add_argument('--no-llm', action='store_true', help='Ejecuta en modo sin LLM (solo UI)')
     args = parser.parse_args(argv[1:])
     config = {
         'cid': args.cid,
@@ -165,7 +191,8 @@ def parse_args(argv):
         'fragments': args.fragment,
         'benchmark_startup': args.benchmark_startup,
         'start_time': start_time,
-        'applet': args.applet
+        'applet': args.applet,
+        'no_llm': args.no_llm
     }
     return config
 
