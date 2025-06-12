@@ -10,7 +10,7 @@ import os
 import sys
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, Gio
 from .debug_utils import debug_print
 
 
@@ -22,6 +22,7 @@ class StyleManager:
         self._styles_loaded = False
         self._platform = self._detect_platform()
         self._styles_dir = os.path.join(os.path.dirname(__file__), 'styles')
+        self._load_gresource()
         self._apply_platform_workarounds()
     
     def apply_macos_native_window_controls(self, headerbar):
@@ -51,6 +52,19 @@ class StyleManager:
         if controls:
             controls.set_use_native_controls(True)
         return False
+
+    def _load_gresource(self):
+        """Carga el archivo GResource con los assets de la aplicación."""
+        try:
+            gresource_path = os.path.join(self._styles_dir, 'resources.gresource')
+            if os.path.exists(gresource_path):
+                resource = Gio.Resource.load(gresource_path)
+                Gio.resources_register(resource)
+                debug_print(f"[StyleManager] GResource cargado: {gresource_path}")
+            else:
+                debug_print(f"[StyleManager] GResource no encontrado: {gresource_path}")
+        except Exception as e:
+            debug_print(f"[StyleManager] Error cargando GResource: {e}")
 
     def _apply_platform_workarounds(self):
         """

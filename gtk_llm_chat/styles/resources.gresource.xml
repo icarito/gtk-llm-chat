@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/org/fuentelibre/gtk-llm-chat/assets">
+    <!-- Assets de controles de ventana de Haiku -->
+    <file>close-focused.png</file>
+    <file>close-unfocused.png</file>
+    <file>maximize-focused.png</file>
+    <file>maximize-unfocused.png</file>
+    <file>minimize-focused.png</file>
+    <file>minimize-unfocused.png</file>
+  </gresource>
+</gresources>

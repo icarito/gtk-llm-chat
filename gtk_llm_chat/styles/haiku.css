@@ -76,11 +76,11 @@ headerbar windowcontrols button.close {
     background-position: center center;
     box-shadow: none;
     -gtk-icon-shadow: none;
-    background-image: url("close-focused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/close-focused.png");
 }
 
 headerbar windowcontrols button.close:backdrop {
-    background-image: url("close-unfocused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/close-unfocused.png");
 }
 
 /* Botón maximizar */
@@ -97,11 +97,11 @@ headerbar windowcontrols button.maximize {
     background-position: center center;
     box-shadow: none;
     -gtk-icon-shadow: none;
-    background-image: url("maximize-focused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/maximize-focused.png");
 }
 
 headerbar windowcontrols button.maximize:backdrop {
-    background-image: url("maximize-unfocused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/maximize-unfocused.png");
 }
 
 /* Botón minimizar */
@@ -118,11 +118,11 @@ headerbar windowcontrols button.minimize {
     background-position: center center;
     box-shadow: none;
     -gtk-icon-shadow: none;
-    background-image: url("minimize-focused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/minimize-focused.png");
 }
 
 headerbar windowcontrols button.minimize:backdrop {
-    background-image: url("minimize-unfocused.png");
+    background-image: url("resource:///org/fuentelibre/gtk-llm-chat/assets/minimize-unfocused.png");
 }
 
 /* Estado maximizado */
