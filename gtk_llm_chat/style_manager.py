@@ -75,6 +75,8 @@ class StyleManager:
             return 'windows'
         elif sys.platform == 'darwin':
             return 'macos'
+        elif sys.platform.startswith('haiku'):
+            return 'haiku'
         else:
             return 'linux'
     
@@ -402,6 +404,194 @@ class StyleManager:
             scrollbar slider:hover {
                 background-color: alpha(@theme_fg_color, 0.6);
             }
+            """
+        elif self._platform == 'haiku':
+            return """
+            /* === ESTILOS ESPECÍFICOS PARA Haiku === */
+            window {
+                box-shadow: none;
+                margin: -12px;
+                border-radius: 0px;
+                padding: 6px;
+            }
+            .menu {
+                margin: -30px;
+                border-radius: 0px;
+            }
+            .menu > * {
+                padding: 10px;
+            }
+
+headerbar windowcontrols {
+    border-spacing: 6px; }
+    headerbar windowcontrols.start:not(.empty):dir(ltr), headerbar windowcontrols.end:not(.empty):dir(rtl) {
+      margin-right: 7px; }
+    headerbar windowcontrols.start:not(.empty):dir(rtl), headerbar windowcontrols.end:not(.empty):dir(ltr) {
+      margin-left: 7px; }
+    headerbar windowcontrols button.close {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/close-focused.png"); }
+      headerbar windowcontrols button.close:backdrop {
+        background-image: url("assets/close-unfocused.png"); }
+    headerbar windowcontrols button.maximize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/maximize-focused.png"); }
+      headerbar windowcontrols button.maximize:backdrop {
+        background-image: url("assets/maximize-unfocused.png"); }
+    headerbar windowcontrols button.minimize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/minimize-focused.png"); }
+      headerbar windowcontrols button.minimize:backdrop {
+        background-image: url("assets/minimize-unfocused.png"); }
+    .maximized headerbar windowcontrols button.maximize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none; }
+
+
+headerbar {
+  min-height: 30px;
+  padding: 4px 8px;
+  color: #000000;
+  background-color: #FFC000;
+  background-image: linear-gradient(to bottom, #ffe699, #FFC000);
+  box-shadow: inset 1px 1px #ffd966, inset -1px -1px #FFC000; }
+  headerbar .title {
+    padding-left: 12px;
+    padding-right: 12px;
+    font-weight: bold; }
+  headerbar .subtitle {
+    font-size: smaller;
+    padding-left: 12px;
+    padding-right: 12px;
+    color: alpha(currentColor, 0.7); }
+  headerbar:backdrop {
+    color: #000000;
+    background-color: #D7D7D7;
+    background-image: linear-gradient(to bottom, #e2e2e2, #D7D7D7);
+    box-shadow: inset 1px 1px #f2f2f2, inset -1px -1px #b7b7b7; }
+  .tiled headerbar, .tiled headerbar:backdrop, .maximized headerbar, .maximized headerbar:backdrop {
+    border-radius: 0; }
+  headerbar.titlebar, .titlebar headerbar {
+    border-radius: 0px 0px 0px 0px; }
+  separator:first-child + headerbar, separator:first-child + headerbar:backdrop, headerbar:first-child, headerbar:first-child:backdrop {
+    border-top-left-radius: 0px; }
+    .maximized separator:first-child + headerbar, .tiled separator:first-child + headerbar, .maximized separator:first-child + headerbar:backdrop, .tiled separator:first-child + headerbar:backdrop, .maximized headerbar:first-child, .tiled headerbar:first-child, .maximized headerbar:first-child:backdrop, .tiled headerbar:first-child:backdrop {
+      border-radius: 0; }
+  headerbar:last-child, headerbar:last-child:backdrop {
+    border-top-right-radius: 0px; }
+    .maximized headerbar:last-child, .tiled headerbar:last-child, .maximized headerbar:last-child:backdrop, .tiled headerbar:last-child:backdrop {
+      border-radius: 0; }
+  headerbar windowcontrols {
+    border-spacing: 6px; }
+    headerbar windowcontrols.start:not(.empty):dir(ltr), headerbar windowcontrols.end:not(.empty):dir(rtl) {
+      margin-right: 7px; }
+    headerbar windowcontrols.start:not(.empty):dir(rtl), headerbar windowcontrols.end:not(.empty):dir(ltr) {
+      margin-left: 7px; }
+    headerbar windowcontrols button.close {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/close-focused.png"); }
+      headerbar windowcontrols button.close:backdrop {
+        background-image: url("assets/close-unfocused.png"); }
+    headerbar windowcontrols button.maximize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/maximize-focused.png"); }
+      headerbar windowcontrols button.maximize:backdrop {
+        background-image: url("assets/maximize-unfocused.png"); }
+    headerbar windowcontrols button.minimize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none;
+      background-image: url("assets/minimize-focused.png"); }
+      headerbar windowcontrols button.minimize:backdrop {
+        background-image: url("assets/minimize-unfocused.png"); }
+    .maximized headerbar windowcontrols button.maximize {
+      padding: 0px;
+      min-width: 14px;
+      min-height: 14px;
+      border: none;
+      border-radius: 0;
+      color: transparent;
+      background-color: transparent;
+      background-size: 14px 14px;
+      background-repeat: no-repeat;
+      background-position: center center;
+      box-shadow: none;
+      -gtk-icon-shadow: none; }
+
             """
         else:  # Linux
             return """
