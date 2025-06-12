@@ -126,7 +126,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
         
-        if sys.platform == 'haiku':
+        if sys.platform.startswith('haiku'):
             def _apply_native_controls():
                 style_manager.apply_haiku_native_window_controls(self.header)
                 return False  # Ejecutar solo una vez

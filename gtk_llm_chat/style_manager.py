@@ -25,6 +25,9 @@ class StyleManager:
         self._load_gresource()
         self._apply_platform_workarounds()
     
+    def apply_haiku_native_window_controls(self, headerbar):
+        headerbar.set_decoration_layout('close:maximize')
+
     def apply_macos_native_window_controls(self, headerbar):
         """
         Busca y activa Gtk.WindowControls existentes en la headerbar (solo macOS, sin crear nuevos).
