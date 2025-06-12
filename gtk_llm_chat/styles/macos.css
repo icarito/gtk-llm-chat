@@ -1,0 +1,23 @@
+/* === ESTILOS ESPECÍFICOS PARA macOS === */
+
+/* Ventanas con esquinas redondeadas y ajuste de ángulo */
+window {
+    border-radius: 10px;
+}
+
+/* Scrollbars estilo macOS */
+scrollbar {
+    background-color: transparent;
+    border-radius: 4px;
+}
+
+scrollbar slider {
+    background-color: alpha(@theme_fg_color, 0.4);
+    border-radius: 4px;
+    min-width: 8px;
+    min-height: 8px;
+}
+
+scrollbar slider:hover {
+    background-color: alpha(@theme_fg_color, 0.6);
+}

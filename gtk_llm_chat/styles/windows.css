@@ -1,0 +1,44 @@
+/* === ESTILOS ESPECÍFICOS PARA WINDOWS === */
+
+/* Remover sombras y bordes redondeados que no se ven bien en Windows */
+window {
+    box-shadow: none;
+    margin: -12px;
+    border-radius: 0px;
+    padding: 6px;
+}
+
+.menu {
+    margin: -30px;
+    border-radius: 0px;
+}
+
+.menu > * {
+    padding: 10px;
+}
+
+/* Botones más planos para Windows */
+button {
+    box-shadow: none;
+    border-radius: 0px;
+}
+
+/* Usar tipografía Segoe UI (también aplicado vía workaround en Python) */
+.main-container, body, window, * {
+    font-family: 'Segoe UI', 'Trebuchet MS', Tahoma, sans-serif;
+}
+
+/* Scrollbars estilo Windows */
+scrollbar {
+    background-color: alpha(@theme_fg_color, 0.1);
+    border-radius: 0;
+}
+
+scrollbar slider {
+    background-color: alpha(@theme_fg_color, 0.3);
+    border-radius: 0;
+}
+
+scrollbar slider:hover {
+    background-color: alpha(@theme_fg_color, 0.5);
+}

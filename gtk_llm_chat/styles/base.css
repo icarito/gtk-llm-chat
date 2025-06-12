@@ -1,0 +1,246 @@
+/* === ESTILOS BASE PARA TODA LA APLICACIÓN === */
+
+/* Contenedores principales */
+.main-container {
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
+}
+
+/* Encabezados */
+.app-header {
+    background: linear-gradient(to bottom, 
+                shade(@theme_bg_color, 1.05), 
+                @theme_bg_color);
+    border-bottom: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.1);
+    padding: 12px;
+}
+
+.app-title {
+    font-weight: bold;
+    font-size: 1.1em;
+    color: @theme_fg_color;
+}
+
+.app-subtitle {
+    color: mix(@theme_fg_color, @theme_bg_color, 0.7);
+    font-size: 0.9em;
+}
+
+/* Botones principales */
+.primary-button {
+    background: linear-gradient(to bottom, @theme_selected_bg_color, 
+                               shade(@theme_selected_bg_color, 0.9));
+    color: @theme_selected_fg_color;
+    border: 1px solid shade(@theme_selected_bg_color, 0.8);
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 500;
+}
+
+.primary-button:hover {
+    background: linear-gradient(to bottom, 
+                               shade(@theme_selected_bg_color, 1.1), 
+                               @theme_selected_bg_color);
+}
+
+.primary-button:active {
+    background: shade(@theme_selected_bg_color, 0.9);
+    border-color: shade(@theme_selected_bg_color, 0.7);
+}
+
+/* Botones secundarios */
+.secondary-button {
+    background: @theme_bg_color;
+    color: @theme_fg_color;
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.2);
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+.secondary-button:hover {
+    background: mix(@theme_fg_color, @theme_bg_color, 0.05);
+    border-color: mix(@theme_fg_color, @theme_bg_color, 0.3);
+}
+
+/* Grupos de botones */
+.button-group {
+    margin: 6px;
+}
+
+.button-group button {
+    margin: 2px;
+}
+
+/* Paneles de contenido */
+.content-panel {
+    background-color: @theme_base_color;
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.1);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 8px;
+}
+
+/* Lista de elementos */
+.item-list {
+    background-color: @theme_base_color;
+    border-radius: 6px;
+}
+
+.item-list row {
+    padding: 8px 12px;
+    border-bottom: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.05);
+}
+
+.item-list row:last-child {
+    border-bottom: none;
+}
+
+.item-list row:hover {
+    background-color: mix(@theme_selected_bg_color, @theme_base_color, 0.1);
+}
+
+/* Entrada de texto */
+.text-input {
+    background-color: @theme_base_color;
+    color: @theme_text_color;
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.2);
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+.text-input:focus {
+    border-color: @theme_selected_bg_color;
+    box-shadow: 0 0 0 2px mix(@theme_selected_bg_color, transparent, 0.2);
+}
+
+/* Área de mensaje de chat */
+.message-container {
+    margin: 8px;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+/* Estilos de mensajes específicos */
+.message {
+    padding: 8px;
+}
+
+.message-content {
+    padding: 6px;
+    min-width: 400px;
+}
+
+.user-message .message-content {
+    background-color: @blue_3;
+    border-radius: 12px 12px 0 12px;
+}
+
+.assistant-message .message-content {
+    background-color: @card_bg_color;
+    border-radius: 12px 12px 12px 0;
+}
+
+.timestamp {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+.error-message {
+    background-color: mix(@error_color, @theme_bg_color, 0.1);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.error-icon {
+    color: @error_color;
+}
+
+.error-content {
+    padding: 3px;
+}
+
+textview {
+    background: none;
+    color: inherit;
+    padding: 3px;
+}
+
+textview text {
+    background: none;
+}
+
+.user-message textview text {
+    color: white;
+}
+
+.user-message textview text selection {
+    background-color: rgba(255,255,255,0.3);
+    color: white;
+}
+
+/* Área de entrada de chat */
+.chat-input-container {
+    background-color: @theme_bg_color;
+    border-top: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.1);
+    padding: 12px;
+}
+
+.chat-input {
+    background-color: @theme_base_color;
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.2);
+    border-radius: 20px;
+    padding: 12px 16px;
+    font-size: 1em;
+}
+
+.chat-input:focus {
+    border-color: @theme_selected_bg_color;
+    box-shadow: 0 0 0 2px mix(@theme_selected_bg_color, transparent, 0.2);
+}
+
+/* Botón de envío */
+.send-button {
+    background: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+    border: none;
+    border-radius: 50%;
+    padding: 8px;
+    margin-left: 8px;
+}
+
+.send-button:hover {
+    background: shade(@theme_selected_bg_color, 1.1);
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: mix(@theme_bg_color, transparent, 0.95);
+    border-right: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.1);
+    min-width: 250px;
+}
+
+.sidebar-header {
+    background-color: mix(@theme_bg_color, transparent, 0.98);
+    border-bottom: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.1);
+    padding: 16px;
+}
+
+/* Elementos de estado */
+.status-indicator {
+    border-radius: 50%;
+    min-width: 8px;
+    min-height: 8px;
+    margin-right: 8px;
+}
+
+.status-connected {
+    background-color: #4CAF50;
+}
+
+.status-connecting {
+    background-color: #FF9800;
+}
+
+.status-error {
+    background-color: #F44336;
+}
