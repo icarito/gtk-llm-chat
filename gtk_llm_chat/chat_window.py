@@ -125,6 +125,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 style_manager.apply_macos_native_window_controls(self.header)
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
+        
+        if sys.platform == 'haiku':
+            def _apply_native_controls():
+                style_manager.apply_haiku_native_window_controls(self.header)
+                return False  # Ejecutar solo una vez
+            GLib.idle_add(_apply_native_controls)
 
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---

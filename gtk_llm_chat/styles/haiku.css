@@ -5,7 +5,8 @@ window {
     box-shadow: none;
     margin: -12px;
     border-radius: 0px;
-    padding: 6px;
+    border: 1px solid grey;
+    padding: 0px;
 }
 
 .menu {

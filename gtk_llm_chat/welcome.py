@@ -32,6 +32,12 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 style_manager.apply_macos_native_window_controls(self.header_bar)
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
+        
+        if sys.platform.startswith('haiku'):
+            def _apply_native_controls():
+                style_manager.apply_haiku_native_window_controls(self.header_bar)
+                return False  # Ejecutar solo una vez
+            GLib.idle_add(_apply_native_controls)
 
         # Conectar la señal realize para iniciar la carga de modelos automáticamente
         self.connect('realize', self._on_realize)
