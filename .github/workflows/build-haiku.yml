@@ -1,0 +1,45 @@
+name: Test Gtk-LLM-Chat on Haiku with Python 3.10 (docker-qemu-haiku)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  haiku-python310-gtkllmchat:
+    runs-on: ubuntu-latest
+    container: docker.io/hectorm/qemu-haiku:latest
+    steps:
+      - name: Wait until the VM is ready
+        run: container-init & timeout 600 vmshell exit 0
+
+      - name: Install system dependencies
+        run: |
+          vmshell pkgman install -y \
+            python3.10 \
+            pip_python310 \
+            pygobject_python310 \
+            gtk3 \
+            gtk4 \
+            libadwaita \
+            gobject_introspection \
+            gsettings_desktop_schemas \
+            adwaita_icon_theme \
+            pillow_python310
+
+      - name: Upgrade pip and setuptools
+        run: |
+          vmshell python3 -m pip install --upgrade pip setuptools
+
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Copy project to VM
+        run: |
+          vmshell mkdir ./src/
+          tar -cf - ./ | vmshell tar -xf - -C ./src/
+
+      - name: Install Gtk-LLM-Chat desde el repo actual
+        run: vmshell python3 -m pip install --no-cache-dir ./src/
