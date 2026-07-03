@@ -113,13 +113,26 @@ isn't merged yet — decide at start).
       `update_po.sh`, extracting Contacts / Online / Offline /
       New XMPP Conversation… / Main Menu / Contact request / Accept /
       Deny / "{jid} wants to add you as a contact." into the catalogs.
-- [ ] **T8. Verification pass**: walk all 4 acceptance criteria in the
+- [x] **T8. Verification pass**: walk all 4 acceptance criteria in the
       running app against yax.im; check them off in `spec.md`.
       Regression pass over 001's 5 criteria and the LLM flow.
-- [ ] **T9. Docs**: update `docs/architecture.md` (presence, roster
+      *Result (2026-07-03):* independent verify+review pass. AC1/AC2 PASS
+      live (roster populated with `icarito@yax.im`, presence flip to
+      online); AC3/AC4 PASS on logic+wiring headless (a full foreign-send
+      needs a second live client). flake8 clean; app launches with no
+      tracebacks; LLM flow unaffected.
+- [x] **T9. Docs**: update `docs/architecture.md` (presence, roster
       sidebar, notifications) in the same change.
-- [ ] **T10. Review & archive**: adversarial review of the branch;
+      *Result (2026-07-03):* backends section now covers XmppSession
+      presence/signals, accept/deny, the persistent roster sidebar vs the
+      modal picker, the header menu and notification actions; stale
+      spec-001 paths repointed to `specs/archive/`.
+- [x] **T10. Review & archive**: adversarial review of the branch;
       merge; `git mv specs/002-xmpp-roster-notifications specs/archive/`.
+      *Result (2026-07-03):* review found 4 ACs PASS + 3 issues, all
+      fixed (message-notification withdrawal, presence desync on
+      reconnect, duplicate-window guard). Spec archived; branch merged
+      to `main`.
 
 ## Note on test infrastructure
 
