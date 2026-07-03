@@ -82,6 +82,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
         self.roster_sidebar = None
+        self.model_options = None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -349,8 +350,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             self.title_widget.set_subtitle(self.config['model'])
 
-            # Crear el sidebar con el modelo actual
-            self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.backend)
+            # Sidebar de conversaciones LLM recientes (spec 003), con las
+            # opciones existentes (modelo/parámetros/system prompt) como
+            # segundo nivel navegable — self.model_options es ese ChatSidebar
+            # interno, para los atajos que necesitan ir directo a una página.
+            from .llm_conversation_sidebar import LLMConversationSidebar
+            self.model_sidebar = LLMConversationSidebar(
+                config=self.config, llm_client=self.backend, chat_history=self.chat_history,
+                on_conversation_selected=self._on_llm_conversation_selected)
+            self.model_options = self.model_sidebar.options_sidebar
             # Establecer el panel lateral en el split_view
             self.split_view.set_sidebar(self.model_sidebar)
 
@@ -381,7 +389,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         show_sidebar = split_view.get_show_sidebar()
         if not show_sidebar:
             if self.model_sidebar is not None:
-                self.model_sidebar.stack.set_visible_child_name("actions")
+                self.model_sidebar.show_list()
+            if self.model_options is not None:
+                self.model_options.stack.set_visible_child_name("actions")
             self.input_text.grab_focus()
 
     def _on_roster_contact_selected(self, bare_jid):
@@ -401,6 +411,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         else:
             # Colapsar el panel tras elegir, para dar foco al chat
             self.split_view.set_show_sidebar(False)
+
+    def _on_llm_conversation_selected(self, cid):
+        """Una conversación LLM elegida en el sidebar (spec 003): abre/
+        enfoca su ventana. Si es la conversación actual, solo colapsa el
+        panel."""
+        if cid == self.cid:
+            self.split_view.set_show_sidebar(False)
+            return
+        app = self.get_application()
+        if app is not None and hasattr(app, 'open_conversation_window'):
+            app.open_conversation_window({'cid': cid})
+        self.split_view.set_show_sidebar(False)
 
     def _setup_css(self):
         """Aplica estilos CSS específicos para la ventana de chat."""
@@ -521,6 +543,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.chat_history.set_conversation_title(
                 conversation_id, self.title_entry.get_text())
             debug_print(f"Guardando título para conversación {conversation_id}: {self.title_entry.get_text()}")
+            if self.model_sidebar is not None:
+                self.model_sidebar.refresh()
         else:
             debug_print("Conversation ID is not available yet. Title update deferred.")
             # Schedule the title update for the next prompt
@@ -561,21 +585,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Ctrl+M: Abrir selector de modelo (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_m and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.model_sidebar is not None:
-                # Mostrar el sidebar y cambiar a la página del selector de modelo
+            if self.model_sidebar is not None and self.model_options is not None:
+                # Mostrar el sidebar, ir a opciones, y a la página del selector
                 self.split_view.set_show_sidebar(True)
-                if hasattr(self.model_sidebar, 'stack'):
-                    self.model_sidebar.stack.set_visible_child_name("model_selector")
+                self.model_sidebar.show_options()
+                self.model_options.stack.set_visible_child_name("model_selector")
             return True
 
         # Ctrl+S: Cambiar system prompt (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_s and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.model_sidebar is not None:
-                # Mostrar el sidebar y abrir el diálogo de system prompt
+            if self.model_sidebar is not None and self.model_options is not None:
+                # Mostrar el sidebar, ir a opciones, y abrir el diálogo de system prompt
                 self.split_view.set_show_sidebar(True)
-                if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
-                    # Simular click en el botón de system prompt
-                    self.model_sidebar._on_system_prompt_button_clicked(None)
+                self.model_sidebar.show_options()
+                if hasattr(self.model_options, '_on_system_prompt_button_clicked'):
+                    self.model_options._on_system_prompt_button_clicked(None)
             return True
 
         # Ctrl+N: Nueva conversación
@@ -856,6 +880,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                         if win is self and key != conversation_id:
                             del app._window_by_cid[key]
                     app._window_by_cid[conversation_id] = self
+                if self.model_sidebar is not None:
+                    self.model_sidebar.refresh()
 
     def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del backend.
