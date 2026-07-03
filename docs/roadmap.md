@@ -6,11 +6,11 @@ shipped in v4.x is dropped from this list.
 
 ## Next: killer features (2026)
 
-> To be specified with the owner and developed through the spec-driven
-> flow in [specs/](../specs/README.md). Each feature starts as
-> `specs/<NNN>-<slug>/spec.md`.
-
-- [ ] _(pending: capture and enrich the new feature ideas)_
+- [ ] **XMPP backend** — chat with personal agents (NanoClaw/OpenClaw)
+      and human contacts over XMPP. Spec:
+      [specs/001-xmpp-backend/](../specs/001-xmpp-backend/spec.md).
+      Layer 2+ later: MAM history, MUC, PubSub, OMEMO.
+- [ ] _(further feature ideas start as `specs/<NNN>-<slug>/spec.md`)_
 
 ## Parked work (resumable)
 
