@@ -211,6 +211,10 @@ class XmppSession(GObject.Object):
             self._conversations[bare_jid] = conversation
         return conversation
 
+    def forget_conversation(self, bare_jid: str):
+        """Elimina una conversación del registro (al cerrar su ventana)."""
+        self._conversations.pop(bare_jid, None)
+
     def shutdown(self):
         self._conversations.clear()
         self.disconnect_from_server()
@@ -223,8 +227,12 @@ class XmppConversation(ChatBackend):
         ChatBackend.__init__(self)
         self.session = session
         self.bare_jid = bare_jid
-        session.connect('state-changed', self._on_session_state)
-        session.connect('session-error', self._on_session_error)
+        # Guardar los handler ids para poder desconectarlos en shutdown:
+        # la sesión es compartida y vive más que esta conversación.
+        self._session_handlers = [
+            session.connect('state-changed', self._on_session_state),
+            session.connect('session-error', self._on_session_error),
+        ]
         if session.is_connected:
             GLib.idle_add(self._emit_ready)
 
@@ -276,5 +284,10 @@ class XmppConversation(ChatBackend):
         self.session.send_chatstate(self.bare_jid, state)
 
     def shutdown(self):
-        # La sesión es compartida; la cierra quien la posee
-        pass
+        # La sesión es compartida (la cierra quien la posee), pero sí hay
+        # que soltar nuestros handlers y salir de su registro para no
+        # seguir recibiendo señales tras cerrar la ventana.
+        for handler_id in self._session_handlers:
+            self.session.disconnect(handler_id)
+        self._session_handlers = []
+        self.session.forget_conversation(self.bare_jid)

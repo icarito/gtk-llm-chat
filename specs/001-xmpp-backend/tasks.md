@@ -118,9 +118,29 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
 ## Phase 4 — Hardening & docs
 
 - [ ] **T9. i18n**: new strings wrapped in `_()`; run `./update_po.sh`.
-- [ ] **T10. Verification pass**: walk all five acceptance criteria in
+- [x] **T10. Verification pass**: walk all five acceptance criteria in
       spec.md against yax.im and check them off; regression pass over
       the LLM flow.
+      *Result (2026-07-03):* independent verify+review pass. All 5 AC
+      PASS live against yax.im; flake8 clean on the XMPP files. The
+      review found 4 real issues, all fixed in this branch:
+      **#1 (correctness)** — outgoing XMPP messages created a dangling
+      empty assistant bubble (LLM-style placeholder) that never filled;
+      a later reply would fill the stale bubble. Masked by self-chat.
+      Fixed: injected backends don't create a placeholder on send;
+      incoming `response` creates its own bubble. Verified: send leaves
+      only the user bubble; incoming makes a fresh bubble; LLM streaming
+      still uses its placeholder (regression checked).
+      **#2 (leak)** — `XmppConversation` connected handlers on the shared
+      session but `shutdown()` was a no-op, so closed conversations kept
+      receiving signals. Fixed: store handler ids, disconnect them and
+      `forget_conversation()` on shutdown. Verified: after one
+      conversation's shutdown it stops receiving, siblings unaffected.
+      **#3 (minor)** — composing timeout not cancelled on window close
+      (stray chatstate). Fixed in `_on_close_request`.
+      **#4 (cosmetic)** — non-fatal `session-error` left "Error" stuck in
+      the header. Fixed: restore last connection state after 4s if still
+      connected.
 - [ ] **T11. Docs**: update `docs/architecture.md` (backend abstraction,
       xmpp_client module) in the same change; add `nbxmpp` + `keyring`
       to pyproject/requirements.

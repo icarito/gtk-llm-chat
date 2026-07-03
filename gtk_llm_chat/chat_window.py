@@ -606,6 +606,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if state == 'disconnected':
             self.connection_status_label.add_css_class("error")
 
+    def _restore_connection_status(self):
+        """Restaura el indicador al último estado de conexión conocido tras
+        mostrar un error no fatal (spec 001, review fix)."""
+        self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
+        return GLib.SOURCE_REMOVE
+
     def _on_backend_state_changed(self, backend, state):
         """Maneja la señal 'state-changed' del backend (spec 001, T7)."""
         debug_print(f"Estado de conexión del backend: {state}")
@@ -702,12 +708,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._composing_timeout_id = None
             # Display user message
             self.display_message(text, sender="user")
-            # Deshabilitar entrada y empezar tarea LLM
+            # Deshabilitar entrada y empezar tarea
             self.set_enabled(False)
-            # NEW: Crear el widget de respuesta aquí
-            self.current_message_widget = self.display_message("", sender="assistant")
-            # Call _on_llm_response with an empty string to update the widget
-            self._on_llm_response(self.backend, "")
+            if self._injected_backend:
+                # Backends de mensajería (XMPP): no hay una respuesta que
+                # rellenar; los mensajes entrantes crean su propia burbuja
+                # cuando llegan (_on_llm_response). No dejar un placeholder.
+                self.current_message_widget = None
+            else:
+                # LLM: crear ya la burbuja de respuesta que el stream irá
+                # rellenando vía 'response'.
+                self.current_message_widget = self.display_message("", sender="assistant")
+                self._on_llm_response(self.backend, "")
             GLib.idle_add(self._start_llm_task, text)
 
     def _start_llm_task(self, prompt_text):
@@ -723,9 +735,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         debug_print(message, file=sys.stderr)
         if self._injected_backend:
             # Un error de sesión (p.ej. roster fallido) no siempre viene
-            # acompañado de 'state-changed'; reflejarlo igual en el header.
+            # acompañado de 'state-changed'; reflejarlo brevemente en el
+            # header. Pero si la sesión sigue conectada (error no fatal),
+            # restaurar el estado real tras unos segundos para no dejar
+            # "Error" pegado permanentemente.
             self.connection_status_label.set_label(_("Error"))
             self.connection_status_label.add_css_class("error")
+            session = getattr(self.backend, 'session', None)
+            if session is not None and session.is_connected:
+                GLib.timeout_add_seconds(4, self._restore_connection_status)
         # Verificar si el widget actual existe y es hijo del messages_box
         if self.current_message_widget is not None:
             is_child = (self.current_message_widget.get_parent() ==
@@ -773,7 +791,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     app._window_by_cid[conversation_id] = self
 
     def _on_llm_response(self, llm_client, response):
-        """Maneja la señal de respuesta del LLM"""
+        """Maneja la señal de respuesta del backend.
+
+        LLM: rellena la burbuja de assistant creada al enviar (streaming).
+        Backends de mensajería (XMPP): cada 'response' es un mensaje
+        entrante completo e independiente; crea su propia burbuja.
+        """
+        if self._injected_backend:
+            self.accumulated_response = ""
+            self.current_message_widget = self.display_message(
+                response, sender="assistant")
+            GLib.idle_add(self._scroll_to_bottom, False)
+            return
+
         if not self.current_message_widget:
             return
 
@@ -818,9 +848,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.timeout_add(50, scroll_after)
 
     def _on_close_request(self, window):
-        # Liberar el backend (p.ej. XmppConversation: no hace nada propio,
-        # la sesión es compartida y la cierra quien la posee; LLMClient:
-        # no-op también). Seguro llamarlo siempre.
+        # Cancelar el aviso pendiente de 'composing' para que no dispare
+        # contra una ventana ya destruida (enviaría un chatstate espurio).
+        if self._composing_timeout_id:
+            GLib.source_remove(self._composing_timeout_id)
+            self._composing_timeout_id = None
+        # Liberar el backend (XmppConversation: suelta sus handlers de la
+        # sesión compartida; LLMClient: no-op). Seguro llamarlo siempre.
         if self.backend is not None:
             self.backend.shutdown()
         # Eliminar del registro de ventanas si corresponde
