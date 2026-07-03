@@ -68,9 +68,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
-        # Inicializar LLMClient con la configuración
-        # self.llm will be initialized later, after UI setup potentially
-        self.llm = None
+        # Backend de conversación (contrato ChatBackend; hoy siempre LLMClient)
+        # self.backend will be initialized later, after UI setup potentially
+        self.backend = None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -221,15 +221,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_content(chat_content_box)
 
         # --- Panel Lateral (Sidebar) ---
-        # Initialize LLMClient *after* basic UI setup
+        # Initialize the backend *after* basic UI setup
         try:
             debug_print(f"Inicializando LLMClient con config: {self.config}")
-            self.llm = LLMClient(self.config, self.chat_history)
-            # Connect signals *here*
-            self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
-            self.llm.connect('response', self._on_llm_response)
-            self.llm.connect('error', self._on_llm_error)
-            self.llm.connect('finished', self._on_llm_finished)
+            self.backend = LLMClient(self.config, self.chat_history)
+            # Connect ChatBackend signals *here*
+            self.backend.connect('ready', self._on_backend_ready)
+            self.backend.connect('response', self._on_llm_response)
+            self.backend.connect('error', self._on_llm_error)
+            self.backend.connect('finished', self._on_llm_finished)
             
             if self.cid:
                 debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
@@ -251,7 +251,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.config['model'] = default_model_id
                 debug_print(f"Usando modelo predeterminado: {default_model_id}")
         else:
-            model_id = self.llm.get_model_id()
+            model_id = self.backend.get_model_id()
             self.config['model'] = model_id
             debug_print(f"Usando modelo de la conversación: {model_id}")
             
@@ -268,7 +268,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_widget.set_subtitle(self.config['model'])
 
         # Crear el sidebar con el modelo actual
-        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
+        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.backend)
         # Establecer el panel lateral en el split_view
         self.split_view.set_sidebar(self.model_sidebar)
 
@@ -423,14 +423,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         else:
             debug_print("Conversation ID is not available yet. Title update deferred.")
             # Schedule the title update for the next prompt
-            def update_title_on_next_prompt(llm_client, response):
+            def update_title_on_next_prompt(backend, response):
                 conversation_id = self.config.get('cid')
                 debug_print(f"Conversation ID post-respuesta: {conversation_id}")
                 if conversation_id:
                     self.chat_history.set_conversation_title(
                         conversation_id, self.title_entry.get_text())
-                    self.llm.disconnect_by_func(update_title_on_next_prompt)
-            self.llm.connect('response', update_title_on_next_prompt)
+                    self.backend.disconnect_by_func(update_title_on_next_prompt)
+            self.backend.connect('response', update_title_on_next_prompt)
         self.header.set_title_widget(self.title_widget)
         new_title = self.title_entry.get_text()
 
@@ -540,12 +540,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         return message_widget
 
-    def _on_model_loaded(self, llm_client, model_id):
-        """Maneja el evento cuando se carga un modelo."""
-        debug_print(f"Modelo cargado correctamente: {model_id}")
-        
-        # Actualizar el título de la ventana con el nombre del modelo
-        self.title_widget.set_subtitle(model_id)
+    def _on_backend_ready(self, backend, display_name):
+        """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
+        debug_print(f"Backend listo: {display_name}")
+
+        # Actualizar el subtítulo de la ventana con el nombre a mostrar
+        self.title_widget.set_subtitle(display_name)
         
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
@@ -621,13 +621,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # NEW: Crear el widget de respuesta aquí
             self.current_message_widget = self.display_message("", sender="assistant")
             # Call _on_llm_response with an empty string to update the widget
-            self._on_llm_response(self.llm, "")
+            self._on_llm_response(self.backend, "")
             GLib.idle_add(self._start_llm_task, text)
 
     def _start_llm_task(self, prompt_text):
-        """Inicia la tarea del LLM con el prompt dado."""
-        # Enviar el prompt usando LLMClient
-        self.llm.send_message(prompt_text)
+        """Inicia la tarea del backend con el prompt dado."""
+        # Enviar el prompt usando el ChatBackend
+        self.backend.send_message(prompt_text)
 
         # Devolver False para que idle_add no se repita
         return GLib.SOURCE_REMOVE
@@ -667,7 +667,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Actualizar el conversation_id en la configuración si no existe
         if success and not self.config.get('cid'):
-            conversation_id = self.llm.get_conversation_id()
+            conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
                 self.cid = conversation_id
@@ -688,7 +688,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Actualizar el conversation_id en la configuración al recibir la primera respuesta
         if not self.config.get('cid'):
-            conversation_id = self.llm.get_conversation_id()
+            conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
                 self.cid = conversation_id

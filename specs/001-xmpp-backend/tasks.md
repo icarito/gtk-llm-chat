@@ -16,11 +16,17 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
 
 ## Phase 1 — Backend abstraction (no behavior change)
 
-- [ ] **T2. Extract `ChatBackend` contract**: document the signal/method
+- [x] **T2. Extract `ChatBackend` contract**: document the signal/method
       contract (design.md) in code; adjust `ChatWindow` to depend on the
       contract instead of `LLMClient` concretely.
-      *Verify:* full LLM conversation flow works exactly as before
-      (send, stream, error, rename, delete).
+      *Result (2026-07-03):* `chat_backend.py` defines the 5 signals
+      (`model-loaded` renamed to `ready`) + methods; `LLMClient` inherits;
+      `ChatWindow.backend` replaces `.llm`. Verified: headless full flow
+      (ready→response→finished vs deepseek-reasoner, test conversation
+      cleaned from logs.db) and real app launch showing
+      "Backend listo: deepseek-reasoner". Found pre-existing latent bug:
+      `LLMClient` fallback passes `fragments_path` to `ChatHistory`,
+      which doesn't accept it (unreachable from the app; noted for T10).
 
 ## Phase 2 — XMPP core
 
