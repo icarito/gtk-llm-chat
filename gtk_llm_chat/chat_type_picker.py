@@ -32,19 +32,16 @@ class ChatTypePickerWindow(Adw.ApplicationWindow):
         header.set_show_end_title_buttons(True)
 
         status_page = Adw.StatusPage()
-        status_page.set_title(_("Who do you want to talk to?"))
-        status_page.set_description(
-            _("Choose an AI model or an XMPP contact to start chatting."))
-        status_page.set_icon_name("org.fuentelibre.gtk_llm_Chat-symbolic")
+        status_page.set_title(_("New Chat"))
 
         button_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=18,
             halign=Gtk.Align.CENTER)
 
         button_box.append(self._make_choice_button(
-            "brain-symbolic", _("LLM Model"), self._on_llm_clicked))
+            "brain-symbolic", _("LLM"), self._on_llm_clicked))
         button_box.append(self._make_choice_button(
-            "system-users-symbolic", _("XMPP Contact"), self._on_xmpp_clicked))
+            "system-users-symbolic", _("XMPP"), self._on_xmpp_clicked))
 
         status_page.set_child(button_box)
 
