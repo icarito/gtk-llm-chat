@@ -70,7 +70,7 @@ class ChatSidebar(Gtk.Box):
         self.model_row = Adw.ActionRow(title=_("Change Model"),
                                        subtitle=f"{_('Provider')}: " + llm_client.get_provider_for_model(model_id) if llm_client else None)
         resource_manager.set_widget_icon_name(self.model_row, "brain-symbolic")
-        # NO establecer subtítulo aquí, lo hará model-loaded
+        # NO establecer subtítulo aquí, lo hará la señal 'ready'
         self.model_row.set_activatable(True)  # Hacerla accionable
         self.model_row.connect("activated", self._on_model_button_clicked)
         
@@ -173,7 +173,7 @@ class ChatSidebar(Gtk.Box):
 
         # Si ya tenemos llm_client, programar la actualización del modelo
         if self.llm_client:
-            self.llm_client.connect('model-loaded', self._on_model_loaded)
+            self.llm_client.connect('ready', self._on_model_loaded)
             # Programar la actualización con el modelo actual
             GLib.idle_add(self.update_model_button)
             # Configurar visibilidad inicial del botón de modelo por defecto
@@ -302,7 +302,7 @@ class ChatSidebar(Gtk.Box):
             debug_print("ChatSidebar: Saltando actualización de subtítulo de temperatura (adjustment o temperature_row no inicializados).")
 
     def _on_model_loaded(self, client, model_id):
-        """Callback para la señal model-loaded del LLMClient."""
+        """Callback para la señal 'ready' del backend LLM (modelo cargado)."""
         debug_print(f"ChatSidebar: Model loaded: {model_id}")
 
         # Obtener el proveedor del modelo cargado

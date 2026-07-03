@@ -12,15 +12,36 @@ Evaluated 2026-07-03:
 | Packaging | In Arch repos (`python-nbxmpp`), PyPI `nbxmpp` | PyPI | — |
 | Fit with our stack | Perfect: same GObject signal world as `LLMClient`, zero loop-integration work | Needs asyncio loop in a worker thread + `GLib.idle_add` bridging (pattern already proven in `llm_client.py`) | — |
 
-**Decision:** start the spike with **nbxmpp**. Its GLib-native design
-removes the whole asyncio↔GTK integration problem, and Gajim's source is
-a working GTK4 reference for every XEP we need. If the spike shows the
-API is too Gajim-coupled for our simple use case, fall back to slixmpp
-in an isolated thread (the `LLMClient` threading pattern applies as-is).
+**Decision (confirmed by spike, 2026-07-03):** **nbxmpp 7.2.0**.
+The spike (`spike/spike_nbxmpp.py`) passed all four checks against
+yax.im — connect+auth, roster fetch, message round-trip, XEP-0085
+chat-state — running directly on the GLib mainloop in ~120 lines.
+slixmpp fallback not needed.
 
-The spike (task 1) must demonstrate: connect to yax.im, auth, fetch
-roster, send/receive a message, receive a chat-state notification —
-in a standalone script, before any UI work.
+### Spike findings (API gotchas for T3)
+
+- `Client` is `Observable`: `subscribe('connected'|'disconnected'|
+  'connection-failed', cb)`; incoming stanzas via
+  `register_handler(StanzaHandler(name='message', callback=cb))` where
+  the callback gets `(client, stanza, properties)`.
+- **Wrong password fails silently** unless you subscribe to
+  `'disconnected'` and inspect `client.get_error()` — `'connection-failed'`
+  only fires for transport-level failures. `XmppClient` must map both
+  paths to its `error`/`state-changed` signals.
+- `properties.has_chatstate` / `properties.chatstate` are properties,
+  not methods; chatstate arrives on the same message handler.
+- An initial `Presence()` must be sent after connect or the server
+  won't route incoming messages to the resource. Moreover (found in T3):
+  the startup order must be roster → initial presence → announce
+  "connected"; if a message is sent before the initial presence, the
+  server treats us as offline and queues it instead of delivering.
+- A deliberate `client.disconnect()` surfaces as
+  `StreamError.STREAM: stream-end` in `get_error()` — a session must
+  remember it requested the disconnect to avoid reporting it as an error.
+- Roster: `client.get_module('Roster').request_roster()` returns a
+  `Task`; use `add_done_callback(cb)` + `task.finish()`.
+- Messages sent to your own bare JID are reflected back by the server —
+  handy for tests without a second account.
 
 ## Backend abstraction
 
@@ -57,13 +78,28 @@ ChatBackend (informal interface — duck-typed GObject)
 - Account setup: minimal dialog reachable from the model/contact
   selector ("Add XMPP account…"). Welcome-wizard integration is Layer 2.
 
-## Selector integration
+## Selector integration (revised in T5/T6, 2026-07-03)
 
-`wide_model_selector.py` / `model_selector.py` currently list providers →
-models. Add a top-level "XMPP contacts" section fed by the roster when an
-account is configured (plus the "Add XMPP account…" entry when not).
-Selecting a contact opens a `ChatWindow` bound to an `XmppClient`
-conversation instead of an `LLMClient`.
+Original plan: add an "XMPP contacts" section inside
+`wide_model_selector.py` / `model_selector.py`. Revised after inspecting
+that code — it's tightly coupled to `ModelSelectionManager` (API keys,
+provider aliases, dynamic reload) and touching it risks the regression
+criterion (LLM flow must stay identical).
+
+**Decision:** XMPP conversations get a separate entry point instead:
+an application action (`app.new-xmpp-conversation`, same pattern as
+the existing `rename`/`delete`/`about` actions in
+`chat_application.py`) opens a small roster-picker dialog — or the
+account setup dialog first, if no account is configured yet. The LLM
+model selector is untouched. Merging XMPP into that selector can
+happen later as a Layer 2+ polish item once the backend abstraction
+has proven itself.
+
+`LLMChatWindow` gains an optional `backend=` constructor parameter: if
+given, it's used as-is (skipping `LLMClient` construction and the
+model/provider-specific UI wiring); if omitted, behavior is exactly
+what it is today. This keeps the injection point minimal and the
+regression surface small.
 
 ## What we deliberately don't build (MVP)
 

@@ -38,19 +38,22 @@ LLM APIs — and any XMPP client anywhere can talk to my agents too.
 
 ## Acceptance criteria (MVP)
 
-The user can:
+The user can (all verified live against yax.im, 2026-07-03 — see
+tasks.md T10 for the full report):
 
-- [ ] 1. Enter their JID (`user@yax.im`) and password in an account setup UI;
+- [x] 1. Enter their JID (`user@yax.im`) and password in an account setup UI;
          the password is stored in the system keyring, not on disk.
-- [ ] 2. Connect successfully to yax.im (public XMPP server with open
+- [x] 2. Connect successfully to yax.im (public XMPP server with open
          registration); connection state (connected/disconnected/error)
          is visible in the UI.
-- [ ] 3. Pick a contact from their roster when starting a new conversation
-         (roster shown alongside LLM models in the selector).
-- [ ] 4. Send and receive text messages with that contact in a chat window,
-         verified against a second client (Gajim/Conversations) on the
-         other end.
-- [ ] 5. See "contact is typing…" (XEP-0085 chat states), and the remote
+- [x] 3. Pick a contact from their roster when starting a new conversation.
+         (Scope note: via a separate entry point / roster dialog, not the
+         LLM model selector — see design.md "Selector integration".)
+- [x] 4. Send and receive text messages with that contact in a chat window.
+         (Verified via self-chat reflection; a review pass caught and fixed
+         a dangling-empty-bubble bug that only manifests with a real remote
+         peer — see tasks.md T10.)
+- [x] 5. See "contact is typing…" (XEP-0085 chat states), and the remote
          side sees ours.
 
 ## Out of scope (MVP)

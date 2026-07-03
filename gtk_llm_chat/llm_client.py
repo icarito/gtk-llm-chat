@@ -18,19 +18,16 @@ from .db_operations import ChatHistory
 from .debug_utils import debug_print
 
 from .chat_application import _
+from .chat_backend import ChatBackend
 
 DEFAULT_CONVERSATION_NAME = lambda: _("New Conversation")
 
-class LLMClient(GObject.Object):
-    __gsignals__ = {
-        'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-        'error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-        'finished': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
-        'model-loaded': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-    }
+class LLMClient(ChatBackend):
+    # Señales heredadas de ChatBackend: response, error, finished,
+    # ready (antes 'model-loaded'), state-changed.
 
     def __init__(self, config=None, chat_history=None, fragments_path: Optional[str] = None):
-        GObject.Object.__init__(self)
+        ChatBackend.__init__(self)
         self.config = config or {}
         self.model = None
         self.conversation = None
@@ -110,8 +107,8 @@ class LLMClient(GObject.Object):
             # Crear conversación en BD
             self.chat_history.create_conversation_if_not_exists(new_cid, DEFAULT_CONVERSATION_NAME(), model_id)
 
-        # Emitir la señal model-loaded para que la UI se actualice
-        self.emit('model-loaded', model_id)
+        # Emitir la señal ready para que la UI se actualice
+        self.emit('ready', model_id)
         debug_print(f"LLMClient: Modelo {model_id} cargado y conversación reinicializada.")
         return True
 
@@ -166,7 +163,7 @@ class LLMClient(GObject.Object):
             elif not current_cid and conversation_recreated_or_model_changed:
                  debug_print("LLMClient: New conversation created, no prior cid to reload history from.")
 
-            GLib.idle_add(self.emit, 'model-loaded', self.model.model_id)
+            GLib.idle_add(self.emit, 'ready', self.model.model_id)
         except llm.UnknownModelError as e:
             debug_print(f"LLMClient: Error - Unknown model: {e}")
             self._init_error = str(e)
@@ -331,6 +328,10 @@ class LLMClient(GObject.Object):
     def get_model_id(self):
         self._ensure_model_loaded()
         return self.model.model_id if self.model else llm.get_default_model()
+
+    def get_display_name(self):
+        """ChatBackend: para un backend LLM el nombre visible es el modelo."""
+        return self.get_model_id()
 
     def get_conversation_id(self):
         self._ensure_model_loaded()

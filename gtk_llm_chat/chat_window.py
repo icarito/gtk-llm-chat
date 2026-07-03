@@ -34,7 +34,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     A chat window
     """
 
-    def __init__(self, config=None, chat_history=None, **kwargs):
+    def __init__(self, config=None, chat_history=None, backend=None, **kwargs):
         super().__init__(**kwargs)
         self.insert_action_group('app', self.get_application())
 
@@ -68,9 +68,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
-        # Inicializar LLMClient con la configuración
-        # self.llm will be initialized later, after UI setup potentially
-        self.llm = None
+        # Backend de conversación (contrato ChatBackend). Si se inyecta uno
+        # (p.ej. XmppConversation), se usa tal cual y se omite todo lo
+        # específico de LLMClient (sidebar de modelo, modelo por defecto).
+        # Si no, el comportamiento es exactamente el de siempre: se crea
+        # un LLMClient más abajo, tras el setup básico de la UI.
+        self.backend = backend
+        self._injected_backend = backend is not None
+        self._composing_timeout_id = None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -126,12 +131,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
 
+        # --- Indicador de estado de conexión (solo backends no-LLM, spec 001) ---
+        self.connection_status_label = Gtk.Label()
+        self.connection_status_label.add_css_class("dim-label")
+        self.connection_status_label.add_css_class("caption")
+        self.connection_status_label.set_visible(self._injected_backend)
+        if self._injected_backend:
+            self.header.pack_start(self.connection_status_label)
+
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
         resource_manager.set_widget_icon_name(self.sidebar_button, "open-menu-symbolic") # O "view-reveal-symbolic"
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
+        # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
+        self.sidebar_button.set_visible(not self._injected_backend)
 
         # Crear botón Rename
         rename_button = Gtk.Button()
@@ -221,56 +236,74 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_content(chat_content_box)
 
         # --- Panel Lateral (Sidebar) ---
-        # Initialize LLMClient *after* basic UI setup
-        try:
-            debug_print(f"Inicializando LLMClient con config: {self.config}")
-            self.llm = LLMClient(self.config, self.chat_history)
-            # Connect signals *here*
-            self.llm.connect('model-loaded', self._on_model_loaded)  # Ensure this is connected
-            self.llm.connect('response', self._on_llm_response)
-            self.llm.connect('error', self._on_llm_error)
-            self.llm.connect('finished', self._on_llm_finished)
-            
-            if self.cid:
-                debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
-            else:
-                debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
-                
-        except Exception as e:
-            debug_print(_(f"Fatal error starting LLMClient: {e}"))
-            # Display error in UI instead of exiting?
-            error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
-            self.messages_box.append(error_widget)
-            self.set_enabled(False)  # Disable input if LLM fails critically
-            # Optionally: sys.exit(1) if it should still be fatal
-
-        # Obtener el modelo predeterminado o el modelo de la conversación activa
-        if not self.config.get('cid'):
-            default_model_id = get_default_model()
-            if default_model_id:
-                self.config['model'] = default_model_id
-                debug_print(f"Usando modelo predeterminado: {default_model_id}")
+        if self._injected_backend:
+            # Backend no-LLM (p.ej. XmppConversation): ya viene construido
+            # y conectado a su sesión propia. Solo cablear las señales del
+            # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
+            self.backend.connect('ready', self._on_backend_ready)
+            self.backend.connect('response', self._on_llm_response)
+            self.backend.connect('error', self._on_llm_error)
+            self.backend.connect('finished', self._on_llm_finished)
+            self.backend.connect('state-changed', self._on_backend_state_changed)
+            self.backend.connect('typing', self._on_backend_typing)
+            self.title_widget.set_subtitle(self.backend.get_display_name())
+            # Estado inicial: la sesión puede ya estar 'connected' antes de
+            # que esta ventana exista (el roster picker implica sesión viva).
+            session = getattr(self.backend, 'session', None)
+            self._last_connection_state = session.state if session else 'connected'
+            self._update_connection_status(self._last_connection_state)
+            self.model_sidebar = None
         else:
-            model_id = self.llm.get_model_id()
-            self.config['model'] = model_id
-            debug_print(f"Usando modelo de la conversación: {model_id}")
-            
-            # Cargar el título de la conversación existente si hay un cid
+            # Initialize the backend *after* basic UI setup
             try:
-                conversation = self.chat_history.get_conversation(self.cid)
-                if conversation and conversation.get('title'):
-                    title = conversation['title']
-                    self.set_conversation_name(title)
-                    debug_print(f"Cargando título de conversación existente: {title}")
+                debug_print(f"Inicializando LLMClient con config: {self.config}")
+                self.backend = LLMClient(self.config, self.chat_history)
+                # Connect ChatBackend signals *here*
+                self.backend.connect('ready', self._on_backend_ready)
+                self.backend.connect('response', self._on_llm_response)
+                self.backend.connect('error', self._on_llm_error)
+                self.backend.connect('finished', self._on_llm_finished)
+
+                if self.cid:
+                    debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
+                else:
+                    debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
+
             except Exception as e:
-                debug_print(f"Error al cargar el título de la conversación: {e}")
+                debug_print(_(f"Fatal error starting LLMClient: {e}"))
+                # Display error in UI instead of exiting?
+                error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
+                self.messages_box.append(error_widget)
+                self.set_enabled(False)  # Disable input if LLM fails critically
+                # Optionally: sys.exit(1) if it should still be fatal
 
-        self.title_widget.set_subtitle(self.config['model'])
+            # Obtener el modelo predeterminado o el modelo de la conversación activa
+            if not self.config.get('cid'):
+                default_model_id = get_default_model()
+                if default_model_id:
+                    self.config['model'] = default_model_id
+                    debug_print(f"Usando modelo predeterminado: {default_model_id}")
+            else:
+                model_id = self.backend.get_model_id()
+                self.config['model'] = model_id
+                debug_print(f"Usando modelo de la conversación: {model_id}")
 
-        # Crear el sidebar con el modelo actual
-        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.llm)
-        # Establecer el panel lateral en el split_view
-        self.split_view.set_sidebar(self.model_sidebar)
+                # Cargar el título de la conversación existente si hay un cid
+                try:
+                    conversation = self.chat_history.get_conversation(self.cid)
+                    if conversation and conversation.get('title'):
+                        title = conversation['title']
+                        self.set_conversation_name(title)
+                        debug_print(f"Cargando título de conversación existente: {title}")
+                except Exception as e:
+                    debug_print(f"Error al cargar el título de la conversación: {e}")
+
+            self.title_widget.set_subtitle(self.config['model'])
+
+            # Crear el sidebar con el modelo actual
+            self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.backend)
+            # Establecer el panel lateral en el split_view
+            self.split_view.set_sidebar(self.model_sidebar)
 
         # --- Ensamblado Final ---
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
@@ -298,7 +331,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_sidebar_visibility_changed(self, split_view, param):
         show_sidebar = split_view.get_show_sidebar()
         if not show_sidebar:
-            self.model_sidebar.stack.set_visible_child_name("actions")
+            if self.model_sidebar is not None:
+                self.model_sidebar.stack.set_visible_child_name("actions")
             self.input_text.grab_focus()
 
     def _setup_css(self):
@@ -423,14 +457,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         else:
             debug_print("Conversation ID is not available yet. Title update deferred.")
             # Schedule the title update for the next prompt
-            def update_title_on_next_prompt(llm_client, response):
+            def update_title_on_next_prompt(backend, response):
                 conversation_id = self.config.get('cid')
                 debug_print(f"Conversation ID post-respuesta: {conversation_id}")
                 if conversation_id:
                     self.chat_history.set_conversation_title(
                         conversation_id, self.title_entry.get_text())
-                    self.llm.disconnect_by_func(update_title_on_next_prompt)
-            self.llm.connect('response', update_title_on_next_prompt)
+                    self.backend.disconnect_by_func(update_title_on_next_prompt)
+            self.backend.connect('response', update_title_on_next_prompt)
         self.header.set_title_widget(self.title_widget)
         new_title = self.title_entry.get_text()
 
@@ -458,21 +492,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             app.on_delete_activate(None, None)
             return True
 
-        # Ctrl+M: Abrir selector de modelo
+        # Ctrl+M: Abrir selector de modelo (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_m and state & Gdk.ModifierType.CONTROL_MASK:
-            # Mostrar el sidebar y cambiar a la página del selector de modelo
-            self.split_view.set_show_sidebar(True)
-            if hasattr(self.model_sidebar, 'stack'):
-                self.model_sidebar.stack.set_visible_child_name("model_selector")
+            if self.model_sidebar is not None:
+                # Mostrar el sidebar y cambiar a la página del selector de modelo
+                self.split_view.set_show_sidebar(True)
+                if hasattr(self.model_sidebar, 'stack'):
+                    self.model_sidebar.stack.set_visible_child_name("model_selector")
             return True
 
-        # Ctrl+S: Cambiar system prompt
+        # Ctrl+S: Cambiar system prompt (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_s and state & Gdk.ModifierType.CONTROL_MASK:
-            # Mostrar el sidebar y abrir el diálogo de system prompt
-            self.split_view.set_show_sidebar(True)
-            if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
-                # Simular click en el botón de system prompt
-                self.model_sidebar._on_system_prompt_button_clicked(None)
+            if self.model_sidebar is not None:
+                # Mostrar el sidebar y abrir el diálogo de system prompt
+                self.split_view.set_show_sidebar(True)
+                if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
+                    # Simular click en el botón de system prompt
+                    self.model_sidebar._on_system_prompt_button_clicked(None)
             return True
 
         # Ctrl+N: Nueva conversación
@@ -494,6 +530,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Ajustar altura entre 3 y 6 líneas
         new_height = min(max(lines * 20, 60), 120)
         self.input_text.set_size_request(-1, new_height)
+
+        # Notificar 'composing' al backend (spec 001, T8). No-op en LLMClient.
+        if self.backend is not None:
+            has_text = buffer.get_char_count() > 0
+            self.backend.notify_composing(has_text)
+            if self._composing_timeout_id:
+                GLib.source_remove(self._composing_timeout_id)
+                self._composing_timeout_id = None
+            if has_text:
+                # Sin más tecleo en 5s, avisar que se dejó de escribir
+                self._composing_timeout_id = GLib.timeout_add_seconds(
+                    5, self._on_composing_timeout)
+
+    def _on_composing_timeout(self):
+        self._composing_timeout_id = None
+        if self.backend is not None:
+            self.backend.notify_composing(False)
+        return GLib.SOURCE_REMOVE
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_Return:
@@ -540,12 +594,46 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         return message_widget
 
-    def _on_model_loaded(self, llm_client, model_id):
-        """Maneja el evento cuando se carga un modelo."""
-        debug_print(f"Modelo cargado correctamente: {model_id}")
-        
-        # Actualizar el título de la ventana con el nombre del modelo
-        self.title_widget.set_subtitle(model_id)
+    def _update_connection_status(self, state):
+        """Refleja el estado de conexión del backend en el header (spec 001, T7)."""
+        labels = {
+            'connecting': _("Connecting…"),
+            'connected': _("Connected"),
+            'disconnected': _("Disconnected"),
+        }
+        self.connection_status_label.set_label(labels.get(state, state))
+        self.connection_status_label.remove_css_class("error")
+        if state == 'disconnected':
+            self.connection_status_label.add_css_class("error")
+
+    def _restore_connection_status(self):
+        """Restaura el indicador al último estado de conexión conocido tras
+        mostrar un error no fatal (spec 001, review fix)."""
+        self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
+        return GLib.SOURCE_REMOVE
+
+    def _on_backend_state_changed(self, backend, state):
+        """Maneja la señal 'state-changed' del backend (spec 001, T7)."""
+        debug_print(f"Estado de conexión del backend: {state}")
+        self._last_connection_state = state
+        self._update_connection_status(state)
+
+    def _on_backend_typing(self, backend, is_typing):
+        """Maneja la señal 'typing' del backend: el contacto está escribiendo
+        (spec 001, T8, XEP-0085). Reusa el indicador de conexión, ya que
+        ambos son estados efímeros de la contraparte."""
+        if is_typing:
+            self.connection_status_label.set_label(_("Typing…"))
+            self.connection_status_label.remove_css_class("error")
+        else:
+            self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
+
+    def _on_backend_ready(self, backend, display_name):
+        """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
+        debug_print(f"Backend listo: {display_name}")
+
+        # Actualizar el subtítulo de la ventana con el nombre a mostrar
+        self.title_widget.set_subtitle(display_name)
         
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
@@ -614,20 +702,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
         )
 
         if text:
+            # Ya se envía el mensaje: cancelar el aviso pendiente de 'composing'
+            if self._composing_timeout_id:
+                GLib.source_remove(self._composing_timeout_id)
+                self._composing_timeout_id = None
             # Display user message
             self.display_message(text, sender="user")
-            # Deshabilitar entrada y empezar tarea LLM
+            # Deshabilitar entrada y empezar tarea
             self.set_enabled(False)
-            # NEW: Crear el widget de respuesta aquí
-            self.current_message_widget = self.display_message("", sender="assistant")
-            # Call _on_llm_response with an empty string to update the widget
-            self._on_llm_response(self.llm, "")
+            if self._injected_backend:
+                # Backends de mensajería (XMPP): no hay una respuesta que
+                # rellenar; los mensajes entrantes crean su propia burbuja
+                # cuando llegan (_on_llm_response). No dejar un placeholder.
+                self.current_message_widget = None
+            else:
+                # LLM: crear ya la burbuja de respuesta que el stream irá
+                # rellenando vía 'response'.
+                self.current_message_widget = self.display_message("", sender="assistant")
+                self._on_llm_response(self.backend, "")
             GLib.idle_add(self._start_llm_task, text)
 
     def _start_llm_task(self, prompt_text):
-        """Inicia la tarea del LLM con el prompt dado."""
-        # Enviar el prompt usando LLMClient
-        self.llm.send_message(prompt_text)
+        """Inicia la tarea del backend con el prompt dado."""
+        # Enviar el prompt usando el ChatBackend
+        self.backend.send_message(prompt_text)
 
         # Devolver False para que idle_add no se repita
         return GLib.SOURCE_REMOVE
@@ -635,6 +733,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
         debug_print(message, file=sys.stderr)
+        if self._injected_backend:
+            # Un error de sesión (p.ej. roster fallido) no siempre viene
+            # acompañado de 'state-changed'; reflejarlo brevemente en el
+            # header. Pero si la sesión sigue conectada (error no fatal),
+            # restaurar el estado real tras unos segundos para no dejar
+            # "Error" pegado permanentemente.
+            self.connection_status_label.set_label(_("Error"))
+            self.connection_status_label.add_css_class("error")
+            session = getattr(self.backend, 'session', None)
+            if session is not None and session.is_connected:
+                GLib.timeout_add_seconds(4, self._restore_connection_status)
         # Verificar si el widget actual existe y es hijo del messages_box
         if self.current_message_widget is not None:
             is_child = (self.current_message_widget.get_parent() ==
@@ -667,7 +776,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Actualizar el conversation_id en la configuración si no existe
         if success and not self.config.get('cid'):
-            conversation_id = self.llm.get_conversation_id()
+            conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
                 self.cid = conversation_id
@@ -682,13 +791,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     app._window_by_cid[conversation_id] = self
 
     def _on_llm_response(self, llm_client, response):
-        """Maneja la señal de respuesta del LLM"""
+        """Maneja la señal de respuesta del backend.
+
+        LLM: rellena la burbuja de assistant creada al enviar (streaming).
+        Backends de mensajería (XMPP): cada 'response' es un mensaje
+        entrante completo e independiente; crea su propia burbuja.
+        """
+        if self._injected_backend:
+            self.accumulated_response = ""
+            self.current_message_widget = self.display_message(
+                response, sender="assistant")
+            GLib.idle_add(self._scroll_to_bottom, False)
+            return
+
         if not self.current_message_widget:
             return
 
         # Actualizar el conversation_id en la configuración al recibir la primera respuesta
         if not self.config.get('cid'):
-            conversation_id = self.llm.get_conversation_id()
+            conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
                 self.cid = conversation_id
@@ -727,6 +848,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.timeout_add(50, scroll_after)
 
     def _on_close_request(self, window):
+        # Cancelar el aviso pendiente de 'composing' para que no dispare
+        # contra una ventana ya destruida (enviaría un chatstate espurio).
+        if self._composing_timeout_id:
+            GLib.source_remove(self._composing_timeout_id)
+            self._composing_timeout_id = None
+        # Liberar el backend (XmppConversation: suelta sus handlers de la
+        # sesión compartida; LLMClient: no-op). Seguro llamarlo siempre.
+        if self.backend is not None:
+            self.backend.shutdown()
         # Eliminar del registro de ventanas si corresponde
         app = self.get_application()
         cid = getattr(self, 'cid', None)

@@ -179,6 +179,10 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+        new_xmpp_action = Gio.SimpleAction.new("new-xmpp-conversation", None)
+        new_xmpp_action.connect("activate", self.on_new_xmpp_conversation_activate)
+        self.add_action(new_xmpp_action)
+
     def OpenConversation(self, cid):
         """Abrir una nueva conversación dado un CID"""
         debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
@@ -362,8 +366,13 @@ class LLMChatApplication(Adw.Application):
             # Si hay error con el asistente, proceder con la ventana normal
             self.open_conversation_window()
 
-    def _create_new_window_with_config(self, config):
-        """Crea una nueva ventana con la configuración dada."""
+    def _create_new_window_with_config(self, config, backend=None):
+        """Crea una nueva ventana con la configuración dada.
+
+        Args:
+            backend: ChatBackend ya construido (p.ej. XmppConversation) a
+                inyectar en la ventana en vez del LLMClient por defecto.
+        """
         debug_print(f"Creando nueva ventana con configuración: {config}")
 
         from .chat_window import LLMChatWindow
@@ -371,7 +380,8 @@ class LLMChatApplication(Adw.Application):
         chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración
-        window = LLMChatWindow(application=self, config=config, chat_history=chat_history)
+        window = LLMChatWindow(application=self, config=config,
+                                chat_history=chat_history, backend=backend)
         resource_manager.set_widget_icon_name(window, "org.fuentelibre.gtk_llm_Chat")
 
         # Configurar el manejador de eventos de teclado
@@ -493,6 +503,47 @@ class LLMChatApplication(Adw.Application):
             copyright="© 2024 Sebastian Silva"
         )
         about_dialog.present()
+
+    def on_new_xmpp_conversation_activate(self, action, param):
+        """Abre el flujo de conversación XMPP (spec 001): cuenta -> roster -> ventana.
+
+        Punto de entrada deliberadamente separado del selector de modelos
+        LLM (ver specs/001-xmpp-backend/design.md) para no arriesgar el
+        flujo LLM existente.
+        """
+        from .xmpp_account import load_account
+        account = load_account()
+        if account is None:
+            from .xmpp_account_dialog import XmppAccountDialog
+
+            def on_account_ready(jid):
+                self.on_new_xmpp_conversation_activate(None, None)
+
+            dialog = XmppAccountDialog(
+                parent=self.get_active_window(), on_account_ready=on_account_ready)
+            dialog.present()
+            return
+
+        jid, password = account
+        session = getattr(self, '_xmpp_session', None)
+        if session is None or not session.is_connected:
+            from .xmpp_client import XmppSession
+            session = XmppSession(jid, password)
+            self._xmpp_session = session
+            session.connect_to_server()
+
+        self._open_xmpp_roster_picker(session)
+
+    def _open_xmpp_roster_picker(self, session):
+        from .xmpp_roster_dialog import XmppRosterDialog
+
+        def on_contact_selected(bare_jid):
+            conversation = session.get_conversation(bare_jid)
+            self._create_new_window_with_config({}, backend=conversation)
+
+        dialog = XmppRosterDialog(
+            session, parent=self.get_active_window(), on_contact_selected=on_contact_selected)
+        dialog.present()
 
     def open_conversation_window(self, config=None):
         """
