@@ -12,6 +12,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw
 
 from .chat_application import _
+from .resource_manager import resource_manager
 from .xmpp_client import XmppSession
 
 
@@ -67,6 +68,7 @@ class XmppRosterSidebar(Gtk.Box):
             row = Adw.ActionRow(title=_("No contacts in your roster yet"))
             row.set_selectable(False)
             self.list_box.append(row)
+            self._append_add_contact_row()
             return
 
         for bare_jid, item in sorted(self.session.roster_items.items()):
@@ -79,6 +81,40 @@ class XmppRosterSidebar(Gtk.Box):
             row.add_prefix(dot)
             self.list_box.append(row)
             self._rows[bare_jid] = (row, dot)
+
+        self._append_add_contact_row()
+
+    def _append_add_contact_row(self):
+        row = Adw.ActionRow(title=_("Add Contact…"))
+        row.add_css_class("dim-label")
+        row.add_prefix(resource_manager.create_icon_widget("list-add-symbolic"))
+        row.set_activatable(True)
+        row.bare_jid = None  # marca especial: no es un contacto
+        row.connect("activated", lambda _r: self._show_add_contact_dialog())
+        self.list_box.append(row)
+
+    def _show_add_contact_dialog(self):
+        dialog = Adw.MessageDialog(
+            transient_for=self.get_root(),
+            heading=_("Add Contact"),
+            body=_("Enter the JID of the contact you want to add (e.g. user@example.org):"),
+        )
+        entry = Gtk.Entry(placeholder_text="user@example.org")
+        entry.set_activates_default(True)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("add", _("Add"))
+        dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("add")
+
+        def on_response(_dialog, response):
+            if response == "add":
+                jid = entry.get_text().strip()
+                if jid:
+                    self.session.add_contact(jid)
+
+        dialog.connect("response", on_response)
+        dialog.present()
 
     def _on_presence_changed(self, _session, bare_jid, state):
         entry = self._rows.get(bare_jid)

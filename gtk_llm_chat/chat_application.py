@@ -304,18 +304,20 @@ class LLMChatApplication(Adw.Application):
 
         # Solo proceder con la ventana si no es modo applet
         if not only_applet:
-            # Verificar si se necesita mostrar el asistente de configuración inicial
-            if self._needs_initial_setup:
-                debug_print("Mostrando asistente de configuración inicial desde command_line")
-                self._show_welcome_window()
-            else:
-                # Si no hay argumentos relevantes y la app ya está corriendo, 
-                # crear una nueva ventana vacía
-                if not has_args and self.get_active_window():
-                    debug_print("Aplicación ya en ejecución sin argumentos, creando nueva ventana")
-                    self.open_conversation_window({})
+            if has_args:
+                # Intención explícita (--cid, --model, --template): abrir
+                # directo, sin picker. Este es el único camino que asume LLM,
+                # y solo porque el usuario ya lo pidió explícitamente.
+                if self._needs_initial_setup:
+                    debug_print("Mostrando asistente de configuración inicial desde command_line")
+                    self._show_welcome_window()
                 else:
                     self.open_conversation_window(config)
+            else:
+                # Arranque genérico (sin argumentos): no asumir LLM ni XMPP,
+                # dejar que el usuario elija (spec 003).
+                debug_print("Sin argumentos: mostrando el selector de tipo de chat")
+                self._show_chat_type_picker()
                     
         if legacy_applet:
             self._applet_loaded = True
@@ -363,13 +365,28 @@ class LLMChatApplication(Adw.Application):
         debug_print("do_activate invocado")
         debug_print(f"do_activate: self._needs_initial_setup = {self._needs_initial_setup}")
 
-        # Verificar si se necesita mostrar el asistente de configuración inicial
-        if self._needs_initial_setup:
-            debug_print("Mostrando asistente de configuración inicial")
-            self._show_welcome_window()
-        else:
-            debug_print("Procediendo con ventana de chat normal")
-            self.open_conversation_window()
+        # Arranque sin argumentos (D-Bus activation / primer lanzamiento):
+        # no asumir LLM ni XMPP, dejar que el usuario elija (spec 003).
+        debug_print("Mostrando el selector de tipo de chat")
+        self._show_chat_type_picker()
+
+    def _show_chat_type_picker(self):
+        """Muestra el selector inicial LLM/XMPP (spec 003): ni un backend ni
+        otro se asumen por defecto."""
+        from .chat_type_picker import ChatTypePickerWindow
+
+        def on_pick_llm():
+            if self._needs_initial_setup:
+                self._show_welcome_window()
+            else:
+                self.open_conversation_window()
+
+        def on_pick_xmpp():
+            self.on_new_xmpp_conversation_activate(None, None)
+
+        picker = ChatTypePickerWindow(
+            self, on_pick_llm=on_pick_llm, on_pick_xmpp=on_pick_xmpp)
+        picker.present()
 
     def _show_welcome_window(self):
         """Muestra el asistente de configuración inicial."""

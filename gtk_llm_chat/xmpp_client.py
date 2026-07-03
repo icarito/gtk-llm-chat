@@ -281,6 +281,15 @@ class XmppSession(GObject.Object):
             return
         self._client.get_module('BasePresence').unsubscribed(JID.from_string(bare_jid))
 
+    def add_contact(self, bare_jid: str):
+        """Añade un contacto nuevo: pide ver su presencia. El contacto
+        aparecerá en el roster (vía roster-push del servidor) aunque él
+        aún no haya aceptado; su presencia quedará offline hasta que lo
+        haga."""
+        if not self.is_connected:
+            return
+        self._client.get_module('BasePresence').subscribe(JID.from_string(bare_jid))
+
     # --- Conversaciones ---
 
     def get_conversation(self, bare_jid: str) -> 'XmppConversation':
