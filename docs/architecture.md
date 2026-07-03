@@ -17,22 +17,33 @@ archived at [archive/spec-2025.md](archive/spec-2025.md).
                     │  ChatWindow (+ UI)  │ chat_window.py, widgets.py,
                     │  sidebar, selector  │ chat_sidebar.py, markdownview.py
                     └──────────┬──────────┘
-                               │ GObject signals (response/error/finished/model-loaded)
-                    ┌──────────▼──────────┐        ┌────────────────────┐
-                    │      LLMClient      │───────▶│ python-llm (in-proc)│
-                    │  llm_client.py      │        │ + provider plugins  │
-                    └──────────┬──────────┘        └────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │     ChatHistory     │──▶ ~/…/io.datasette.llm/logs.db
-                    │  db_operations.py   │    (schema owned by llm.migrations)
-                    └─────────────────────┘
+                               │ ChatBackend contract (GObject signals:
+                               │ response/error/finished/ready/state-changed/typing)
+                    ┌──────────▼──────────────────────────┐
+                    │            ChatBackend               │  chat_backend.py
+                    ├──────────────────┬───────────────────┤
+        ┌───────────▼──────┐   ┌───────▼───────────────┐
+        │    LLMClient     │   │   XmppConversation     │  xmpp_client.py
+        │  llm_client.py   │   │  (per bare JID)        │
+        └────────┬─────────┘   └───────┬────────────────┘
+                 │                     │ shares one
+        ┌────────▼─────────┐   ┌───────▼───────────────┐
+        │ python-llm       │   │   XmppSession          │──▶ nbxmpp ──▶ XMPP server
+        │ (in-proc) + plugins   │  (one per account)     │
+        └────────┬─────────┘   └────────────────────────┘
+                 │
+        ┌────────▼─────────┐
+        │   ChatHistory    │──▶ ~/…/io.datasette.llm/logs.db
+        │ db_operations.py │    (LLM only; XMPP is not persisted)
+        └──────────────────┘
 ```
 
 Key decision: the LLM runs **in-process** through the `llm` Python API.
 There is no subprocess, no stdout parsing. Streaming happens in a worker
 thread; chunks are marshalled to the main loop with `GLib.idle_add` and
-emitted as GObject signals.
+emitted as GObject signals. XMPP (spec 001) reuses the same window and
+the same `ChatBackend` signal vocabulary, but runs entirely on the GLib
+main loop via nbxmpp — no threads needed there.
 
 ## Modules
 
@@ -66,14 +77,42 @@ emitted as GObject signals.
 - `welcome.py` — first-run assistant (API keys, model selection,
   .desktop integration).
 
-### LLM integration
+### Conversation backends
 
-- `llm_client.py` — `LLMClient(GObject.Object)`. Signals: `response(str)`,
-  `error(str)`, `finished(bool)`, `model-loaded(str)`. Deferred model
-  loading; `send_message()` streams in a thread. Cancellation supported.
+`ChatWindow` does not talk to a concrete client; it depends on a
+`ChatBackend` contract, so the same window drives an LLM model or an
+XMPP contact.
+
+- `chat_backend.py` — `ChatBackend(GObject.Object)`, the contract.
+  Signals: `response(str)`, `error(str)`, `finished(bool)`,
+  `ready(str)` (backend can send / display name), `state-changed(str)`
+  (connection state; local backends may never emit it), `typing(bool)`.
+  Methods: `send_message`, `cancel`, `get_conversation_id`,
+  `get_display_name`, `notify_composing`, `shutdown`. `response` may
+  stream (many emits) or arrive whole (one emit); always followed by
+  `finished`. `LLMChatWindow(backend=…)` injects a non-LLM backend;
+  when omitted it builds an `LLMClient` and shows the model sidebar.
+- `llm_client.py` — `LLMClient(ChatBackend)`. Deferred model loading;
+  `send_message()` streams in a thread; emits `ready` on model load.
+  Cancellation supported.
+- `xmpp_client.py` — XMPP backend (spec 001). `XmppSession(GObject)`:
+  one nbxmpp connection per account on the GLib main loop, owns state,
+  roster and incoming-message routing; shared by all conversations of
+  that account. `XmppConversation(ChatBackend)`: one per bare JID,
+  maps XMPP messages/chat-states onto the contract (a whole message =
+  `response` + `finished`). See `specs/001-xmpp-backend/` for the
+  design and the nbxmpp gotchas (silent auth failure, startup order,
+  disconnect-as-error).
+- `xmpp_account.py` / `xmpp_account_dialog.py` — XMPP account: JID in a
+  plain JSON file under the user dir, password in the system keyring
+  (Secret Service, service `gtk-llm-chat-xmpp`); the dialog validates
+  by connecting a throwaway session before persisting.
+- `xmpp_roster_dialog.py` — contact picker (separate entry point from
+  the LLM model selector; action `app.new-xmpp-conversation`).
 - `db_operations.py` — `ChatHistory`: read/write conversations in `llm`'s
   own `logs.db` (sqlite-utils + `llm.migrations.migrate`). ULIDs for ids.
-  Thread-local connections.
+  Thread-local connections. **XMPP conversations are not persisted here**
+  (spec 001: no local history in the MVP).
 - `stubs/llm/` — stub of the `llm` module enabling `--no-llm` UI-only mode
   (see `plans/NO_LLM_MODE_DOCUMENTATION.md`).
 

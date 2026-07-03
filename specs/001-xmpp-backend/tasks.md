@@ -117,7 +117,11 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
 
 ## Phase 4 — Hardening & docs
 
-- [ ] **T9. i18n**: new strings wrapped in `_()`; run `./update_po.sh`.
+- [x] **T9. i18n**: new strings wrapped in `_()`; run `./update_po.sh`.
+      *Result (2026-07-03):* all static user-visible strings in the XMPP
+      files already used `_()`; ran `update_po.sh`, new msgids
+      (Connecting…/Connected/Disconnected/Typing…/Add XMPP Account/…)
+      extracted into `po/gtk-llm-chat.pot` and merged into the catalogs.
 - [x] **T10. Verification pass**: walk all five acceptance criteria in
       spec.md against yax.im and check them off; regression pass over
       the LLM flow.
@@ -141,8 +145,14 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       **#4 (cosmetic)** — non-fatal `session-error` left "Error" stuck in
       the header. Fixed: restore last connection state after 4s if still
       connected.
-- [ ] **T11. Docs**: update `docs/architecture.md` (backend abstraction,
+- [x] **T11. Docs**: update `docs/architecture.md` (backend abstraction,
       xmpp_client module) in the same change; add `nbxmpp` + `keyring`
       to pyproject/requirements.
+      *Result (2026-07-03):* architecture.md's big-picture diagram and
+      module list now cover the `ChatBackend` contract, `xmpp_client`,
+      `xmpp_account`/dialog, roster dialog, and the "XMPP not persisted
+      in logs.db" note; also corrected the stale `model-loaded` signal
+      name to `ready`. `nbxmpp` and `keyring` were added to
+      pyproject/requirements in T3/T4.
 - [ ] **T12. Review & archive**: adversarial code review of the branch;
       merge; `git mv specs/001-xmpp-backend specs/archive/`.
