@@ -576,7 +576,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         Ctrl+M: Abrir selector de modelo
         Ctrl+S: Cambiar system prompt
         Ctrl+N: Nueva conversación
+        Ctrl+Q: Salir de la aplicación
         """
+        # Ctrl+Q: Salir de la aplicación (quit explícito, sin importar
+        # si hay sesión XMPP activa — a diferencia de cerrar la última
+        # ventana, esto es una intención inequívoca del usuario).
+        if keyval == Gdk.KEY_q and state & Gdk.ModifierType.CONTROL_MASK:
+            app = self.get_application()
+            if app is not None:
+                app.quit()
+            return True
         # Ctrl+W: Borrar conversación
         if keyval == Gdk.KEY_w and state & Gdk.ModifierType.CONTROL_MASK:
             app = self.get_application()
@@ -961,10 +970,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 if win is self:
                     debug_print(f"Eliminando ventana del registro: {key}")
                     del app._window_by_cid[key]
-        # Lógica de cierre global: si es la última ventana
+        # Lógica de cierre global: si es la última ventana, salir — salvo
+        # que haya una sesión XMPP conectada (spec 003, criterio 4: cerrar
+        # una ventana de chat no debe desloguearte de XMPP, igual que en
+        # cualquier cliente XMPP normal). La app queda viva en segundo
+        # plano y se puede resurgir vía el ícono de la app / D-Bus.
         if len(app.get_windows()) <= 1:
-            debug_print("Última ventana cerrada saliendo de la aplicación (desde chat_window)")
-            app.quit()
+            xmpp_session = getattr(app, '_xmpp_session', None)
+            if xmpp_session is not None and xmpp_session.is_connected:
+                debug_print(
+                    "Última ventana cerrada, pero hay sesión XMPP activa: "
+                    "la app sigue corriendo en segundo plano")
+            else:
+                debug_print("Última ventana cerrada, sin sesión XMPP: saliendo de la aplicación")
+                app.quit()
         # Permitir el cierre de la ventana
         return False
 

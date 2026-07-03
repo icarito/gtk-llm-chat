@@ -43,11 +43,14 @@ served by an in-window sidebar, consistent with the XMPP roster from 002.
          contacts), a row navigates into options. The header toolbar
          uses **two rows** to reduce clutter: row 1 primary actions,
          row 2 contextual.
-- [ ] 4. Lifecycle: closing the last window **quits the app UNLESS an
+- [x] 4. Lifecycle: closing the last window **quits the app UNLESS an
          XMPP session is connected** — closing a chat window must not log
          you out of XMPP (as no XMPP client would). With an active
          session the app keeps running headless and can resurface a
          conversation; with no session, last-window-close quits.
+         (Verified headless 2026-07-03: `_on_close_request` checks
+         `app._xmpp_session.is_connected` before quitting; also added
+         Ctrl+Q as an explicit, unconditional quit shortcut.)
 - [ ] 5. No regression: LLM chat (send/stream/rename/delete) and all of
          001/002's XMPP behavior (chat, typing, roster, presence,
          notifications) keep working.
