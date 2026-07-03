@@ -31,7 +31,13 @@ slixmpp fallback not needed.
 - `properties.has_chatstate` / `properties.chatstate` are properties,
   not methods; chatstate arrives on the same message handler.
 - An initial `Presence()` must be sent after connect or the server
-  won't route incoming messages to the resource.
+  won't route incoming messages to the resource. Moreover (found in T3):
+  the startup order must be roster → initial presence → announce
+  "connected"; if a message is sent before the initial presence, the
+  server treats us as offline and queues it instead of delivering.
+- A deliberate `client.disconnect()` surfaces as
+  `StreamError.STREAM: stream-end` in `get_error()` — a session must
+  remember it requested the disconnect to avoid reporting it as an error.
 - Roster: `client.get_module('Roster').request_roster()` returns a
   `Task`; use `add_done_callback(cb)` + `task.finish()`.
 - Messages sent to your own bare JID are reflected back by the server —

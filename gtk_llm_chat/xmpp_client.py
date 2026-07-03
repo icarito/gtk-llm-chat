@@ -1,0 +1,274 @@
+"""
+xmpp_client.py - backend XMPP para conversar con agentes/contactos (spec 001).
+
+Dos piezas:
+- XmppSession: una conexión XMPP por cuenta (nbxmpp Client sobre el main
+  loop de GLib), compartida por todas las conversaciones. Maneja estado,
+  roster y enrutamiento de mensajes entrantes.
+- XmppConversation: implementa el contrato ChatBackend para un contacto
+  (bare JID). Es lo que consume LLMChatWindow.
+
+Hallazgos del spike (specs/001-xmpp-backend/design.md) aplicados aquí:
+- Una contraseña errada NO dispara 'connection-failed': hay que revisar
+  client.get_error() al recibir 'disconnected'.
+- Hay que enviar Presence inicial o el servidor no rutea mensajes.
+- request_roster() devuelve un Task; el resultado llega por callback.
+"""
+from gi.repository import GLib, GObject
+
+from nbxmpp.client import Client as NbxmppClient
+from nbxmpp.namespaces import Namespace
+from nbxmpp.protocol import JID, Message, Presence
+from nbxmpp.simplexml import Node
+from nbxmpp.structs import StanzaHandler
+
+from .chat_backend import ChatBackend
+from .chat_application import _
+from .debug_utils import debug_print
+
+STATE_DISCONNECTED = 'disconnected'
+STATE_CONNECTING = 'connecting'
+STATE_CONNECTED = 'connected'
+
+RESOURCE = 'gtk-llm-chat'
+
+
+class XmppSession(GObject.Object):
+    """Sesión XMPP de una cuenta, compartida por sus conversaciones.
+
+    Nota: GObject.Object ya define connect()/disconnect() para señales,
+    por eso los métodos de red se llaman connect_to_server() y
+    disconnect_from_server().
+    """
+
+    __gsignals__ = {
+        'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        'session-error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        'roster-updated': (GObject.SignalFlags.RUN_LAST, None, ()),
+        # bare_jid, body — para mensajes sin conversación abierta (T6)
+        'message-received': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+    }
+
+    def __init__(self, jid: str, password: str, resource: str = RESOURCE):
+        GObject.Object.__init__(self)
+        self._jid = JID.from_string(jid)
+        self._password = password
+        self._resource = resource
+        self._client = None
+        self._state = STATE_DISCONNECTED
+        self._disconnect_requested = False
+        # bare jid (str) -> dict(name=..., subscription=...)
+        self.roster_items = {}
+        self._roster_loaded = False
+        # bare jid (str) -> XmppConversation
+        self._conversations = {}
+
+    # --- Estado ---
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @property
+    def is_connected(self) -> bool:
+        return self._state == STATE_CONNECTED
+
+    @property
+    def bare_jid(self) -> str:
+        return str(self._jid.bare)
+
+    def _set_state(self, state: str):
+        if state == self._state:
+            return
+        debug_print(f"XmppSession[{self.bare_jid}]: estado {self._state} -> {state}")
+        self._state = state
+        self.emit('state-changed', state)
+
+    # --- Ciclo de vida de la conexión ---
+
+    def connect_to_server(self):
+        """Inicia la conexión. No bloqueante; el progreso llega por señales."""
+        if self._state != STATE_DISCONNECTED:
+            debug_print(f"XmppSession: connect_to_server ignorado en estado {self._state}")
+            return
+        client = NbxmppClient(log_context=f'xmpp-{self.bare_jid}')
+        client.set_username(self._jid.localpart)
+        client.set_domain(self._jid.domain)
+        client.set_resource(self._resource)
+        client.set_password(self._password)
+        client.subscribe('connected', self._on_connected)
+        client.subscribe('disconnected', self._on_disconnected)
+        client.subscribe('connection-failed', self._on_connection_failed)
+        client.register_handler(
+            StanzaHandler(name='message', callback=self._on_message))
+        self._client = client
+        self._disconnect_requested = False
+        self._set_state(STATE_CONNECTING)
+        client.connect()
+
+    def disconnect_from_server(self):
+        if self._client is not None and self._state != STATE_DISCONNECTED:
+            self._disconnect_requested = True
+            self._client.disconnect()
+
+    def _on_connected(self, _client, _signal_name):
+        # Orden RFC 6121: roster primero, luego presence inicial, y solo
+        # entonces anunciar 'connected'. Si se envía un mensaje antes del
+        # presence, el servidor nos considera offline y lo encola.
+        task = self._client.get_module('Roster').request_roster()
+        task.add_done_callback(self._on_roster)
+
+    def _on_disconnected(self, _client, _signal_name):
+        # Un fallo de autenticación llega por aquí, no por connection-failed
+        error, text, _extra = self._client.get_error()
+        if self._disconnect_requested:
+            # Cierre voluntario: el stream-end resultante no es un error
+            error = None
+        if error is not None:
+            message = f"{error}: {text}" if text else str(error)
+            debug_print(f"XmppSession: desconectado con error: {message}")
+            self.emit('session-error', message)
+        self._set_state(STATE_DISCONNECTED)
+
+    def _on_connection_failed(self, _client, _signal_name):
+        error, text, _extra = self._client.get_error()
+        message = f"{error}: {text}" if text else str(error or _("Connection failed"))
+        debug_print(f"XmppSession: fallo de conexión: {message}")
+        self.emit('session-error', message)
+        self._set_state(STATE_DISCONNECTED)
+
+    # --- Roster ---
+
+    def _on_roster(self, task):
+        try:
+            roster = task.finish()
+        except Exception as err:
+            # Un roster fallido no impide chatear; reportar y seguir
+            debug_print(f"XmppSession: error al pedir roster: {err}")
+            self.emit('session-error', str(err))
+            roster = None
+        if roster is not None:
+            self.roster_items = {}
+            for item in roster.items:
+                self.roster_items[str(item.jid.bare)] = {
+                    'name': item.name,
+                    'subscription': item.subscription,
+                }
+            self._roster_loaded = True
+            debug_print(f"XmppSession: roster con {len(self.roster_items)} contactos")
+        # Presence inicial: sin esto el servidor no rutea mensajes entrantes
+        self._client.send_stanza(Presence())
+        self._set_state(STATE_CONNECTED)
+        if roster is not None:
+            self.emit('roster-updated')
+
+    def get_contact_name(self, bare_jid: str) -> str:
+        item = self.roster_items.get(bare_jid)
+        if item and item.get('name'):
+            return item['name']
+        return bare_jid
+
+    # --- Mensajes ---
+
+    def _on_message(self, _client, _stanza, properties):
+        if properties.jid is None:
+            return
+        if getattr(properties, 'is_carbon_message', False) \
+                and properties.carbon.is_sent:
+            return
+        bare = str(properties.jid.bare)
+        conversation = self._conversations.get(bare)
+        if properties.has_chatstate and conversation is not None:
+            conversation.notify_chatstate(str(properties.chatstate))
+        if not properties.body:
+            return
+        debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
+        if conversation is not None:
+            conversation.deliver(properties.body)
+        else:
+            self.emit('message-received', bare, properties.body)
+
+    def send_text(self, to_bare_jid: str, text: str):
+        # XEP-0085: marcar 'active' junto con cada mensaje
+        chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
+        self._client.send_stanza(
+            Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate]))
+
+    # --- Conversaciones ---
+
+    def get_conversation(self, bare_jid: str) -> 'XmppConversation':
+        """Devuelve (creando si hace falta) el backend para un contacto."""
+        conversation = self._conversations.get(bare_jid)
+        if conversation is None:
+            conversation = XmppConversation(self, bare_jid)
+            self._conversations[bare_jid] = conversation
+        return conversation
+
+    def shutdown(self):
+        self._conversations.clear()
+        self.disconnect_from_server()
+
+
+class XmppConversation(ChatBackend):
+    """ChatBackend para un contacto XMPP. Una instancia por bare JID."""
+
+    __gsignals__ = {
+        # Extra al contrato: el contacto está escribiendo (XEP-0085, T8)
+        'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
+    }
+
+    def __init__(self, session: XmppSession, bare_jid: str):
+        ChatBackend.__init__(self)
+        self.session = session
+        self.bare_jid = bare_jid
+        session.connect('state-changed', self._on_session_state)
+        session.connect('session-error', self._on_session_error)
+        if session.is_connected:
+            GLib.idle_add(self._emit_ready)
+
+    def _emit_ready(self):
+        self.emit('ready', self.get_display_name())
+        return GLib.SOURCE_REMOVE
+
+    def _on_session_state(self, _session, state):
+        self.emit('state-changed', state)
+        if state == STATE_CONNECTED:
+            self.emit('ready', self.get_display_name())
+
+    def _on_session_error(self, _session, message):
+        self.emit('error', message)
+
+    # --- Entrantes (llamados por la sesión) ---
+
+    def deliver(self, body: str):
+        """Un mensaje del contacto: response + finished (sin streaming)."""
+        self.emit('response', body)
+        self.emit('finished', True)
+
+    def notify_chatstate(self, chatstate: str):
+        self.emit('typing', chatstate.endswith('COMPOSING'))
+
+    # --- Contrato ChatBackend ---
+
+    def send_message(self, prompt: str):
+        if not self.session.is_connected:
+            self.emit('error', _("Not connected to the XMPP server"))
+            self.emit('finished', False)
+            return
+        self.session.send_text(self.bare_jid, prompt)
+        # El envío no genera respuesta propia: liberar la UI de inmediato
+        self.emit('finished', True)
+
+    def cancel(self):
+        pass
+
+    def get_conversation_id(self):
+        # Sin historial local en el MVP (spec 001): no hay CID persistente
+        return None
+
+    def get_display_name(self) -> str:
+        return self.session.get_contact_name(self.bare_jid)
+
+    def shutdown(self):
+        # La sesión es compartida; la cierra quien la posee
+        pass

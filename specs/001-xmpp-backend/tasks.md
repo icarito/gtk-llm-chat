@@ -30,9 +30,17 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
 
 ## Phase 2 — XMPP core
 
-- [ ] **T3. `xmpp_client.py`**: `XmppClient(GObject)` — connect/auth,
-      `state-changed` signal, roster fetch, clean shutdown.
-      *Verify:* DEBUG run shows connect→roster against yax.im.
+- [x] **T3. `xmpp_client.py`**: `XmppSession` (una conexión por cuenta:
+      estado, roster, ruteo de entrantes) + `XmppConversation(ChatBackend)`
+      (una por bare JID). Incluye ya el núcleo de send/receive y recepción
+      de chat states (adelanto de T5/T8).
+      *Result (2026-07-03):* verificado headless contra yax.im —
+      round-trip de mensaje sin errores espurios al desconectar, y
+      contraseña errada emite `error` (StreamError.SASL: not-authorized)
+      en vez de fallar en silencio. Lección nueva para design.md: el
+      orden de arranque debe ser roster → presence → 'connected'; si se
+      envía antes del presence inicial el servidor encola el mensaje
+      como offline. Dependencia `nbxmpp` añadida a pyproject/requirements.
 - [ ] **T4. Credentials**: JID config file + password in keyring;
       account setup dialog ("Add XMPP account…").
       *Verify:* password absent from disk; reconnect works after restart.
