@@ -41,7 +41,7 @@ class ChatTypePickerWindow(Adw.ApplicationWindow):
         button_box.append(self._make_choice_button(
             "brain-symbolic", _("LLM"), self._on_llm_clicked))
         button_box.append(self._make_choice_button(
-            "system-users-symbolic", _("XMPP"), self._on_xmpp_clicked))
+            "chat-bubbles-empty-symbolic", _("XMPP"), self._on_xmpp_clicked))
 
         status_page.set_child(button_box)
 
@@ -52,7 +52,7 @@ class ChatTypePickerWindow(Adw.ApplicationWindow):
 
     def _make_choice_button(self, icon_name, label_text, callback):
         icon = resource_manager.create_icon_widget(icon_name)
-        icon.set_pixel_size(48)
+        icon.set_pixel_size(32)
 
         label = Gtk.Label(label=label_text)
 
