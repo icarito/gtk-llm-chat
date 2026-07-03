@@ -34,7 +34,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     A chat window
     """
 
-    def __init__(self, config=None, chat_history=None, **kwargs):
+    def __init__(self, config=None, chat_history=None, backend=None, **kwargs):
         super().__init__(**kwargs)
         self.insert_action_group('app', self.get_application())
 
@@ -68,9 +68,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
-        # Backend de conversación (contrato ChatBackend; hoy siempre LLMClient)
-        # self.backend will be initialized later, after UI setup potentially
-        self.backend = None
+        # Backend de conversación (contrato ChatBackend). Si se inyecta uno
+        # (p.ej. XmppConversation), se usa tal cual y se omite todo lo
+        # específico de LLMClient (sidebar de modelo, modelo por defecto).
+        # Si no, el comportamiento es exactamente el de siempre: se crea
+        # un LLMClient más abajo, tras el setup básico de la UI.
+        self.backend = backend
+        self._injected_backend = backend is not None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -132,6 +136,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         resource_manager.set_widget_icon_name(self.sidebar_button, "open-menu-symbolic") # O "view-reveal-symbolic"
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
+        # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
+        self.sidebar_button.set_visible(not self._injected_backend)
 
         # Crear botón Rename
         rename_button = Gtk.Button()
@@ -221,56 +227,67 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_content(chat_content_box)
 
         # --- Panel Lateral (Sidebar) ---
-        # Initialize the backend *after* basic UI setup
-        try:
-            debug_print(f"Inicializando LLMClient con config: {self.config}")
-            self.backend = LLMClient(self.config, self.chat_history)
-            # Connect ChatBackend signals *here*
+        if self._injected_backend:
+            # Backend no-LLM (p.ej. XmppConversation): ya viene construido
+            # y conectado a su sesión propia. Solo cablear las señales del
+            # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
             self.backend.connect('ready', self._on_backend_ready)
             self.backend.connect('response', self._on_llm_response)
             self.backend.connect('error', self._on_llm_error)
             self.backend.connect('finished', self._on_llm_finished)
-            
-            if self.cid:
-                debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
-            else:
-                debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
-                
-        except Exception as e:
-            debug_print(_(f"Fatal error starting LLMClient: {e}"))
-            # Display error in UI instead of exiting?
-            error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
-            self.messages_box.append(error_widget)
-            self.set_enabled(False)  # Disable input if LLM fails critically
-            # Optionally: sys.exit(1) if it should still be fatal
-
-        # Obtener el modelo predeterminado o el modelo de la conversación activa
-        if not self.config.get('cid'):
-            default_model_id = get_default_model()
-            if default_model_id:
-                self.config['model'] = default_model_id
-                debug_print(f"Usando modelo predeterminado: {default_model_id}")
+            self.title_widget.set_subtitle(self.backend.get_display_name())
+            self.model_sidebar = None
         else:
-            model_id = self.backend.get_model_id()
-            self.config['model'] = model_id
-            debug_print(f"Usando modelo de la conversación: {model_id}")
-            
-            # Cargar el título de la conversación existente si hay un cid
+            # Initialize the backend *after* basic UI setup
             try:
-                conversation = self.chat_history.get_conversation(self.cid)
-                if conversation and conversation.get('title'):
-                    title = conversation['title']
-                    self.set_conversation_name(title)
-                    debug_print(f"Cargando título de conversación existente: {title}")
+                debug_print(f"Inicializando LLMClient con config: {self.config}")
+                self.backend = LLMClient(self.config, self.chat_history)
+                # Connect ChatBackend signals *here*
+                self.backend.connect('ready', self._on_backend_ready)
+                self.backend.connect('response', self._on_llm_response)
+                self.backend.connect('error', self._on_llm_error)
+                self.backend.connect('finished', self._on_llm_finished)
+
+                if self.cid:
+                    debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
+                else:
+                    debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
+
             except Exception as e:
-                debug_print(f"Error al cargar el título de la conversación: {e}")
+                debug_print(_(f"Fatal error starting LLMClient: {e}"))
+                # Display error in UI instead of exiting?
+                error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
+                self.messages_box.append(error_widget)
+                self.set_enabled(False)  # Disable input if LLM fails critically
+                # Optionally: sys.exit(1) if it should still be fatal
 
-        self.title_widget.set_subtitle(self.config['model'])
+            # Obtener el modelo predeterminado o el modelo de la conversación activa
+            if not self.config.get('cid'):
+                default_model_id = get_default_model()
+                if default_model_id:
+                    self.config['model'] = default_model_id
+                    debug_print(f"Usando modelo predeterminado: {default_model_id}")
+            else:
+                model_id = self.backend.get_model_id()
+                self.config['model'] = model_id
+                debug_print(f"Usando modelo de la conversación: {model_id}")
 
-        # Crear el sidebar con el modelo actual
-        self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.backend)
-        # Establecer el panel lateral en el split_view
-        self.split_view.set_sidebar(self.model_sidebar)
+                # Cargar el título de la conversación existente si hay un cid
+                try:
+                    conversation = self.chat_history.get_conversation(self.cid)
+                    if conversation and conversation.get('title'):
+                        title = conversation['title']
+                        self.set_conversation_name(title)
+                        debug_print(f"Cargando título de conversación existente: {title}")
+                except Exception as e:
+                    debug_print(f"Error al cargar el título de la conversación: {e}")
+
+            self.title_widget.set_subtitle(self.config['model'])
+
+            # Crear el sidebar con el modelo actual
+            self.model_sidebar = ChatSidebar(config=self.config, llm_client=self.backend)
+            # Establecer el panel lateral en el split_view
+            self.split_view.set_sidebar(self.model_sidebar)
 
         # --- Ensamblado Final ---
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
@@ -298,7 +315,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_sidebar_visibility_changed(self, split_view, param):
         show_sidebar = split_view.get_show_sidebar()
         if not show_sidebar:
-            self.model_sidebar.stack.set_visible_child_name("actions")
+            if self.model_sidebar is not None:
+                self.model_sidebar.stack.set_visible_child_name("actions")
             self.input_text.grab_focus()
 
     def _setup_css(self):
@@ -458,21 +476,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             app.on_delete_activate(None, None)
             return True
 
-        # Ctrl+M: Abrir selector de modelo
+        # Ctrl+M: Abrir selector de modelo (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_m and state & Gdk.ModifierType.CONTROL_MASK:
-            # Mostrar el sidebar y cambiar a la página del selector de modelo
-            self.split_view.set_show_sidebar(True)
-            if hasattr(self.model_sidebar, 'stack'):
-                self.model_sidebar.stack.set_visible_child_name("model_selector")
+            if self.model_sidebar is not None:
+                # Mostrar el sidebar y cambiar a la página del selector de modelo
+                self.split_view.set_show_sidebar(True)
+                if hasattr(self.model_sidebar, 'stack'):
+                    self.model_sidebar.stack.set_visible_child_name("model_selector")
             return True
 
-        # Ctrl+S: Cambiar system prompt
+        # Ctrl+S: Cambiar system prompt (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_s and state & Gdk.ModifierType.CONTROL_MASK:
-            # Mostrar el sidebar y abrir el diálogo de system prompt
-            self.split_view.set_show_sidebar(True)
-            if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
-                # Simular click en el botón de system prompt
-                self.model_sidebar._on_system_prompt_button_clicked(None)
+            if self.model_sidebar is not None:
+                # Mostrar el sidebar y abrir el diálogo de system prompt
+                self.split_view.set_show_sidebar(True)
+                if hasattr(self.model_sidebar, '_on_system_prompt_button_clicked'):
+                    # Simular click en el botón de system prompt
+                    self.model_sidebar._on_system_prompt_button_clicked(None)
             return True
 
         # Ctrl+N: Nueva conversación
@@ -727,6 +747,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.timeout_add(50, scroll_after)
 
     def _on_close_request(self, window):
+        # Liberar el backend (p.ej. XmppConversation: no hace nada propio,
+        # la sesión es compartida y la cierra quien la posee; LLMClient:
+        # no-op también). Seguro llamarlo siempre.
+        if self.backend is not None:
+            self.backend.shutdown()
         # Eliminar del registro de ventanas si corresponde
         app = self.get_application()
         cid = getattr(self, 'cid', None)

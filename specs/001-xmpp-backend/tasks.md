@@ -55,19 +55,40 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       no password. (2) wrong password — nothing persisted, no callback,
       error surfaced in the dialog's UI label
       ("StreamError.SASL: not-authorized").
-- [ ] **T5. Send/receive messages** bound to a `ChatWindow` via the
+- [x] **T5. Send/receive messages** bound to a `ChatWindow` via the
       `ChatBackend` contract (message in → bubble; `response`+`finished`
       on receive).
-      *Verify:* two-way text chat with a second client. (AC 4)
+      *Result (2026-07-03):* done together with T6 (see below) —
+      `LLMChatWindow` accepts an injected `backend=`; when present it
+      wires `XmppConversation` signals straight into the existing
+      `_on_llm_response`/`_on_llm_error`/`_on_llm_finished` handlers
+      unchanged. Verified with a real `LLMChatWindow` + real send click
+      against yax.im (self-chat echo): 2 bubbles, correct text in both,
+      title = contact JID. (AC 4)
 
 ## Phase 3 — UI integration
 
-- [ ] **T6. Selector**: "XMPP contacts" section in the model selector
-      (roster entries; "Add XMPP account…" when unconfigured); selecting
-      a contact opens an XMPP-backed window. (AC 3)
-- [ ] **T7. XMPP window chrome**: contact name in header, connection
-      state indicator; hide LLM-only controls (temperature, system
-      prompt, API-key banner) for XMPP windows. (AC 2)
+- [x] **T6. Selector**: separate entry point instead of touching the LLM
+      model selector (**scope revised**, see design.md → "Selector
+      integration"): `app.new-xmpp-conversation` action → account dialog
+      if unconfigured, else `XmppRosterDialog` (new) listing the live
+      roster → picking a contact opens an XMPP-backed `LLMChatWindow`.
+      *Result (2026-07-03):* `xmpp_roster_dialog.py` (new) +
+      `chat_application.py` wiring
+      (`on_new_xmpp_conversation_activate`/`_open_xmpp_roster_picker`).
+      LLM model selector untouched — zero regression risk there.
+      Verified: regression pass on a real unmodified app launch (no
+      injected backend) shows no tracebacks and normal
+      "Backend listo: <model>" behavior; separately, a real
+      `LLMChatWindow(backend=xmpp_conversation)` shows the contact JID
+      as subtitle and hides the model-sidebar toggle. (AC 3)
+- [ ] **T7. XMPP window chrome**: connection state indicator (connected/
+      disconnected/error) somewhere visible in the header, driven by
+      `state-changed`. Contact name in header and hiding LLM-only
+      controls already landed in T5/T6 (subtitle = contact JID, sidebar
+      toggle hidden entirely for injected backends — there's no
+      temperature/system-prompt/API-key UI shown at all, so nothing left
+      to selectively hide). (AC 2)
 - [ ] **T8. Typing indicators** (XEP-0085) both directions:
       show "typing…" from remote; emit our own composing state. (AC 5)
 

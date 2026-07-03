@@ -78,13 +78,28 @@ ChatBackend (informal interface — duck-typed GObject)
 - Account setup: minimal dialog reachable from the model/contact
   selector ("Add XMPP account…"). Welcome-wizard integration is Layer 2.
 
-## Selector integration
+## Selector integration (revised in T5/T6, 2026-07-03)
 
-`wide_model_selector.py` / `model_selector.py` currently list providers →
-models. Add a top-level "XMPP contacts" section fed by the roster when an
-account is configured (plus the "Add XMPP account…" entry when not).
-Selecting a contact opens a `ChatWindow` bound to an `XmppClient`
-conversation instead of an `LLMClient`.
+Original plan: add an "XMPP contacts" section inside
+`wide_model_selector.py` / `model_selector.py`. Revised after inspecting
+that code — it's tightly coupled to `ModelSelectionManager` (API keys,
+provider aliases, dynamic reload) and touching it risks the regression
+criterion (LLM flow must stay identical).
+
+**Decision:** XMPP conversations get a separate entry point instead:
+an application action (`app.new-xmpp-conversation`, same pattern as
+the existing `rename`/`delete`/`about` actions in
+`chat_application.py`) opens a small roster-picker dialog — or the
+account setup dialog first, if no account is configured yet. The LLM
+model selector is untouched. Merging XMPP into that selector can
+happen later as a Layer 2+ polish item once the backend abstraction
+has proven itself.
+
+`LLMChatWindow` gains an optional `backend=` constructor parameter: if
+given, it's used as-is (skipping `LLMClient` construction and the
+model/provider-specific UI wiring); if omitted, behavior is exactly
+what it is today. This keeps the injection point minimal and the
+regression surface small.
 
 ## What we deliberately don't build (MVP)
 
