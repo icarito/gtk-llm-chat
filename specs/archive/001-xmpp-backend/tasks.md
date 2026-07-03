@@ -154,5 +154,7 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       in logs.db" note; also corrected the stale `model-loaded` signal
       name to `ready`. `nbxmpp` and `keyring` were added to
       pyproject/requirements in T3/T4.
-- [ ] **T12. Review & archive**: adversarial code review of the branch;
+- [x] **T12. Review & archive**: adversarial code review of the branch;
       merge; `git mv specs/001-xmpp-backend specs/archive/`.
+      *Result (2026-07-03):* review done in T10 (4 issues found & fixed);
+      spec archived here and `feat/xmpp-backend` merged to `main`.
