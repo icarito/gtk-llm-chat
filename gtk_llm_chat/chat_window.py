@@ -161,6 +161,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         rename_button.set_tooltip_text(_("Rename"))
         rename_button.connect('clicked', lambda x: self.get_application().on_rename_activate(None, None))
 
+        # --- Menú principal (hamburguesa): punto de entrada a nuevas
+        # conversaciones LLM y XMPP (spec 002) ---
+        primary_menu = Gio.Menu()
+        primary_menu.append(_("New Conversation"), "app.new-conversation")
+        primary_menu.append(_("New XMPP Conversation…"), "app.new-xmpp-conversation")
+        self.primary_menu_button = Gtk.MenuButton()
+        resource_manager.set_widget_icon_name(self.primary_menu_button, "view-more-symbolic")
+        self.primary_menu_button.set_tooltip_text(_("Main Menu"))
+        self.primary_menu_button.set_menu_model(primary_menu)
+
+        self.header.pack_end(self.primary_menu_button)
         self.header.pack_end(self.sidebar_button)
         self.header.pack_end(rename_button)
         self.header.pack_start(self.roster_button)

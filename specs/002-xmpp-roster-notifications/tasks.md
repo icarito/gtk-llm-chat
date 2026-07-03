@@ -58,8 +58,15 @@ isn't merged yet — decide at start).
       real window's roster sidebar showed `icarito@yax.im` as Online off
       the real session. Regression: LLM windows keep the right-side model
       sidebar and no roster button; app launches clean. (AC 1, AC 2)
-
-## Phase 3 — Notifications
+- [x] **T4b. Expose the feature in the UI** (gap found while testing —
+      the `new-xmpp-conversation` action existed but nothing invoked it).
+      Added a primary "hamburger" menu (`Gtk.MenuButton` +
+      `Gio.Menu`, `view-more-symbolic`) in the window header with
+      "New Conversation" (→ new `app.new-conversation` action) and
+      "New XMPP Conversation…" (→ `app.new-xmpp-conversation`). Present
+      in every chat window.
+      *Result (2026-07-03):* verified — both actions registered, the menu
+      lists both entries pointing at them, app launches clean.
 
 - [x] **T5. Incoming-message notifications**: when a message arrives and
       its conversation window isn't focused (or doesn't exist), fire a
@@ -89,7 +96,11 @@ isn't merged yet — decide at start).
 
 ## Phase 4 — Hardening & docs
 
-- [ ] **T7. i18n**: new strings wrapped in `_()`; run `./update_po.sh`.
+- [x] **T7. i18n**: new strings wrapped in `_()`; run `./update_po.sh`.
+      *Result (2026-07-03):* all new user-visible strings use `_()`; ran
+      `update_po.sh`, extracting Contacts / Online / Offline /
+      New XMPP Conversation… / Main Menu / Contact request / Accept /
+      Deny / "{jid} wants to add you as a contact." into the catalogs.
 - [ ] **T8. Verification pass**: walk all 4 acceptance criteria in the
       running app against yax.im; check them off in `spec.md`.
       Regression pass over 001's 5 criteria and the LLM flow.

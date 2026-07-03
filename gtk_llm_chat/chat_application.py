@@ -179,6 +179,11 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+        new_conversation_action = Gio.SimpleAction.new("new-conversation", None)
+        new_conversation_action.connect(
+            "activate", lambda a, p: self.open_conversation_window({}))
+        self.add_action(new_conversation_action)
+
         new_xmpp_action = Gio.SimpleAction.new("new-xmpp-conversation", None)
         new_xmpp_action.connect("activate", self.on_new_xmpp_conversation_activate)
         self.add_action(new_xmpp_action)
