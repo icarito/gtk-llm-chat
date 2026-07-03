@@ -49,6 +49,8 @@ class XmppSession(GObject.Object):
         'message-received': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # bare_jid, state ('online'/'offline') — presencia de un contacto (spec 002)
         'presence-changed': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        # bare_jid — alguien pide suscribirse a nuestra presencia (spec 002 T6)
+        'subscription-request': (GObject.SignalFlags.RUN_LAST, None, (str,)),
     }
 
     PRESENCE_ONLINE = 'online'
@@ -194,11 +196,16 @@ class XmppSession(GObject.Object):
         if properties.jid is None or properties.type is None:
             return
         ptype = properties.type
-        # Ignorar subscribe/subscribed/etc. aquí; solo available/unavailable
-        # importan para presencia. (subscribe se maneja en T6.)
+        bare = str(properties.jid.bare)
+        # Solicitud de suscripción entrante (spec 002 T6): alguien quiere
+        # ver nuestra presencia. La app decide aceptar/rechazar.
+        if ptype.value == 'subscribe':
+            debug_print(f"XmppSession: solicitud de suscripción de {bare}")
+            self.emit('subscription-request', bare)
+            return
+        # Solo available/unavailable importan para presencia.
         if ptype.value not in (None, 'unavailable'):
             return
-        bare = str(properties.jid.bare)
         resource = properties.jid.resource
         if bare not in self.roster_items:
             # Presencia de alguien fuera del roster (p.ej. nosotros mismos);
@@ -234,8 +241,9 @@ class XmppSession(GObject.Object):
         debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
         if conversation is not None:
             conversation.deliver(properties.body)
-        else:
-            self.emit('message-received', bare, properties.body)
+        # Emitir siempre para que la app pueda notificar si la ventana de
+        # esa conversación no tiene foco (o no existe) — spec 002 T5.
+        self.emit('message-received', bare, properties.body)
 
     def send_text(self, to_bare_jid: str, text: str):
         # XEP-0085: marcar 'active' junto con cada mensaje
@@ -249,6 +257,24 @@ class XmppSession(GObject.Object):
             return
         payload = Node(chatstate, attrs={'xmlns': Namespace.CHATSTATES})
         self._client.send_stanza(Message(to=to_bare_jid, typ='chat', payload=[payload]))
+
+    # --- Suscripciones (spec 002 T6) ---
+
+    def accept_subscription(self, bare_jid: str):
+        """Acepta una solicitud de suscripción y pide reciprocidad, para
+        que ambos vean la presencia del otro."""
+        if not self.is_connected:
+            return
+        jid = JID.from_string(bare_jid)
+        presence = self._client.get_module('BasePresence')
+        presence.subscribed(jid)   # el otro podrá ver nuestra presencia
+        presence.subscribe(jid)    # y pedimos ver la suya
+
+    def deny_subscription(self, bare_jid: str):
+        """Rechaza una solicitud de suscripción."""
+        if not self.is_connected:
+            return
+        self._client.get_module('BasePresence').unsubscribed(JID.from_string(bare_jid))
 
     # --- Conversaciones ---
 

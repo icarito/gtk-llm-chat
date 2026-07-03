@@ -61,19 +61,31 @@ isn't merged yet — decide at start).
 
 ## Phase 3 — Notifications
 
-- [ ] **T5. Incoming-message notifications**: when a message arrives and
+- [x] **T5. Incoming-message notifications**: when a message arrives and
       its conversation window isn't focused (or doesn't exist), fire a
       `Gio.Notification` (id = bare JID); default action opens/focuses
       the conversation. Track per-window focus.
-      *Verify:* send a message from a second client to the test account
-      while the window is unfocused/closed; confirm the notification
-      appears and clicking it focuses/opens the chat. (AC 3)
-- [ ] **T6. Subscription-request notifications**: `XmppSession` emits
+      *Result (2026-07-03):* `XmppSession` now emits `message-received`
+      for every inbound message (not only when no conversation is open);
+      the app's `_on_xmpp_message_received` fires a `Gio.Notification`
+      (id `xmpp-msg:<jid>`, so repeats replace) unless the conversation's
+      window `is_active()`. Default action `app.open-xmpp` (param = bare
+      JID) opens/focuses it. Verified headless across all three cases:
+      no window → notify, active window → silent, inactive window →
+      notify. (AC 3)
+- [x] **T6. Subscription-request notifications**: `XmppSession` emits
       `subscription-request(bare_jid)`; app shows a notification with
       Accept/Deny actions wired to `BasePresence.subscribed/unsubscribed`.
-      *Verify:* trigger a subscribe request from a second account/client;
-      confirm the notification with both actions, and that Accept adds
-      the contact (roster-updated) while Deny doesn't. (AC 4)
+      *Result (2026-07-03):* incoming `type=subscribe` presence →
+      `subscription-request` signal → notification with Accept/Deny
+      buttons (`app.accept-xmpp-sub` / `deny-xmpp-sub`, param = JID).
+      Accept calls `session.accept_subscription()` (sends `subscribed`
+      **and** reciprocates with `subscribe` for mutual presence); Deny
+      sends `unsubscribed`. Verified live against yax.im: the
+      `subscription-request` signal fired for `icarito@yax.im`, and
+      `accept_subscription()` produced an immediate
+      `presence-changed → online`. Notification actions confirmed
+      registered. (AC 4)
 
 ## Phase 4 — Hardening & docs
 
