@@ -16,6 +16,8 @@ Reglas del contrato (ver specs/001-xmpp-backend/design.md):
 - 'state-changed' comunica estados de conexión propios del backend
   (p.ej. XMPP: connected/disconnected). Los backends locales pueden
   no emitirla nunca.
+- 'typing' indica que la otra parte está escribiendo (p.ej. XEP-0085).
+  Backends que no lo soportan (LLMClient) simplemente no la emiten.
 """
 from gi.repository import GObject
 
@@ -30,6 +32,7 @@ class ChatBackend(GObject.Object):
         'finished': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
 
     def send_message(self, prompt: str):
@@ -39,6 +42,12 @@ class ChatBackend(GObject.Object):
     def cancel(self):
         """Cancela la generación/el envío en curso, si lo hay."""
         raise NotImplementedError
+
+    def notify_composing(self, is_composing: bool):
+        """Informa al backend que el usuario está escribiendo (o dejó de
+        hacerlo), para que lo retransmita si el protocolo lo soporta
+        (p.ej. XEP-0085). No-op por defecto."""
+        pass
 
     def get_conversation_id(self):
         """Identificador persistente de la conversación, o None."""

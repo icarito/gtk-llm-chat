@@ -75,6 +75,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # un LLMClient más abajo, tras el setup básico de la UI.
         self.backend = backend
         self._injected_backend = backend is not None
+        self._composing_timeout_id = None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -244,11 +245,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.backend.connect('error', self._on_llm_error)
             self.backend.connect('finished', self._on_llm_finished)
             self.backend.connect('state-changed', self._on_backend_state_changed)
+            self.backend.connect('typing', self._on_backend_typing)
             self.title_widget.set_subtitle(self.backend.get_display_name())
             # Estado inicial: la sesión puede ya estar 'connected' antes de
             # que esta ventana exista (el roster picker implica sesión viva).
             session = getattr(self.backend, 'session', None)
-            self._update_connection_status(session.state if session else 'connected')
+            self._last_connection_state = session.state if session else 'connected'
+            self._update_connection_status(self._last_connection_state)
             self.model_sidebar = None
         else:
             # Initialize the backend *after* basic UI setup
@@ -528,6 +531,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
         new_height = min(max(lines * 20, 60), 120)
         self.input_text.set_size_request(-1, new_height)
 
+        # Notificar 'composing' al backend (spec 001, T8). No-op en LLMClient.
+        if self.backend is not None:
+            has_text = buffer.get_char_count() > 0
+            self.backend.notify_composing(has_text)
+            if self._composing_timeout_id:
+                GLib.source_remove(self._composing_timeout_id)
+                self._composing_timeout_id = None
+            if has_text:
+                # Sin más tecleo en 5s, avisar que se dejó de escribir
+                self._composing_timeout_id = GLib.timeout_add_seconds(
+                    5, self._on_composing_timeout)
+
+    def _on_composing_timeout(self):
+        self._composing_timeout_id = None
+        if self.backend is not None:
+            self.backend.notify_composing(False)
+        return GLib.SOURCE_REMOVE
+
     def _on_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_Return:
             # Permitir Shift+Enter para nuevas líneas
@@ -588,7 +609,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_backend_state_changed(self, backend, state):
         """Maneja la señal 'state-changed' del backend (spec 001, T7)."""
         debug_print(f"Estado de conexión del backend: {state}")
+        self._last_connection_state = state
         self._update_connection_status(state)
+
+    def _on_backend_typing(self, backend, is_typing):
+        """Maneja la señal 'typing' del backend: el contacto está escribiendo
+        (spec 001, T8, XEP-0085). Reusa el indicador de conexión, ya que
+        ambos son estados efímeros de la contraparte."""
+        if is_typing:
+            self.connection_status_label.set_label(_("Typing…"))
+            self.connection_status_label.remove_css_class("error")
+        else:
+            self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
@@ -664,6 +696,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         )
 
         if text:
+            # Ya se envía el mensaje: cancelar el aviso pendiente de 'composing'
+            if self._composing_timeout_id:
+                GLib.source_remove(self._composing_timeout_id)
+                self._composing_timeout_id = None
             # Display user message
             self.display_message(text, sender="user")
             # Deshabilitar entrada y empezar tarea LLM

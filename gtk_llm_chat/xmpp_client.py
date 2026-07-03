@@ -194,6 +194,13 @@ class XmppSession(GObject.Object):
         self._client.send_stanza(
             Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate]))
 
+    def send_chatstate(self, to_bare_jid: str, chatstate: str):
+        """Envía solo un chat state (XEP-0085), sin cuerpo de mensaje."""
+        if not self.is_connected:
+            return
+        payload = Node(chatstate, attrs={'xmlns': Namespace.CHATSTATES})
+        self._client.send_stanza(Message(to=to_bare_jid, typ='chat', payload=[payload]))
+
     # --- Conversaciones ---
 
     def get_conversation(self, bare_jid: str) -> 'XmppConversation':
@@ -211,11 +218,6 @@ class XmppSession(GObject.Object):
 
 class XmppConversation(ChatBackend):
     """ChatBackend para un contacto XMPP. Una instancia por bare JID."""
-
-    __gsignals__ = {
-        # Extra al contrato: el contacto está escribiendo (XEP-0085, T8)
-        'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
-    }
 
     def __init__(self, session: XmppSession, bare_jid: str):
         ChatBackend.__init__(self)
@@ -268,6 +270,10 @@ class XmppConversation(ChatBackend):
 
     def get_display_name(self) -> str:
         return self.session.get_contact_name(self.bare_jid)
+
+    def notify_composing(self, is_composing: bool):
+        state = 'composing' if is_composing else 'active'
+        self.session.send_chatstate(self.bare_jid, state)
 
     def shutdown(self):
         # La sesión es compartida; la cierra quien la posee

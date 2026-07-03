@@ -98,8 +98,22 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       Connected → Disconnected with the error style the instant the
       session drops. Regression: the label is hidden for ordinary
       (non-injected) LLM windows.
-- [ ] **T8. Typing indicators** (XEP-0085) both directions:
+- [x] **T8. Typing indicators** (XEP-0085) both directions:
       show "typing…" from remote; emit our own composing state. (AC 5)
+      *Result (2026-07-03):* `ChatBackend` gained `notify_composing()`
+      (no-op default, harmless for `LLMClient`) and the `typing` signal
+      moved from `XmppConversation`-only into the shared contract.
+      `chat_window._on_text_changed` calls `notify_composing(True)` on
+      first keystroke and arms a 5s idle timeout that calls
+      `notify_composing(False)`; sending a message cancels that timer.
+      `XmppSession.send_chatstate()` sends a bare XEP-0085 stanza
+      (composing/active). Incoming chat states reuse the connection
+      status label ("Typing…", restored to the last connection state
+      when it clears). Verified live against yax.im (self-chat): typing
+      emits composing, the server reflection comes back as
+      `typing=True` on the same conversation, the UI shows "Typing…",
+      and sending clears it back to "Connected". Regression: LLMClient
+      windows are unaffected (`notify_composing` no-op).
 
 ## Phase 4 — Hardening & docs
 
