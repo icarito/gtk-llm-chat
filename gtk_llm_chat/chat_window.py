@@ -34,7 +34,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     A chat window
     """
 
-    def __init__(self, config=None, chat_history=None, backend=None, **kwargs):
+    def __init__(self, config=None, chat_history=None, backend=None,
+                 xmpp_session=None, **kwargs):
         super().__init__(**kwargs)
         self.insert_action_group('app', self.get_application())
 
@@ -74,7 +75,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Si no, el comportamiento es exactamente el de siempre: se crea
         # un LLMClient más abajo, tras el setup básico de la UI.
         self.backend = backend
-        self._injected_backend = backend is not None
+        # xmpp_session: sesión XMPP sin contacto elegido todavía (spec 003).
+        # La ventana existe, muestra el roster, pero no hay conversación
+        # activa hasta que el usuario elige una fila.
+        self._xmpp_session = xmpp_session
+        self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
         self.roster_sidebar = None
 
@@ -265,16 +270,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Backend no-LLM (p.ej. XmppConversation): ya viene construido
             # y conectado a su sesión propia. Solo cablear las señales del
             # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
-            self.backend.connect('ready', self._on_backend_ready)
-            self.backend.connect('response', self._on_llm_response)
-            self.backend.connect('error', self._on_llm_error)
-            self.backend.connect('finished', self._on_llm_finished)
-            self.backend.connect('state-changed', self._on_backend_state_changed)
-            self.backend.connect('typing', self._on_backend_typing)
-            self.title_widget.set_subtitle(self.backend.get_display_name())
+            session = getattr(self.backend, 'session', None) or self._xmpp_session
+            if self.backend is not None:
+                self.backend.connect('ready', self._on_backend_ready)
+                self.backend.connect('response', self._on_llm_response)
+                self.backend.connect('error', self._on_llm_error)
+                self.backend.connect('finished', self._on_llm_finished)
+                self.backend.connect('state-changed', self._on_backend_state_changed)
+                self.backend.connect('typing', self._on_backend_typing)
+                self.title_widget.set_subtitle(self.backend.get_display_name())
+            else:
+                # Sin contacto elegido aún: mostrar el roster, deshabilitar
+                # el chat hasta que el usuario elija una fila (spec 003).
+                self.title_widget.set_subtitle(_("Choose a contact"))
+                self.set_enabled(False)
             # Estado inicial: la sesión puede ya estar 'connected' antes de
             # que esta ventana exista (el roster picker implica sesión viva).
-            session = getattr(self.backend, 'session', None)
             self._last_connection_state = session.state if session else 'connected'
             self._update_connection_status(self._last_connection_state)
             self.model_sidebar = None
@@ -286,6 +297,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     session, on_contact_selected=self._on_roster_contact_selected)
                 self.split_view.set_sidebar_position(Gtk.PackType.START)
                 self.split_view.set_sidebar(self.roster_sidebar)
+                if self.backend is None:
+                    # Sin contacto: el roster se ve de entrada, no detrás
+                    # de un toggle — es lo único que hay que hacer aquí.
+                    self.split_view.set_show_sidebar(True)
+                    self.split_view.set_collapsed(False)
         else:
             # Initialize the backend *after* basic UI setup
             try:
@@ -369,16 +385,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.input_text.grab_focus()
 
     def _on_roster_contact_selected(self, bare_jid):
-        """Un contacto elegido en el roster sidebar (spec 002): abre/enfoca
-        su ventana de conversación. Delega en la aplicación, que mantiene el
-        registro de ventanas por conversación."""
+        """Un contacto elegido en el roster sidebar (spec 002/003): abre/
+        enfoca su ventana de conversación. Delega en la aplicación, que
+        mantiene el registro de ventanas por conversación."""
         app = self.get_application()
-        session = getattr(self.backend, 'session', None)
+        session = getattr(self.backend, 'session', None) or self._xmpp_session
+        was_empty = self.backend is None
         if app is not None and session is not None and \
                 hasattr(app, 'open_xmpp_conversation'):
             app.open_xmpp_conversation(session, bare_jid)
-        # Colapsar el panel tras elegir, para dar foco al chat
-        self.split_view.set_show_sidebar(False)
+        if was_empty:
+            # Esta ventana era solo el picker de contacto (spec 003): la
+            # conversación real se abrió en otra ventana, cerrar esta.
+            self.close()
+        else:
+            # Colapsar el panel tras elegir, para dar foco al chat
+            self.split_view.set_show_sidebar(False)
 
     def _setup_css(self):
         """Aplica estilos CSS específicos para la ventana de chat."""

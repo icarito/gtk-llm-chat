@@ -409,12 +409,14 @@ class LLMChatApplication(Adw.Application):
             # Si hay error con el asistente, proceder con la ventana normal
             self.open_conversation_window()
 
-    def _create_new_window_with_config(self, config, backend=None):
+    def _create_new_window_with_config(self, config, backend=None, xmpp_session=None):
         """Crea una nueva ventana con la configuración dada.
 
         Args:
             backend: ChatBackend ya construido (p.ej. XmppConversation) a
                 inyectar en la ventana en vez del LLMClient por defecto.
+            xmpp_session: sesión XMPP sin contacto elegido aún (spec 003):
+                la ventana muestra el roster y espera selección.
         """
         debug_print(f"Creando nueva ventana con configuración: {config}")
 
@@ -423,8 +425,8 @@ class LLMChatApplication(Adw.Application):
         chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración
-        window = LLMChatWindow(application=self, config=config,
-                                chat_history=chat_history, backend=backend)
+        window = LLMChatWindow(application=self, config=config, chat_history=chat_history,
+                                backend=backend, xmpp_session=xmpp_session)
         resource_manager.set_widget_icon_name(window, "org.fuentelibre.gtk_llm_Chat")
 
         # Configurar el manejador de eventos de teclado
@@ -627,12 +629,9 @@ class LLMChatApplication(Adw.Application):
         self.send_notification(f"xmpp-sub:{bare_jid}", notification)
 
     def _open_xmpp_roster_picker(self, session):
-        from .xmpp_roster_dialog import XmppRosterDialog
-
-        dialog = XmppRosterDialog(
-            session, parent=self.get_active_window(),
-            on_contact_selected=lambda jid: self.open_xmpp_conversation(session, jid))
-        dialog.present()
+        """Abre una ventana XMPP sin contacto elegido: muestra el roster
+        normal (spec 003) en vez de un diálogo modal aparte."""
+        self._create_new_window_with_config({}, xmpp_session=session)
 
     def open_xmpp_conversation(self, session, bare_jid):
         """Abre (o enfoca, si ya existe) la ventana de conversación con un

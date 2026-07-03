@@ -1,10 +1,11 @@
 """
-xmpp_roster_sidebar.py - panel de contactos persistente (spec 002, T3).
+xmpp_roster_sidebar.py - panel de contactos persistente (spec 002/003).
 
-A diferencia de xmpp_roster_dialog.py (modal, de un solo uso), este es un
-widget que vive dentro de la ventana de chat XMPP: lista los contactos
+Widget que vive dentro de la ventana de chat XMPP: lista los contactos
 del roster con su presencia en vivo y notifica la selección de un
-contacto vía callback.
+contacto vía callback. Es el único selector de contacto de la app — no
+hay un diálogo modal aparte; una ventana sin conversación elegida
+todavía simplemente muestra este mismo panel (spec 003).
 """
 import gi
 gi.require_version('Gtk', '4.0')
