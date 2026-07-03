@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2026-07-03 03:48-0500\n"
+"POT-Creation-Date: 2026-07-03 04:01-0500\n"
 "PO-Revision-Date: 2025-06-04 18:45-0500\n"
 "Last-Translator: Sebastian Silva <sebastian@fuentelibre.org>\n"
 "Language-Team: German <de@tp.org.de>\n"
@@ -45,7 +45,7 @@ msgstr "Modellparameter"
 msgid "Conversation"
 msgstr "Unterhaltung"
 
-#: gtk_llm_chat/chat_sidebar.py:101 gtk_llm_chat/chat_application.py:491
+#: gtk_llm_chat/chat_sidebar.py:101 gtk_llm_chat/chat_application.py:495
 msgid "Delete Conversation"
 msgstr "Konversation löschen"
 
@@ -102,7 +102,7 @@ msgstr "als Standardmodell für neue Unterhaltungen?"
 
 #: gtk_llm_chat/chat_sidebar.py:252 gtk_llm_chat/chat_sidebar.py:331
 #: gtk_llm_chat/model_selector.py:293 gtk_llm_chat/wide_model_selector.py:312
-#: gtk_llm_chat/chat_application.py:494
+#: gtk_llm_chat/chat_application.py:498
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -187,10 +187,9 @@ msgstr ""
 msgid "Rename"
 msgstr "Umbenennen"
 
-#: gtk_llm_chat/chat_window.py:167 gtk_llm_chat/llm_client.py:23
-#: gtk_llm_chat/welcome.py:58 gtk_llm_chat/tray_applet.py:128
-#: gtk_llm_chat/tray_applet.py:509
-msgid "New Conversation"
+#: gtk_llm_chat/chat_window.py:167
+#, fuzzy
+msgid "New LLM Conversation"
 msgstr "Neue Konversation"
 
 #: gtk_llm_chat/chat_window.py:168
@@ -198,33 +197,42 @@ msgstr "Neue Konversation"
 msgid "New XMPP Conversation…"
 msgstr "Neue Konversation"
 
-#: gtk_llm_chat/chat_window.py:171
+#: gtk_llm_chat/chat_window.py:170
+msgid "XMPP Account…"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:174
 msgid "Main Menu"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:246
+#: gtk_llm_chat/chat_window.py:249
 msgid "Send"
 msgstr "Senden"
 
-#: gtk_llm_chat/chat_window.py:642
+#: gtk_llm_chat/chat_window.py:645
 msgid "Connecting…"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:643
+#: gtk_llm_chat/chat_window.py:646
 msgid "Connected"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:644
+#: gtk_llm_chat/chat_window.py:647
 msgid "Disconnected"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:668
+#: gtk_llm_chat/chat_window.py:671
 msgid "Typing…"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:784 gtk_llm_chat/wide_model_selector.py:165
+#: gtk_llm_chat/chat_window.py:787 gtk_llm_chat/wide_model_selector.py:165
 msgid "Error"
 msgstr "Fehler"
+
+#: gtk_llm_chat/llm_client.py:23 gtk_llm_chat/welcome.py:58
+#: gtk_llm_chat/tray_applet.py:128 gtk_llm_chat/tray_applet.py:509
+msgid "New Conversation"
+msgstr "Neue Konversation"
 
 #: gtk_llm_chat/llm_client.py:231
 msgid "LLMClient: Ignoring invalid temperature:"
@@ -475,40 +483,40 @@ msgstr ""
 "\n"
 "Anwendung wird geschlossen..."
 
-#: gtk_llm_chat/chat_application.py:252
+#: gtk_llm_chat/chat_application.py:256
 msgid "Error: _version.py not found"
 msgstr "Fehler: _version.py nicht gefunden"
 
-#: gtk_llm_chat/chat_application.py:492
+#: gtk_llm_chat/chat_application.py:496
 msgid "Are you sure you want to delete the conversation?"
 msgstr "Sind Sie sicher, dass Sie die Konversation löschen möchten?"
 
-#: gtk_llm_chat/chat_application.py:495
+#: gtk_llm_chat/chat_application.py:499
 msgid "Delete"
 msgstr "Löschen"
 
-#: gtk_llm_chat/chat_application.py:517
+#: gtk_llm_chat/chat_application.py:521
 msgid "Gtk LLM Chat"
 msgstr "Gtk LLM Chat"
 
-#: gtk_llm_chat/chat_application.py:520
+#: gtk_llm_chat/chat_application.py:524
 msgid "A frontend for LLM"
 msgstr "Ein Frontend für LLM"
 
-#: gtk_llm_chat/chat_application.py:583
+#: gtk_llm_chat/chat_application.py:603
 msgid "Contact request"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:585
+#: gtk_llm_chat/chat_application.py:605
 #, python-brace-format
 msgid "{jid} wants to add you as a contact."
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:587
+#: gtk_llm_chat/chat_application.py:607
 msgid "Accept"
 msgstr ""
 
-#: gtk_llm_chat/chat_application.py:589
+#: gtk_llm_chat/chat_application.py:609
 msgid "Deny"
 msgstr ""
 

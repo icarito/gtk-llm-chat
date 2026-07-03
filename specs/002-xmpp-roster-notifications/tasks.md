@@ -67,6 +67,18 @@ isn't merged yet — decide at start).
       in every chat window.
       *Result (2026-07-03):* verified — both actions registered, the menu
       lists both entries pointing at them, app launches clean.
+- [x] **T4c. Account setup reachability + menu polish** (gaps found while
+      testing). The `XmppAccountDialog` only opened auto-magically when no
+      account existed — once configured there was no way to reopen it
+      (change account, fix password). Added an `app.xmpp-account` action
+      + "XMPP Account…" menu entry (own section) that opens it any time;
+      changing the account tears down the previous session. Menu copy
+      "New Conversation" → "New LLM Conversation". The LLM model sidebar
+      toggle now uses `brain-symbolic` (was the generic hamburger, which
+      collided with the primary menu).
+      *Result (2026-07-03):* verified — menu shows the 3 entries with the
+      account item in its own section; the xmpp-account action opens the
+      dialog and swaps the session on a new account; regression OK.
 
 - [x] **T5. Incoming-message notifications**: when a message arrives and
       its conversation window isn't focused (or doesn't exist), fire a

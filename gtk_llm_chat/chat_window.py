@@ -143,7 +143,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
-        resource_manager.set_widget_icon_name(self.sidebar_button, "open-menu-symbolic") # O "view-reveal-symbolic"
+        resource_manager.set_widget_icon_name(self.sidebar_button, "brain-symbolic")
         self.sidebar_button.set_tooltip_text(_("Model Settings"))
         # No conectar 'toggled' aquí si usamos bind_property
         # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
@@ -164,8 +164,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Menú principal (hamburguesa): punto de entrada a nuevas
         # conversaciones LLM y XMPP (spec 002) ---
         primary_menu = Gio.Menu()
-        primary_menu.append(_("New Conversation"), "app.new-conversation")
+        primary_menu.append(_("New LLM Conversation"), "app.new-conversation")
         primary_menu.append(_("New XMPP Conversation…"), "app.new-xmpp-conversation")
+        xmpp_section = Gio.Menu()
+        xmpp_section.append(_("XMPP Account…"), "app.xmpp-account")
+        primary_menu.append_section(None, xmpp_section)
         self.primary_menu_button = Gtk.MenuButton()
         resource_manager.set_widget_icon_name(self.primary_menu_button, "view-more-symbolic")
         self.primary_menu_button.set_tooltip_text(_("Main Menu"))

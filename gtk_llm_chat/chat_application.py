@@ -188,6 +188,10 @@ class LLMChatApplication(Adw.Application):
         new_xmpp_action.connect("activate", self.on_new_xmpp_conversation_activate)
         self.add_action(new_xmpp_action)
 
+        xmpp_account_action = Gio.SimpleAction.new("xmpp-account", None)
+        xmpp_account_action.connect("activate", self.on_xmpp_account_activate)
+        self.add_action(xmpp_account_action)
+
         # Acciones parametrizadas por bare JID, invocadas desde las
         # notificaciones XMPP (spec 002 T5/T6).
         open_xmpp_action = Gio.SimpleAction.new(
@@ -536,19 +540,35 @@ class LLMChatApplication(Adw.Application):
         from .xmpp_account import load_account
         account = load_account()
         if account is None:
-            from .xmpp_account_dialog import XmppAccountDialog
-
-            def on_account_ready(jid):
-                self.on_new_xmpp_conversation_activate(None, None)
-
-            dialog = XmppAccountDialog(
-                parent=self.get_active_window(), on_account_ready=on_account_ready)
-            dialog.present()
+            # Sin cuenta configurada: abrir el setup y reintentar al terminar
+            self._open_xmpp_account_dialog(
+                on_ready=lambda jid: self.on_new_xmpp_conversation_activate(None, None))
             return
 
         jid, password = account
         session = self._ensure_xmpp_session(jid, password)
         self._open_xmpp_roster_picker(session)
+
+    def on_xmpp_account_activate(self, action, param):
+        """Abre el diálogo de configuración de cuenta XMPP (siempre, no solo
+        la primera vez): permite configurar o cambiar la cuenta."""
+        self._open_xmpp_account_dialog()
+
+    def _open_xmpp_account_dialog(self, on_ready=None):
+        from .xmpp_account_dialog import XmppAccountDialog
+
+        def _on_ready(jid):
+            # Una cuenta nueva/cambiada invalida la sesión previa
+            old = getattr(self, '_xmpp_session', None)
+            if old is not None:
+                old.shutdown()
+                self._xmpp_session = None
+            if on_ready is not None:
+                on_ready(jid)
+
+        dialog = XmppAccountDialog(
+            parent=self.get_active_window(), on_account_ready=_on_ready)
+        dialog.present()
 
     def _ensure_xmpp_session(self, jid, password):
         """Devuelve la sesión XMPP de la app, creándola (y cableando sus
