@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk-llm-chat 0.1\n"
 "Report-Msgid-Bugs-To: your@email.com\n"
-"POT-Creation-Date: 2026-07-03 03:18-0500\n"
+"POT-Creation-Date: 2026-07-03 04:01-0500\n"
 "PO-Revision-Date: 2025-06-04 18:45-0500\n"
 "Last-Translator: Sebastian Silva <sebastian@fuentelibre.org>\n"
 "Language-Team: Spanish <es@tp.org.es>\n"
@@ -43,7 +43,7 @@ msgstr "Parámetros del modelo"
 msgid "Conversation"
 msgstr "Conversación"
 
-#: gtk_llm_chat/chat_sidebar.py:101 gtk_llm_chat/chat_application.py:469
+#: gtk_llm_chat/chat_sidebar.py:101 gtk_llm_chat/chat_application.py:495
 msgid "Delete Conversation"
 msgstr "Eliminar conversación"
 
@@ -99,7 +99,7 @@ msgstr "como modelo por defecto para nuevas conversaciones?"
 
 #: gtk_llm_chat/chat_sidebar.py:252 gtk_llm_chat/chat_sidebar.py:331
 #: gtk_llm_chat/model_selector.py:293 gtk_llm_chat/wide_model_selector.py:312
-#: gtk_llm_chat/chat_application.py:472
+#: gtk_llm_chat/chat_application.py:498
 msgid "Cancel"
 msgstr "Cancelar"
 
@@ -172,35 +172,57 @@ msgstr ""
 msgid "Local/Other"
 msgstr "Local/Otro"
 
-#: gtk_llm_chat/chat_window.py:146
+#: gtk_llm_chat/chat_window.py:147
 msgid "Model Settings"
 msgstr "Configuración del modelo"
 
-#: gtk_llm_chat/chat_window.py:154
+#: gtk_llm_chat/chat_window.py:155 gtk_llm_chat/xmpp_roster_sidebar.py:31
+msgid "Contacts"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:161
 msgid "Rename"
 msgstr "Renombrar"
 
-#: gtk_llm_chat/chat_window.py:224
+#: gtk_llm_chat/chat_window.py:167
+#, fuzzy
+msgid "New LLM Conversation"
+msgstr "Nueva conversación"
+
+#: gtk_llm_chat/chat_window.py:168
+#, fuzzy
+msgid "New XMPP Conversation…"
+msgstr "Nueva conversación"
+
+#: gtk_llm_chat/chat_window.py:170
+msgid "XMPP Account…"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:174
+msgid "Main Menu"
+msgstr ""
+
+#: gtk_llm_chat/chat_window.py:249
 msgid "Send"
 msgstr "Enviar"
 
-#: gtk_llm_chat/chat_window.py:600
+#: gtk_llm_chat/chat_window.py:645
 msgid "Connecting…"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:601
+#: gtk_llm_chat/chat_window.py:646
 msgid "Connected"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:602
+#: gtk_llm_chat/chat_window.py:647
 msgid "Disconnected"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:626
+#: gtk_llm_chat/chat_window.py:671
 msgid "Typing…"
 msgstr ""
 
-#: gtk_llm_chat/chat_window.py:742 gtk_llm_chat/wide_model_selector.py:165
+#: gtk_llm_chat/chat_window.py:787 gtk_llm_chat/wide_model_selector.py:165
 msgid "Error"
 msgstr "Error"
 
@@ -290,7 +312,7 @@ msgstr "Cambiar clave API"
 msgid "Select XMPP Contact"
 msgstr ""
 
-#: gtk_llm_chat/xmpp_roster_dialog.py:59
+#: gtk_llm_chat/xmpp_roster_dialog.py:59 gtk_llm_chat/xmpp_roster_sidebar.py:67
 msgid "No contacts in your roster yet"
 msgstr ""
 
@@ -436,6 +458,14 @@ msgstr "Desconocido"
 msgid "Plugin"
 msgstr "Plugin"
 
+#: gtk_llm_chat/xmpp_roster_sidebar.py:54
+msgid "Online"
+msgstr ""
+
+#: gtk_llm_chat/xmpp_roster_sidebar.py:55
+msgid "Offline"
+msgstr ""
+
 #: gtk_llm_chat/chat_application.py:70 gtk_llm_chat/tray_applet.py:430
 msgid ""
 "\n"
@@ -444,31 +474,48 @@ msgstr ""
 "\n"
 "Cerrando aplicación..."
 
-#: gtk_llm_chat/chat_application.py:230
+#: gtk_llm_chat/chat_application.py:256
 msgid "Error: _version.py not found"
 msgstr "Error: _version.py no encontrado"
 
-#: gtk_llm_chat/chat_application.py:470
+#: gtk_llm_chat/chat_application.py:496
 msgid "Are you sure you want to delete the conversation?"
 msgstr "¿Está seguro que desea eliminar la conversación?"
 
-#: gtk_llm_chat/chat_application.py:473
+#: gtk_llm_chat/chat_application.py:499
 msgid "Delete"
 msgstr "Eliminar"
 
-#: gtk_llm_chat/chat_application.py:495
+#: gtk_llm_chat/chat_application.py:521
 msgid "Gtk LLM Chat"
 msgstr "Gtk LLM Chat"
 
-#: gtk_llm_chat/chat_application.py:498
+#: gtk_llm_chat/chat_application.py:524
 msgid "A frontend for LLM"
 msgstr "Un frontend para LLM"
 
-#: gtk_llm_chat/xmpp_client.py:135
+#: gtk_llm_chat/chat_application.py:603
+msgid "Contact request"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:605
+#, python-brace-format
+msgid "{jid} wants to add you as a contact."
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:607
+msgid "Accept"
+msgstr ""
+
+#: gtk_llm_chat/chat_application.py:609
+msgid "Deny"
+msgstr ""
+
+#: gtk_llm_chat/xmpp_client.py:147
 msgid "Connection failed"
 msgstr ""
 
-#: gtk_llm_chat/xmpp_client.py:265
+#: gtk_llm_chat/xmpp_client.py:340
 msgid "Not connected to the XMPP server"
 msgstr ""
 

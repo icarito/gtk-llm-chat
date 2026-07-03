@@ -179,9 +179,35 @@ class LLMChatApplication(Adw.Application):
         about_action.connect("activate", self.on_about_activate)
         self.add_action(about_action)
 
+        new_conversation_action = Gio.SimpleAction.new("new-conversation", None)
+        new_conversation_action.connect(
+            "activate", lambda a, p: self.open_conversation_window({}))
+        self.add_action(new_conversation_action)
+
         new_xmpp_action = Gio.SimpleAction.new("new-xmpp-conversation", None)
         new_xmpp_action.connect("activate", self.on_new_xmpp_conversation_activate)
         self.add_action(new_xmpp_action)
+
+        xmpp_account_action = Gio.SimpleAction.new("xmpp-account", None)
+        xmpp_account_action.connect("activate", self.on_xmpp_account_activate)
+        self.add_action(xmpp_account_action)
+
+        # Acciones parametrizadas por bare JID, invocadas desde las
+        # notificaciones XMPP (spec 002 T5/T6).
+        open_xmpp_action = Gio.SimpleAction.new(
+            "open-xmpp", GLib.VariantType.new('s'))
+        open_xmpp_action.connect("activate", self._on_open_xmpp_action)
+        self.add_action(open_xmpp_action)
+
+        accept_sub_action = Gio.SimpleAction.new(
+            "accept-xmpp-sub", GLib.VariantType.new('s'))
+        accept_sub_action.connect("activate", self._on_accept_xmpp_sub)
+        self.add_action(accept_sub_action)
+
+        deny_sub_action = Gio.SimpleAction.new(
+            "deny-xmpp-sub", GLib.VariantType.new('s'))
+        deny_sub_action.connect("activate", self._on_deny_xmpp_sub)
+        self.add_action(deny_sub_action)
 
     def OpenConversation(self, cid):
         """Abrir una nueva conversación dado un CID"""
@@ -514,36 +540,123 @@ class LLMChatApplication(Adw.Application):
         from .xmpp_account import load_account
         account = load_account()
         if account is None:
-            from .xmpp_account_dialog import XmppAccountDialog
-
-            def on_account_ready(jid):
-                self.on_new_xmpp_conversation_activate(None, None)
-
-            dialog = XmppAccountDialog(
-                parent=self.get_active_window(), on_account_ready=on_account_ready)
-            dialog.present()
+            # Sin cuenta configurada: abrir el setup y reintentar al terminar
+            self._open_xmpp_account_dialog(
+                on_ready=lambda jid: self.on_new_xmpp_conversation_activate(None, None))
             return
 
         jid, password = account
+        session = self._ensure_xmpp_session(jid, password)
+        self._open_xmpp_roster_picker(session)
+
+    def on_xmpp_account_activate(self, action, param):
+        """Abre el diálogo de configuración de cuenta XMPP (siempre, no solo
+        la primera vez): permite configurar o cambiar la cuenta."""
+        self._open_xmpp_account_dialog()
+
+    def _open_xmpp_account_dialog(self, on_ready=None):
+        from .xmpp_account_dialog import XmppAccountDialog
+
+        def _on_ready(jid):
+            # Una cuenta nueva/cambiada invalida la sesión previa
+            old = getattr(self, '_xmpp_session', None)
+            if old is not None:
+                old.shutdown()
+                self._xmpp_session = None
+            if on_ready is not None:
+                on_ready(jid)
+
+        dialog = XmppAccountDialog(
+            parent=self.get_active_window(), on_account_ready=_on_ready)
+        dialog.present()
+
+    def _ensure_xmpp_session(self, jid, password):
+        """Devuelve la sesión XMPP de la app, creándola (y cableando sus
+        notificaciones) la primera vez."""
         session = getattr(self, '_xmpp_session', None)
         if session is None or not session.is_connected:
             from .xmpp_client import XmppSession
             session = XmppSession(jid, password)
             self._xmpp_session = session
+            session.connect('message-received', self._on_xmpp_message_received)
+            session.connect('subscription-request', self._on_xmpp_subscription_request)
             session.connect_to_server()
+        return session
 
-        self._open_xmpp_roster_picker(session)
+    def _on_xmpp_message_received(self, session, bare_jid, body):
+        """Notifica un mensaje XMPP entrante si su ventana no está activa
+        (spec 002 T5). Si la ventana está enfocada, no molesta."""
+        key = f"xmpp:{session.bare_jid}:{bare_jid}"
+        window = self._window_by_cid.get(key)
+        if window is not None and window.is_active():
+            return  # la ve el usuario ahora mismo; no notificar
+        notification = Gio.Notification.new(session.get_contact_name(bare_jid))
+        notification.set_body(body)
+        # 'default' action → abrir/enfocar esa conversación al hacer clic
+        notification.set_default_action_and_target(
+            "app.open-xmpp", GLib.Variant('s', bare_jid))
+        # id = bare JID: mensajes repetidos reemplazan, no se apilan
+        self.send_notification(f"xmpp-msg:{bare_jid}", notification)
+
+    def _on_xmpp_subscription_request(self, session, bare_jid):
+        """Alguien pide vernos: notificación con Aceptar/Rechazar (T6)."""
+        notification = Gio.Notification.new(_("Contact request"))
+        notification.set_body(
+            _("{jid} wants to add you as a contact.").format(jid=bare_jid))
+        notification.add_button(
+            _("Accept"), "app.accept-xmpp-sub::" + bare_jid)
+        notification.add_button(
+            _("Deny"), "app.deny-xmpp-sub::" + bare_jid)
+        self.send_notification(f"xmpp-sub:{bare_jid}", notification)
 
     def _open_xmpp_roster_picker(self, session):
         from .xmpp_roster_dialog import XmppRosterDialog
 
-        def on_contact_selected(bare_jid):
-            conversation = session.get_conversation(bare_jid)
-            self._create_new_window_with_config({}, backend=conversation)
-
         dialog = XmppRosterDialog(
-            session, parent=self.get_active_window(), on_contact_selected=on_contact_selected)
+            session, parent=self.get_active_window(),
+            on_contact_selected=lambda jid: self.open_xmpp_conversation(session, jid))
         dialog.present()
+
+    def open_xmpp_conversation(self, session, bare_jid):
+        """Abre (o enfoca, si ya existe) la ventana de conversación con un
+        contacto XMPP. Spec 002: usado tanto por el picker modal como por
+        el roster sidebar."""
+        # La conversación se está abriendo/enfocando: retirar cualquier
+        # notificación de mensaje pendiente de ese contacto (fix review #1).
+        self.withdraw_notification(f"xmpp-msg:{bare_jid}")
+        key = f"xmpp:{session.bare_jid}:{bare_jid}"
+        # El registro solo contiene ventanas vivas (la limpieza al cerrar es
+        # por valor), así que una entrada presente se enfoca aunque no esté
+        # visible en este instante — no crear una duplicada (fix review #3).
+        existing = self._window_by_cid.get(key)
+        if existing is not None:
+            existing.present()
+            return existing
+        conversation = session.get_conversation(bare_jid)
+        window = self._create_new_window_with_config({}, backend=conversation)
+        self._window_by_cid[key] = window
+        return window
+
+    def _on_open_xmpp_action(self, action, param):
+        """Notificación XMPP clicada: abre/enfoca la conversación con el JID."""
+        bare_jid = param.get_string()
+        session = getattr(self, '_xmpp_session', None)
+        if session is not None:
+            self.open_xmpp_conversation(session, bare_jid)
+
+    def _on_accept_xmpp_sub(self, action, param):
+        """Botón 'Aceptar' de una notificación de solicitud de suscripción."""
+        session = getattr(self, '_xmpp_session', None)
+        if session is not None:
+            session.accept_subscription(param.get_string())
+        self.withdraw_notification(f"xmpp-sub:{param.get_string()}")
+
+    def _on_deny_xmpp_sub(self, action, param):
+        """Botón 'Rechazar' de una notificación de solicitud de suscripción."""
+        session = getattr(self, '_xmpp_session', None)
+        if session is not None:
+            session.deny_subscription(param.get_string())
+        self.withdraw_notification(f"xmpp-sub:{param.get_string()}")
 
     def open_conversation_window(self, config=None):
         """

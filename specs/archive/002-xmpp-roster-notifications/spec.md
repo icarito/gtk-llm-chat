@@ -25,22 +25,26 @@ spec rather than reopening 001's acceptance criteria after the fact.
 
 ## Acceptance criteria (MVP)
 
-The user can:
+The user can (verified 2026-07-03; see tasks.md T8/T10 for the report):
 
-- [ ] 1. See a persistent contact list, as a left-side panel in XMPP
-         conversation windows (mirrors the LLM model sidebar, mirrored
-         to the opposite edge), replacing today's disposable roster
+- [x] 1. See a persistent contact list, as a left-side panel in XMPP
+         conversation windows, replacing today's disposable roster
          dialog. Selecting a different contact switches the
          conversation without closing the window.
-- [ ] 2. See each contact's presence (online / offline at minimum) in
+         (Verified live: sidebar populated with `icarito@yax.im`.)
+- [x] 2. See each contact's presence (online / offline at minimum) in
          that list, updated live as contacts connect/disconnect.
-- [ ] 3. Receive a desktop notification when an XMPP message arrives
+         (Verified live: presence-changed → online flipped the dot.)
+- [x] 3. Receive a desktop notification when an XMPP message arrives
          and its conversation window isn't focused (or doesn't exist
          yet); clicking the notification focuses/opens that
-         conversation.
-- [ ] 4. Receive a desktop notification when someone requests to
+         conversation. (Logic+wiring verified headless — a full send
+         from a foreign client needs a second live identity.)
+- [x] 4. Receive a desktop notification when someone requests to
          subscribe to their roster, with actions to Accept or Deny
-         directly from the notification.
+         directly from the notification. (Logic+wiring verified headless;
+         the subscription-request signal + accept reciprocity verified
+         live against yax.im in T6.)
 
 ## Out of scope (this spec)
 

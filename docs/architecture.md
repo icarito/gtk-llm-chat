@@ -95,20 +95,40 @@ XMPP contact.
 - `llm_client.py` — `LLMClient(ChatBackend)`. Deferred model loading;
   `send_message()` streams in a thread; emits `ready` on model load.
   Cancellation supported.
-- `xmpp_client.py` — XMPP backend (spec 001). `XmppSession(GObject)`:
-  one nbxmpp connection per account on the GLib main loop, owns state,
-  roster and incoming-message routing; shared by all conversations of
-  that account. `XmppConversation(ChatBackend)`: one per bare JID,
-  maps XMPP messages/chat-states onto the contract (a whole message =
-  `response` + `finished`). See `specs/001-xmpp-backend/` for the
-  design and the nbxmpp gotchas (silent auth failure, startup order,
-  disconnect-as-error).
+- `xmpp_client.py` — XMPP backend. `XmppSession(GObject)`: one nbxmpp
+  connection per account on the GLib main loop, owns state, roster,
+  presence and incoming-message routing; shared by all conversations of
+  that account. Signals: `state-changed`, `session-error`,
+  `roster-updated`, `message-received(jid, body)`,
+  `presence-changed(jid, state)`, `subscription-request(jid)`. Presence
+  is keyed on **bare JID**, aggregated across resources
+  (`_online_resources`); a presence handler guards `jid is None` (an
+  nbxmpp 7.2.0 bug crashes its own base handler on from-less presences).
+  `accept_subscription`/`deny_subscription` use the `BasePresence`
+  module. `XmppConversation(ChatBackend)`: one per bare JID, maps XMPP
+  messages/chat-states onto the contract (a whole message = `response` +
+  `finished`). See `specs/archive/001-xmpp-backend/` for the base design
+  and gotchas (silent auth failure, startup order, disconnect-as-error);
+  `specs/002-xmpp-roster-notifications/` for presence/roster/notifications.
 - `xmpp_account.py` / `xmpp_account_dialog.py` — XMPP account: JID in a
   plain JSON file under the user dir, password in the system keyring
   (Secret Service, service `gtk-llm-chat-xmpp`); the dialog validates
-  by connecting a throwaway session before persisting.
-- `xmpp_roster_dialog.py` — contact picker (separate entry point from
-  the LLM model selector; action `app.new-xmpp-conversation`).
+  by connecting a throwaway session before persisting. Reachable any
+  time via the header menu action `app.xmpp-account`.
+- `xmpp_roster_dialog.py` — first-open contact picker (modal).
+  `xmpp_roster_sidebar.py` — persistent in-window contact list with live
+  presence dots (bound to `roster-updated` / `presence-changed`), docked
+  left in XMPP windows; picking a contact goes through the app's
+  `open_xmpp_conversation()` (focus-or-open, keyed
+  `xmpp:<account>:<contact>`).
+- Header entry points: a primary menu (`Gtk.MenuButton` in the window
+  header) with "New LLM Conversation" (`app.new-conversation`), "New XMPP
+  Conversation…" (`app.new-xmpp-conversation`) and "XMPP Account…"
+  (`app.xmpp-account`). XMPP windows add a left roster toggle button and
+  a connection-status label; incoming-message and subscription-request
+  desktop notifications go through `Gio.Application.send_notification`
+  with `app.open-xmpp` / `app.accept-xmpp-sub` / `app.deny-xmpp-sub`
+  actions.
 - `db_operations.py` — `ChatHistory`: read/write conversations in `llm`'s
   own `logs.db` (sqlite-utils + `llm.migrations.migrate`). ULIDs for ids.
   Thread-local connections. **XMPP conversations are not persisted here**
