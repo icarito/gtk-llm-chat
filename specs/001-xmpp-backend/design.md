@@ -12,15 +12,30 @@ Evaluated 2026-07-03:
 | Packaging | In Arch repos (`python-nbxmpp`), PyPI `nbxmpp` | PyPI | — |
 | Fit with our stack | Perfect: same GObject signal world as `LLMClient`, zero loop-integration work | Needs asyncio loop in a worker thread + `GLib.idle_add` bridging (pattern already proven in `llm_client.py`) | — |
 
-**Decision:** start the spike with **nbxmpp**. Its GLib-native design
-removes the whole asyncio↔GTK integration problem, and Gajim's source is
-a working GTK4 reference for every XEP we need. If the spike shows the
-API is too Gajim-coupled for our simple use case, fall back to slixmpp
-in an isolated thread (the `LLMClient` threading pattern applies as-is).
+**Decision (confirmed by spike, 2026-07-03):** **nbxmpp 7.2.0**.
+The spike (`spike/spike_nbxmpp.py`) passed all four checks against
+yax.im — connect+auth, roster fetch, message round-trip, XEP-0085
+chat-state — running directly on the GLib mainloop in ~120 lines.
+slixmpp fallback not needed.
 
-The spike (task 1) must demonstrate: connect to yax.im, auth, fetch
-roster, send/receive a message, receive a chat-state notification —
-in a standalone script, before any UI work.
+### Spike findings (API gotchas for T3)
+
+- `Client` is `Observable`: `subscribe('connected'|'disconnected'|
+  'connection-failed', cb)`; incoming stanzas via
+  `register_handler(StanzaHandler(name='message', callback=cb))` where
+  the callback gets `(client, stanza, properties)`.
+- **Wrong password fails silently** unless you subscribe to
+  `'disconnected'` and inspect `client.get_error()` — `'connection-failed'`
+  only fires for transport-level failures. `XmppClient` must map both
+  paths to its `error`/`state-changed` signals.
+- `properties.has_chatstate` / `properties.chatstate` are properties,
+  not methods; chatstate arrives on the same message handler.
+- An initial `Presence()` must be sent after connect or the server
+  won't route incoming messages to the resource.
+- Roster: `client.get_module('Roster').request_roster()` returns a
+  `Task`; use `add_done_callback(cb)` + `task.finish()`.
+- Messages sent to your own bare JID are reflected back by the server —
+  handy for tests without a second account.
 
 ## Backend abstraction
 

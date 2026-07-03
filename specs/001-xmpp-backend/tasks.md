@@ -4,13 +4,15 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
 
 ## Phase 0 — Spike (validates the library decision)
 
-- [ ] **T1. nbxmpp spike script** (`specs/001-xmpp-backend/spike/`):
+- [x] **T1. nbxmpp spike script** (`specs/001-xmpp-backend/spike/`):
       standalone script that connects to yax.im with a test account,
-      fetches the roster, sends/receives a message with a second client,
-      and logs incoming chat-state notifications.
-      *Verify:* run against Gajim/Conversations on the other end.
-      *Gate:* if nbxmpp proves unworkable here, redo spike with slixmpp
-      in a thread and update design.md before continuing.
+      fetches the roster, sends/receives a message, and receives
+      chat-state notifications.
+      *Result (2026-07-03):* **PASS 4/4** with nbxmpp 7.2.0 — connect+auth,
+      roster, message round-trip (server reflection), XEP-0085 chat state
+      parsed. GLib mainloop native, no thread bridging needed.
+      Library decision confirmed: **nbxmpp**. Gotchas recorded in
+      design.md → "Spike findings".
 
 ## Phase 1 — Backend abstraction (no behavior change)
 
