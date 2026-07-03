@@ -9,11 +9,10 @@ shipped in v4.x is dropped from this list.
 - [x] **XMPP backend (Layer 1)** — 1:1 chat with agents/contacts over
       XMPP, typing indicators, connection status. Done & archived:
       [specs/archive/001-xmpp-backend/](../specs/archive/001-xmpp-backend/spec.md).
-- [ ] **XMPP roster & notifications (Layer 2)** — persistent left-docked
+- [x] **XMPP roster & notifications (Layer 2)** — persistent left-docked
       roster with live presence, desktop notifications for incoming
-      messages and subscription requests. Implemented on
-      `feat/xmpp-roster-notifications`, pending verify/review/merge:
-      [specs/002-xmpp-roster-notifications/](../specs/002-xmpp-roster-notifications/spec.md).
+      messages and subscription requests. Done & archived:
+      [specs/archive/002-xmpp-roster-notifications/](../specs/archive/002-xmpp-roster-notifications/spec.md).
 - [ ] **Drop tray applet, unify sidebar navigation** — remove the
       systray (portability blocker); conversation list moves into a
       left sidebar mirroring the XMPP roster, options go a level deeper,
