@@ -11,8 +11,14 @@ shipped in v4.x is dropped from this list.
       [specs/archive/001-xmpp-backend/](../specs/archive/001-xmpp-backend/spec.md).
 - [ ] **XMPP roster & notifications (Layer 2)** — persistent left-docked
       roster with live presence, desktop notifications for incoming
-      messages and subscription requests. Spec (draft):
+      messages and subscription requests. Implemented on
+      `feat/xmpp-roster-notifications`, pending verify/review/merge:
       [specs/002-xmpp-roster-notifications/](../specs/002-xmpp-roster-notifications/spec.md).
+- [ ] **Drop tray applet, unify sidebar navigation** — remove the
+      systray (portability blocker); conversation list moves into a
+      left sidebar mirroring the XMPP roster, options go a level deeper,
+      two-row header. Spec (draft):
+      [specs/003-drop-tray-unified-sidebar/](../specs/003-drop-tray-unified-sidebar/spec.md).
 - [ ] **XMPP Layer 3+** — MAM server-side history, MUC, PubSub, OMEMO.
 - [ ] _(further feature ideas start as `specs/<NNN>-<slug>/spec.md`)_
 
