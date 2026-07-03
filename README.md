@@ -53,7 +53,9 @@ pipx install llm               # required by gtk-llm-chat
 llm install gtk-llm-chat
 ```
 
-You may want to copy the provided .desktop files to your ~/.local/share/applications/ folder. A welcome assistant will do this in the future for you.
+If you installed from source rather than a release bundle, running
+`desktop/install-dev.sh` will put `gtk-llm-chat` in your `PATH` and
+register it (with its icon) in your desktop's application launcher.
 
 
 ### System Requirements

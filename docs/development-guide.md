@@ -19,6 +19,24 @@ python -m venv --system-site-packages .venv
 On Debian/Ubuntu the equivalents are `libgtk-4-dev libadwaita-1-dev
 python3-gi gobject-introspection`; on other distros see the README.
 
+## Desktop integration (optional, for daily use)
+
+`pip install -e .` gives you the `gtk-llm-chat` command inside the venv,
+but nothing puts it in the GNOME launcher or gives it its icon — the
+`.desktop` file has to be installed separately. Do that with:
+
+```bash
+desktop/install-dev.sh              # symlinks the venv binary into
+                                     # ~/.local/bin, installs the
+                                     # .desktop and icons under ~/.local
+desktop/install-dev.sh --uninstall  # removes all of the above
+```
+
+After this, `gtk-llm-chat` works from any terminal (via the
+`~/.local/bin` symlink) and the app shows up in the GNOME app grid with
+its icon. Re-run it if you recreate the `.venv` (the symlink target
+stays the same, so usually you don't even need to).
+
 ## Running
 
 ```bash
