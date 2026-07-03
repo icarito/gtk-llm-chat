@@ -160,6 +160,11 @@ class XmppSession(GObject.Object):
             self.emit('session-error', str(err))
             roster = None
         if roster is not None:
+            # Reiniciar el estado de presencia: tras una (re)carga de roster
+            # las presencias se reciben de nuevo. Sin esto, un reconnect del
+            # mismo objeto sesión dejaría recursos "online" fantasma que
+            # impiden detectar el flip offline→online (fix review #2).
+            self._online_resources = {}
             self.roster_items = {}
             for item in roster.items:
                 bare = str(item.jid.bare)

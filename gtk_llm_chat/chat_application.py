@@ -621,9 +621,15 @@ class LLMChatApplication(Adw.Application):
         """Abre (o enfoca, si ya existe) la ventana de conversación con un
         contacto XMPP. Spec 002: usado tanto por el picker modal como por
         el roster sidebar."""
+        # La conversación se está abriendo/enfocando: retirar cualquier
+        # notificación de mensaje pendiente de ese contacto (fix review #1).
+        self.withdraw_notification(f"xmpp-msg:{bare_jid}")
         key = f"xmpp:{session.bare_jid}:{bare_jid}"
+        # El registro solo contiene ventanas vivas (la limpieza al cerrar es
+        # por valor), así que una entrada presente se enfoca aunque no esté
+        # visible en este instante — no crear una duplicada (fix review #3).
         existing = self._window_by_cid.get(key)
-        if existing is not None and existing.is_visible():
+        if existing is not None:
             existing.present()
             return existing
         conversation = session.get_conversation(bare_jid)
