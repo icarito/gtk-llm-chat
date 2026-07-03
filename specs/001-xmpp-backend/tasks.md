@@ -41,9 +41,20 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       orden de arranque debe ser roster → presence → 'connected'; si se
       envía antes del presence inicial el servidor encola el mensaje
       como offline. Dependencia `nbxmpp` añadida a pyproject/requirements.
-- [ ] **T4. Credentials**: JID config file + password in keyring;
+- [x] **T4. Credentials**: JID config file + password in keyring;
       account setup dialog ("Add XMPP account…").
-      *Verify:* password absent from disk; reconnect works after restart.
+      *Result (2026-07-03):* `xmpp_account.py` (JSON with only the JID
+      under the app's user dir + password via `keyring`/Secret Service,
+      service name `gtk-llm-chat-xmpp`) and `xmpp_account_dialog.py`
+      (`Adw.Window` with `EntryRow`/`PasswordEntryRow`, validates by
+      actually connecting a throwaway `XmppSession` before persisting).
+      Verified headless end-to-end against yax.im, both paths: (1) happy
+      path — dialog connects, persists, calls back with the JID, and a
+      simulated restart (fresh `load_account()`) recovers the same
+      password; confirmed the on-disk file contains only `{"jid": ...}`,
+      no password. (2) wrong password — nothing persisted, no callback,
+      error surfaced in the dialog's UI label
+      ("StreamError.SASL: not-authorized").
 - [ ] **T5. Send/receive messages** bound to a `ChatWindow` via the
       `ChatBackend` contract (message in → bubble; `response`+`finished`
       on receive).

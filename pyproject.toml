@@ -20,6 +20,7 @@ dependencies = [
     'llm-perplexity',
     'llm-anthropic',
     'llm-openrouter',
+    'keyring',
     'markdown-it-py',
     'nbxmpp',
     'python-ulid',

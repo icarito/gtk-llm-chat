@@ -1,0 +1,145 @@
+"""
+xmpp_account_dialog.py - diálogo "Add XMPP account…" (spec 001, T4).
+
+Ventana simple: JID + contraseña, botón Connect. En éxito persiste la
+cuenta (xmpp_account.save_account) y notifica vía callback para que el
+selector pueda abrir el roster; en fallo muestra el error y deja
+reintentar sin perder lo escrito.
+"""
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, GLib
+
+from .chat_application import _
+from .debug_utils import debug_print
+from .style_manager import style_manager
+from .xmpp_account import save_account
+from .xmpp_client import XmppSession, STATE_CONNECTED, STATE_DISCONNECTED
+
+
+class XmppAccountDialog(Adw.Window):
+    """Pide JID + contraseña, valida conectando de verdad, y persiste."""
+
+    def __init__(self, parent=None, on_account_ready=None):
+        super().__init__(modal=True, transient_for=parent)
+        self._on_account_ready = on_account_ready
+        self._probe_session = None
+
+        self.set_title(_("Add XMPP Account"))
+        self.set_default_size(380, -1)
+        style_manager.apply_to_widget(self, "main-container")
+
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(True)
+
+        self.jid_row = Adw.EntryRow(title=_("JID (e.g. user@yax.im)"))
+        self.password_row = Adw.PasswordEntryRow(title=_("Password"))
+
+        group = Adw.PreferencesGroup()
+        group.add(self.jid_row)
+        group.add(self.password_row)
+
+        self.status_label = Gtk.Label(label="")
+        self.status_label.set_wrap(True)
+        self.status_label.add_css_class("error")
+        self.status_label.set_visible(False)
+
+        self.connect_button = Gtk.Button(label=_("Connect"))
+        self.connect_button.add_css_class("suggested-action")
+        self.connect_button.connect('clicked', self._on_connect_clicked)
+
+        self.spinner = Gtk.Spinner()
+        self.spinner.set_visible(False)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(24)
+        content.set_margin_bottom(24)
+        content.set_margin_start(24)
+        content.set_margin_end(24)
+        content.append(group)
+        content.append(self.status_label)
+
+        button_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END)
+        button_box.append(self.spinner)
+        button_box.append(self.connect_button)
+        content.append(button_box)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(content)
+        self.set_content(toolbar_view)
+
+        self.password_row.connect('entry-activated', self._on_connect_clicked)
+
+    def _set_busy(self, busy: bool):
+        self.connect_button.set_sensitive(not busy)
+        self.jid_row.set_sensitive(not busy)
+        self.password_row.set_sensitive(not busy)
+        self.spinner.set_visible(busy)
+        if busy:
+            self.spinner.start()
+        else:
+            self.spinner.stop()
+
+    def _show_error(self, message: str):
+        self.status_label.set_label(message)
+        self.status_label.set_visible(True)
+
+    def _on_connect_clicked(self, _widget):
+        jid = self.jid_row.get_text().strip()
+        password = self.password_row.get_text()
+        if not jid or not password:
+            self._show_error(_("Enter both a JID and a password."))
+            return
+
+        self.status_label.set_visible(False)
+        self._set_busy(True)
+
+        # Sesión de prueba: solo valida credenciales, no se reutiliza.
+        # send_message() no aplica aquí (aún no hay UI de conversación).
+        self._probe_session = XmppSession(jid, password)
+
+        def on_state(_session, state):
+            self._on_probe_state(jid, password, state)
+
+        self._probe_session.connect('state-changed', on_state)
+        self._probe_session.connect('session-error', self._on_probe_error)
+        self._probe_session.connect_to_server()
+
+        def on_timeout():
+            if self._probe_session is not None:
+                self._show_error(_("Connection timed out."))
+                self._cleanup_probe()
+            return GLib.SOURCE_REMOVE
+        GLib.timeout_add_seconds(20, on_timeout)
+
+    def _on_probe_state(self, jid, password, state):
+        if state == STATE_CONNECTED:
+            debug_print(f"XmppAccountDialog: credenciales válidas para {jid}")
+            try:
+                save_account(jid, password)
+            except RuntimeError as err:
+                self._show_error(str(err))
+                self._cleanup_probe()
+                return
+            self._cleanup_probe()
+            self._set_busy(False)
+            if self._on_account_ready:
+                self._on_account_ready(jid)
+            self.close()
+        elif state == STATE_DISCONNECTED and self._probe_session is not None:
+            # Se desconectó antes de confirmar 'connected': el error ya
+            # llegó (o llegará) por 'session-error'.
+            self._cleanup_probe()
+
+    def _on_probe_error(self, _session, message):
+        self._show_error(_("Could not connect: {error}").format(error=message))
+        self._set_busy(False)
+
+    def _cleanup_probe(self):
+        if self._probe_session is not None:
+            session, self._probe_session = self._probe_session, None
+            session.shutdown()
+            self._set_busy(False)

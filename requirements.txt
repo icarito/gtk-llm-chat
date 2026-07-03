@@ -1,4 +1,5 @@
 pygobject
+keyring
 markdown-it-py
 nbxmpp
 python-ulid
