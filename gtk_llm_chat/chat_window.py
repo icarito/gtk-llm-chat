@@ -130,6 +130,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
 
+        # --- Indicador de estado de conexión (solo backends no-LLM, spec 001) ---
+        self.connection_status_label = Gtk.Label()
+        self.connection_status_label.add_css_class("dim-label")
+        self.connection_status_label.add_css_class("caption")
+        self.connection_status_label.set_visible(self._injected_backend)
+        if self._injected_backend:
+            self.header.pack_start(self.connection_status_label)
+
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
@@ -235,7 +243,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.backend.connect('response', self._on_llm_response)
             self.backend.connect('error', self._on_llm_error)
             self.backend.connect('finished', self._on_llm_finished)
+            self.backend.connect('state-changed', self._on_backend_state_changed)
             self.title_widget.set_subtitle(self.backend.get_display_name())
+            # Estado inicial: la sesión puede ya estar 'connected' antes de
+            # que esta ventana exista (el roster picker implica sesión viva).
+            session = getattr(self.backend, 'session', None)
+            self._update_connection_status(session.state if session else 'connected')
             self.model_sidebar = None
         else:
             # Initialize the backend *after* basic UI setup
@@ -560,6 +573,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         return message_widget
 
+    def _update_connection_status(self, state):
+        """Refleja el estado de conexión del backend en el header (spec 001, T7)."""
+        labels = {
+            'connecting': _("Connecting…"),
+            'connected': _("Connected"),
+            'disconnected': _("Disconnected"),
+        }
+        self.connection_status_label.set_label(labels.get(state, state))
+        self.connection_status_label.remove_css_class("error")
+        if state == 'disconnected':
+            self.connection_status_label.add_css_class("error")
+
+    def _on_backend_state_changed(self, backend, state):
+        """Maneja la señal 'state-changed' del backend (spec 001, T7)."""
+        debug_print(f"Estado de conexión del backend: {state}")
+        self._update_connection_status(state)
+
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
         debug_print(f"Backend listo: {display_name}")
@@ -655,6 +685,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
         debug_print(message, file=sys.stderr)
+        if self._injected_backend:
+            # Un error de sesión (p.ej. roster fallido) no siempre viene
+            # acompañado de 'state-changed'; reflejarlo igual en el header.
+            self.connection_status_label.set_label(_("Error"))
+            self.connection_status_label.add_css_class("error")
         # Verificar si el widget actual existe y es hijo del messages_box
         if self.current_message_widget is not None:
             is_child = (self.current_message_widget.get_parent() ==

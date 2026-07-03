@@ -82,13 +82,22 @@ Small, individually verifiable. Feature branch: `feat/xmpp-backend`.
       "Backend listo: <model>" behavior; separately, a real
       `LLMChatWindow(backend=xmpp_conversation)` shows the contact JID
       as subtitle and hides the model-sidebar toggle. (AC 3)
-- [ ] **T7. XMPP window chrome**: connection state indicator (connected/
+- [x] **T7. XMPP window chrome**: connection state indicator (connected/
       disconnected/error) somewhere visible in the header, driven by
       `state-changed`. Contact name in header and hiding LLM-only
       controls already landed in T5/T6 (subtitle = contact JID, sidebar
       toggle hidden entirely for injected backends — there's no
       temperature/system-prompt/API-key UI shown at all, so nothing left
       to selectively hide). (AC 2)
+      *Result (2026-07-03):* `connection_status_label` in the header,
+      visible only for injected backends, driven by `state-changed`
+      ("Connecting…"/"Connected"/"Disconnected", the last with an
+      `error` CSS class) plus a fallback on the `error` signal for
+      session errors that don't carry a state transition (e.g. a failed
+      roster fetch). Verified live against yax.im: label goes
+      Connected → Disconnected with the error style the instant the
+      session drops. Regression: the label is hidden for ordinary
+      (non-injected) LLM windows.
 - [ ] **T8. Typing indicators** (XEP-0085) both directions:
       show "typing…" from remote; emit our own composing state. (AC 5)
 
