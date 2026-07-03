@@ -18,32 +18,46 @@ isn't merged yet — decide at start).
 
 ## Phase 1 — Presence in the session (no UI)
 
-- [ ] **T2. Presence tracking in `XmppSession`**: register a presence
+- [x] **T2. Presence tracking in `XmppSession`**: register a presence
       handler; maintain `roster_items[bare_jid]['presence']`
       ('online'/'offline') aggregated across resources; emit a new
       `presence-changed(bare_jid, state)` signal. Guard against the
       None-`jid` case (design.md).
-      *Verify:* headless — connect, log presence-changed events for the
-      test account's own resources (open a second client / the Dino
-      resource seen in the spike) and assert online→offline transitions.
+      *Result (2026-07-03):* `_on_presence` keys online resources per
+      bare JID in `_online_resources` and only emits `presence-changed`
+      on an actual online↔offline flip; ignores non-presence types and
+      JIDs outside the roster; guards `jid is None`. Verified live: with
+      `icarito@yax.im` mutually subscribed, connecting fired
+      `presence-changed: icarito@yax.im -> online` and the roster row
+      showed `presence=online sub=to`.
 
 ## Phase 2 — Roster sidebar
 
-- [ ] **T3. `XmppRosterSidebar` widget** (new): list of contacts with
+- [x] **T3. `XmppRosterSidebar` widget** (new): list of contacts with
       name + presence dot, bound to `roster-updated` and
-      `presence-changed`. Model it on `chat_sidebar.py`.
-      *Verify:* headless construct with a fake/populated session, assert
-      rows render and a `presence-changed` emission flips the dot.
-- [ ] **T4. Dock it left in the XMPP window**: add a second
-      `Adw.OverlaySplitView` sidebar (or reuse with `PackType.START`)
-      shown only for injected XMPP backends, with a header toggle
-      button; selecting a contact focuses-or-opens that conversation
-      (per design.md's leaning). Retire the modal `XmppRosterDialog` as
-      the primary picker (keep it only if still needed for first open).
-      *Verify:* run the app, open an XMPP conversation, confirm the
-      left sidebar lists contacts with live presence and picking one
-      opens/focuses its window. Regression: LLM windows and 001's
-      right-side model sidebar unchanged. (AC 1, AC 2)
+      `presence-changed`.
+      *Result (2026-07-03):* `xmpp_roster_sidebar.py` — persistent Box
+      with a `navigation-sidebar` list; each row a contact with a
+      `media-record-symbolic` dot (`success` when online, `dim-label`
+      when offline) updated in place on `presence-changed`; `shutdown()`
+      drops the session handlers. Verified headless: populates, reflects
+      initial presence, flips the dot live, fires the selection
+      callback, and stops updating after shutdown.
+- [x] **T4. Dock it left in the XMPP window** + toolbar button: reuse the
+      window's `Adw.OverlaySplitView` with `PackType.START` (opposite the
+      LLM model sidebar's END), shown only for injected XMPP backends,
+      toggled by a new left-docked `roster_button` (`system-users-symbolic`,
+      pack_start). Selecting a contact calls the app's new
+      `open_xmpp_conversation()` (focus-or-open, keyed
+      `xmpp:<account>:<contact>` in `_window_by_cid`); window-close
+      cleanup now removes registry entries by value so both LLM CIDs and
+      XMPP keys are covered. The modal `XmppRosterDialog` stays as the
+      first-open picker from the app action.
+      *Result (2026-07-03):* verified — structure (roster button left &
+      visible, model button hidden, sidebar at START) and **live**: a
+      real window's roster sidebar showed `icarito@yax.im` as Online off
+      the real session. Regression: LLM windows keep the right-side model
+      sidebar and no roster button; app launches clean. (AC 1, AC 2)
 
 ## Phase 3 — Notifications
 

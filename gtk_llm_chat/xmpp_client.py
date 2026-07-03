@@ -47,7 +47,12 @@ class XmppSession(GObject.Object):
         'roster-updated': (GObject.SignalFlags.RUN_LAST, None, ()),
         # bare_jid, body — para mensajes sin conversación abierta (T6)
         'message-received': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        # bare_jid, state ('online'/'offline') — presencia de un contacto (spec 002)
+        'presence-changed': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
     }
+
+    PRESENCE_ONLINE = 'online'
+    PRESENCE_OFFLINE = 'offline'
 
     def __init__(self, jid: str, password: str, resource: str = RESOURCE):
         GObject.Object.__init__(self)
@@ -57,9 +62,12 @@ class XmppSession(GObject.Object):
         self._client = None
         self._state = STATE_DISCONNECTED
         self._disconnect_requested = False
-        # bare jid (str) -> dict(name=..., subscription=...)
+        # bare jid (str) -> dict(name=..., subscription=..., presence=...)
         self.roster_items = {}
         self._roster_loaded = False
+        # bare jid (str) -> set de recursos online; un contacto está
+        # 'online' si tiene al menos un recurso disponible (spec 002 spike)
+        self._online_resources = {}
         # bare jid (str) -> XmppConversation
         self._conversations = {}
 
@@ -101,6 +109,8 @@ class XmppSession(GObject.Object):
         client.subscribe('connection-failed', self._on_connection_failed)
         client.register_handler(
             StanzaHandler(name='message', callback=self._on_message))
+        client.register_handler(
+            StanzaHandler(name='presence', callback=self._on_presence))
         self._client = client
         self._disconnect_requested = False
         self._set_state(STATE_CONNECTING)
@@ -150,9 +160,12 @@ class XmppSession(GObject.Object):
         if roster is not None:
             self.roster_items = {}
             for item in roster.items:
-                self.roster_items[str(item.jid.bare)] = {
+                bare = str(item.jid.bare)
+                self.roster_items[bare] = {
                     'name': item.name,
                     'subscription': item.subscription,
+                    # Presencia inicial desconocida = offline hasta recibir <presence>
+                    'presence': self.PRESENCE_OFFLINE,
                 }
             self._roster_loaded = True
             debug_print(f"XmppSession: roster con {len(self.roster_items)} contactos")
@@ -167,6 +180,42 @@ class XmppSession(GObject.Object):
         if item and item.get('name'):
             return item['name']
         return bare_jid
+
+    def get_presence(self, bare_jid: str) -> str:
+        item = self.roster_items.get(bare_jid)
+        return item.get('presence', self.PRESENCE_OFFLINE) if item else self.PRESENCE_OFFLINE
+
+    # --- Presencia (spec 002) ---
+
+    def _on_presence(self, _client, _stanza, properties):
+        # El handler base de nbxmpp 7.2.0 puede haber crasheado antes en
+        # presencias sin 'from' (bug conocido, va a stderr sin tumbar el
+        # stream). Aquí guardamos igual contra jid None.
+        if properties.jid is None or properties.type is None:
+            return
+        ptype = properties.type
+        # Ignorar subscribe/subscribed/etc. aquí; solo available/unavailable
+        # importan para presencia. (subscribe se maneja en T6.)
+        if ptype.value not in (None, 'unavailable'):
+            return
+        bare = str(properties.jid.bare)
+        resource = properties.jid.resource
+        if bare not in self.roster_items:
+            # Presencia de alguien fuera del roster (p.ej. nosotros mismos);
+            # no la mostramos en la lista de contactos.
+            return
+        resources = self._online_resources.setdefault(bare, set())
+        was_online = bool(resources)
+        if ptype.value == 'unavailable':
+            resources.discard(resource)
+        else:  # available
+            resources.add(resource)
+        is_online = bool(resources)
+        if is_online != was_online:
+            state = self.PRESENCE_ONLINE if is_online else self.PRESENCE_OFFLINE
+            self.roster_items[bare]['presence'] = state
+            debug_print(f"XmppSession: presencia {bare} -> {state}")
+            self.emit('presence-changed', bare, state)
 
     # --- Mensajes ---
 

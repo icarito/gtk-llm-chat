@@ -537,13 +537,24 @@ class LLMChatApplication(Adw.Application):
     def _open_xmpp_roster_picker(self, session):
         from .xmpp_roster_dialog import XmppRosterDialog
 
-        def on_contact_selected(bare_jid):
-            conversation = session.get_conversation(bare_jid)
-            self._create_new_window_with_config({}, backend=conversation)
-
         dialog = XmppRosterDialog(
-            session, parent=self.get_active_window(), on_contact_selected=on_contact_selected)
+            session, parent=self.get_active_window(),
+            on_contact_selected=lambda jid: self.open_xmpp_conversation(session, jid))
         dialog.present()
+
+    def open_xmpp_conversation(self, session, bare_jid):
+        """Abre (o enfoca, si ya existe) la ventana de conversación con un
+        contacto XMPP. Spec 002: usado tanto por el picker modal como por
+        el roster sidebar."""
+        key = f"xmpp:{session.bare_jid}:{bare_jid}"
+        existing = self._window_by_cid.get(key)
+        if existing is not None and existing.is_visible():
+            existing.present()
+            return existing
+        conversation = session.get_conversation(bare_jid)
+        window = self._create_new_window_with_config({}, backend=conversation)
+        self._window_by_cid[key] = window
+        return window
 
     def open_conversation_window(self, config=None):
         """

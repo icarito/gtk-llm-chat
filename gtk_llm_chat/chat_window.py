@@ -76,6 +76,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.backend = backend
         self._injected_backend = backend is not None
         self._composing_timeout_id = None
+        self.roster_sidebar = None
 
         # Configurar la ventana principal
         # Si hay un CID, intentar obtener el título de la conversación desde el inicio
@@ -148,6 +149,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
         self.sidebar_button.set_visible(not self._injected_backend)
 
+        # Botón de contactos (roster) a la IZQUIERDA, solo para XMPP (spec 002)
+        self.roster_button = Gtk.ToggleButton()
+        resource_manager.set_widget_icon_name(self.roster_button, "system-users-symbolic")
+        self.roster_button.set_tooltip_text(_("Contacts"))
+        self.roster_button.set_visible(self._injected_backend)
+
         # Crear botón Rename
         rename_button = Gtk.Button()
         resource_manager.set_widget_icon_name(rename_button, "document-edit-symbolic")
@@ -156,6 +163,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.header.pack_end(self.sidebar_button)
         self.header.pack_end(rename_button)
+        self.header.pack_start(self.roster_button)
 
         # --- Fin Botones Header Bar ---
 
@@ -168,9 +176,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_max_sidebar_width(400)
         self.split_view.set_sidebar_position(Gtk.PackType.END)
 
-        # Conectar la propiedad 'show-sidebar' del split_view al estado del botón
+        # Conectar la propiedad 'show-sidebar' del split_view al botón que
+        # corresponda: el de modelo (derecha) en modo LLM, el de contactos
+        # (izquierda) en modo XMPP.
+        toggle_button = self.roster_button if self._injected_backend else self.sidebar_button
         self.split_view.bind_property(
-            "show-sidebar", self.sidebar_button, "active",
+            "show-sidebar", toggle_button, "active",
             GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
         )
         # Conectar al cambio de 'show-sidebar' para cambiar el icono y foco
@@ -253,6 +264,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._last_connection_state = session.state if session else 'connected'
             self._update_connection_status(self._last_connection_state)
             self.model_sidebar = None
+            # Panel de contactos (roster) dockeado a la IZQUIERDA (spec 002),
+            # opuesto al sidebar de modelo LLM que va a la derecha.
+            if session is not None:
+                from .xmpp_roster_sidebar import XmppRosterSidebar
+                self.roster_sidebar = XmppRosterSidebar(
+                    session, on_contact_selected=self._on_roster_contact_selected)
+                self.split_view.set_sidebar_position(Gtk.PackType.START)
+                self.split_view.set_sidebar(self.roster_sidebar)
         else:
             # Initialize the backend *after* basic UI setup
             try:
@@ -334,6 +353,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if self.model_sidebar is not None:
                 self.model_sidebar.stack.set_visible_child_name("actions")
             self.input_text.grab_focus()
+
+    def _on_roster_contact_selected(self, bare_jid):
+        """Un contacto elegido en el roster sidebar (spec 002): abre/enfoca
+        su ventana de conversación. Delega en la aplicación, que mantiene el
+        registro de ventanas por conversación."""
+        app = self.get_application()
+        session = getattr(self.backend, 'session', None)
+        if app is not None and session is not None and \
+                hasattr(app, 'open_xmpp_conversation'):
+            app.open_xmpp_conversation(session, bare_jid)
+        # Colapsar el panel tras elegir, para dar foco al chat
+        self.split_view.set_show_sidebar(False)
 
     def _setup_css(self):
         """Aplica estilos CSS específicos para la ventana de chat."""
@@ -857,12 +888,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # sesión compartida; LLMClient: no-op). Seguro llamarlo siempre.
         if self.backend is not None:
             self.backend.shutdown()
-        # Eliminar del registro de ventanas si corresponde
+        # El roster sidebar también tiene handlers en la sesión compartida.
+        if self.roster_sidebar is not None:
+            self.roster_sidebar.shutdown()
+        # Eliminar del registro de ventanas (por valor: cubre tanto las
+        # claves por CID de LLM como las claves "xmpp:…" de spec 002).
         app = self.get_application()
-        cid = getattr(self, 'cid', None)
-        if hasattr(app, '_window_by_cid') and cid and cid in app._window_by_cid:
-            debug_print(f"Eliminando ventana del registro para CID: {cid}")
-            del app._window_by_cid[cid]
+        if hasattr(app, '_window_by_cid'):
+            for key, win in list(app._window_by_cid.items()):
+                if win is self:
+                    debug_print(f"Eliminando ventana del registro: {key}")
+                    del app._window_by_cid[key]
         # Lógica de cierre global: si es la última ventana
         if len(app.get_windows()) <= 1:
             debug_print("Última ventana cerrada saliendo de la aplicación (desde chat_window)")
