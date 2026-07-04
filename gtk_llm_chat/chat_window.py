@@ -69,19 +69,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 "Warning: chat_history not provided to LLMChatWindow, creating new instance.")
             self.chat_history = ChatHistory()
 
-        # Backend de conversación (contrato ChatBackend). Si se inyecta uno
-        # (p.ej. XmppConversation), se usa tal cual y se omite todo lo
-        # específico de LLMClient (sidebar de modelo, modelo por defecto).
-        # Si no, el comportamiento es exactamente el de siempre: se crea
-        # un LLMClient más abajo, tras el setup básico de la UI.
-        self.backend = backend
-        # xmpp_session: sesión XMPP sin contacto elegido todavía (spec 003).
-        # La ventana existe, muestra el roster, pero no hay conversación
-        # activa hasta que el usuario elige una fila.
-        self._xmpp_session = xmpp_session
+        # Estado del backend (contrato ChatBackend) y su sidebar — inicializado
+        # aquí y poblado de verdad por _bind_backend() más abajo en este
+        # __init__ (y, potencialmente, de nuevo más tarde para transformar
+        # la ventana in-place; spec 003 T7). _injected_backend se calcula ya
+        # (solo depende de los parámetros de entrada, no del backend en sí)
+        # porque el chrome del header construido más abajo decide su propio
+        # aspecto (qué botón mostrar, a qué lado) según este flag.
+        self.backend = None
+        self._xmpp_session = None
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
         self.roster_sidebar = None
+        self.model_sidebar = None
         self.model_options = None
 
         # Configurar la ventana principal
@@ -196,14 +196,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_max_sidebar_width(400)
         self.split_view.set_sidebar_position(Gtk.PackType.END)
 
-        # Conectar la propiedad 'show-sidebar' del split_view al botón que
-        # corresponda: el de modelo (derecha) en modo LLM, el de contactos
-        # (izquierda) en modo XMPP.
-        toggle_button = self.roster_button if self._injected_backend else self.sidebar_button
-        self.split_view.bind_property(
-            "show-sidebar", toggle_button, "active",
-            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
-        )
+        # El binding 'show-sidebar' <-> botón toggle se crea en _bind_backend
+        # (spec 003, T7), ya que depende de qué botón corresponde al tipo de
+        # backend actual y puede cambiar si la ventana se re-bindea.
         # Conectar al cambio de 'show-sidebar' para cambiar el icono y foco
         self.split_view.connect("notify::show-sidebar", self._on_sidebar_visibility_changed)
 
@@ -266,20 +261,109 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Establecer el contenido principal en el split_view
         self.split_view.set_content(chat_content_box)
 
-        # --- Panel Lateral (Sidebar) ---
+        # --- Panel Lateral (Sidebar) y backend ---
+        # Extraído a _bind_backend (spec 003, T7): el chrome de arriba (header,
+        # split_view, área de chat) se construye una sola vez aquí; el backend
+        # y su sidebar se pueden re-bindear más tarde sobre la misma ventana
+        # sin reconstruir nada — ver _bind_backend / _unbind_backend.
+        self._bind_backend(backend=backend, xmpp_session=xmpp_session)
+
+        # --- Ensamblado Final ---
+        # El contenedor principal ahora incluye la HeaderBar y el SplitView
+        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root_box.append(self.header)
+        root_box.append(self.split_view) # Añadir el split_view aquí
+
+        # Establecer el contenido de la ventana
+        self.set_content(root_box) # El root_box es el nuevo contenido
+
+        # Agregar CSS provider
+        self._setup_css()
+
+        # Agregar soporte para cancelación
+        self.current_message_widget = None
+        self.accumulated_response = ""
+
+        # Add a focus controller to the window
+        focus_controller_window = Gtk.EventControllerFocus.new()
+        focus_controller_window.connect("enter", self._on_focus_enter)
+        self.add_controller(focus_controller_window)
+
+
+    def _unbind_backend(self):
+        """Suelta el backend y el sidebar actuales de esta ventana (spec 003,
+        T7): desconecta handlers de sesiones compartidas y limpia las
+        referencias, dejando la ventana lista para un _bind_backend nuevo o
+        para cerrarse. Idempotente — seguro llamarla aunque no haya nada que
+        soltar (ventana recién construida)."""
+        if self._composing_timeout_id:
+            GLib.source_remove(self._composing_timeout_id)
+            self._composing_timeout_id = None
+        if self.backend is not None:
+            self.backend.shutdown()
+        if self.roster_sidebar is not None:
+            self.roster_sidebar.shutdown()
+            self.roster_sidebar = None
+        self.model_sidebar = None
+        self.model_options = None
+        self.backend = None
+        self._xmpp_session = None
+        # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
+        # si no, cada _bind_backend acumularía otro binding sobre la misma
+        # propiedad (fuga y comportamiento errático al alternar toggles).
+        if getattr(self, '_sidebar_toggle_binding', None) is not None:
+            self._sidebar_toggle_binding.unbind()
+            self._sidebar_toggle_binding = None
+
+    def _bind_backend(self, backend=None, xmpp_session=None):
+        """Conecta un backend (y su sidebar) a esta ventana — spec 003, T7.
+
+        Se llama una vez desde __init__ para el estado inicial, y puede
+        volver a llamarse más tarde para transformar una ventana ya viva
+        (p.ej. el picker de contacto XMPP al elegir uno, o el sidebar de
+        conversaciones LLM al elegir una distinta) sin reconstruir el
+        chrome (header, split_view, área de chat), que ya existe.
+
+        Args:
+            backend: ChatBackend ya construido (p.ej. XmppConversation) a
+                inyectar en la ventana en vez del LLMClient por defecto.
+            xmpp_session: sesión XMPP sin contacto elegido todavía —
+                la ventana muestra el roster y espera selección.
+        """
+        self._unbind_backend()
+        self._xmpp_session = xmpp_session
+        self._injected_backend = backend is not None or xmpp_session is not None
+
+        # El chrome (botones, posición del split_view) refleja el tipo de
+        # backend; se actualiza aquí porque puede cambiar entre llamadas
+        # (p.ej. una ventana XMPP vacía nunca pasa a modo LLM en la práctica,
+        # pero el flag sí puede alternar entre "sin contacto" y "con contacto").
+        self.connection_status_label.set_visible(self._injected_backend)
+        self.sidebar_button.set_visible(not self._injected_backend)
+        self.roster_button.set_visible(self._injected_backend)
+        toggle_button = self.roster_button if self._injected_backend else self.sidebar_button
+        self._sidebar_toggle_binding = self.split_view.bind_property(
+            "show-sidebar", toggle_button, "active",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
+        )
+        self.set_enabled(True)
+        self.split_view.set_collapsed(True)
+        self.split_view.set_show_sidebar(False)
+
         if self._injected_backend:
             # Backend no-LLM (p.ej. XmppConversation): ya viene construido
             # y conectado a su sesión propia. Solo cablear las señales del
             # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
-            session = getattr(self.backend, 'session', None) or self._xmpp_session
-            if self.backend is not None:
-                self.backend.connect('ready', self._on_backend_ready)
-                self.backend.connect('response', self._on_llm_response)
-                self.backend.connect('error', self._on_llm_error)
-                self.backend.connect('finished', self._on_llm_finished)
-                self.backend.connect('state-changed', self._on_backend_state_changed)
-                self.backend.connect('typing', self._on_backend_typing)
-                self.title_widget.set_subtitle(self.backend.get_display_name())
+            self.backend = backend
+            session = getattr(backend, 'session', None) or xmpp_session
+            if backend is not None:
+                backend.connect('ready', self._on_backend_ready)
+                backend.connect('response', self._on_llm_response)
+                backend.connect('error', self._on_llm_error)
+                backend.connect('finished', self._on_llm_finished)
+                backend.connect('state-changed', self._on_backend_state_changed)
+                backend.connect('typing', self._on_backend_typing)
+                self.title_widget.set_subtitle(backend.get_display_name())
             else:
                 # Sin contacto elegido aún: mostrar el roster, deshabilitar
                 # el chat hasta que el usuario elija una fila (spec 003).
@@ -289,7 +373,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # que esta ventana exista (el roster picker implica sesión viva).
             self._last_connection_state = session.state if session else 'connected'
             self._update_connection_status(self._last_connection_state)
-            self.model_sidebar = None
             # Panel de contactos (roster) dockeado a la IZQUIERDA (spec 002),
             # opuesto al sidebar de modelo LLM que va a la derecha.
             if session is not None:
@@ -298,7 +381,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     session, on_contact_selected=self._on_roster_contact_selected)
                 self.split_view.set_sidebar_position(Gtk.PackType.START)
                 self.split_view.set_sidebar(self.roster_sidebar)
-                if self.backend is None:
+                if backend is None:
                     # Sin contacto: el roster se ve de entrada, no detrás
                     # de un toggle — es lo único que hay que hacer aquí.
                     self.split_view.set_show_sidebar(True)
@@ -362,28 +445,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Establecer el panel lateral en el split_view
             self.split_view.set_sidebar(self.model_sidebar)
 
-        # --- Ensamblado Final ---
-        # El contenedor principal ahora incluye la HeaderBar y el SplitView
-        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        root_box.append(self.header)
-        root_box.append(self.split_view) # Añadir el split_view aquí
-
-        # Establecer el contenido de la ventana
-        self.set_content(root_box) # El root_box es el nuevo contenido
-
-        # Agregar CSS provider
-        self._setup_css()
-
-        # Agregar soporte para cancelación
-        self.current_message_widget = None
-        self.accumulated_response = ""
-
-        # Add a focus controller to the window
-        focus_controller_window = Gtk.EventControllerFocus.new()
-        focus_controller_window.connect("enter", self._on_focus_enter)
-        self.add_controller(focus_controller_window)
-
-
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
         show_sidebar = split_view.get_show_sidebar()
@@ -396,32 +457,53 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_roster_contact_selected(self, bare_jid):
         """Un contacto elegido en el roster sidebar (spec 002/003): abre/
-        enfoca su ventana de conversación. Delega en la aplicación, que
-        mantiene el registro de ventanas por conversación."""
+        enfoca su ventana de conversación."""
         app = self.get_application()
         session = getattr(self.backend, 'session', None) or self._xmpp_session
-        was_empty = self.backend is None
-        if app is not None and session is not None and \
-                hasattr(app, 'open_xmpp_conversation'):
+        if session is None:
+            return
+        if self.backend is None:
+            # Esta ventana era el picker de contacto (sin conversación
+            # elegida aún, spec 003): transformarla en la conversación
+            # in-place (T7) en vez de abrir una segunda ventana y cerrar
+            # esta — misma ventana, registrada en la app para focus-or-open.
+            conversation = session.get_conversation(bare_jid)
+            self._bind_backend(backend=conversation)
+            if app is not None and hasattr(app, '_window_by_cid'):
+                app._window_by_cid[f"xmpp:{session.bare_jid}:{bare_jid}"] = self
+        elif app is not None and hasattr(app, 'open_xmpp_conversation'):
+            # Ventana ya en una conversación: cambiar de contacto abre/
+            # enfoca la ventana de ese contacto vía el registro habitual.
             app.open_xmpp_conversation(session, bare_jid)
-        if was_empty:
-            # Esta ventana era solo el picker de contacto (spec 003): la
-            # conversación real se abrió en otra ventana, cerrar esta.
-            self.close()
-        else:
-            # Colapsar el panel tras elegir, para dar foco al chat
             self.split_view.set_show_sidebar(False)
 
     def _on_llm_conversation_selected(self, cid):
-        """Una conversación LLM elegida en el sidebar (spec 003): abre/
-        enfoca su ventana. Si es la conversación actual, solo colapsa el
-        panel."""
+        """Una conversación LLM elegida en el sidebar (spec 003): cambia
+        esta ventana a esa conversación in-place (T7), salvo que ya tenga
+        su propia ventana registrada — en ese caso se enfoca esa, en vez
+        de tener la misma conversación abierta dos veces."""
         if cid == self.cid:
             self.split_view.set_show_sidebar(False)
             return
         app = self.get_application()
-        if app is not None and hasattr(app, 'open_conversation_window'):
-            app.open_conversation_window({'cid': cid})
+        existing = getattr(app, '_window_by_cid', {}).get(cid) if app else None
+        if existing is not None and existing is not self:
+            existing.present()
+            self.split_view.set_show_sidebar(False)
+            return
+
+        # Sin ventana propia: transformar esta misma ventana in-place.
+        # _bind_backend's rama LLM lee self.config['cid'] para construir el
+        # LLMClient correcto (mismo camino que __init__ usa al abrir con
+        # un CID existente), así que basta con actualizarlo antes de llamar.
+        old_cid = self.cid
+        self.config['cid'] = cid
+        self.cid = cid
+        self._bind_backend(backend=None)
+        if app is not None and hasattr(app, '_window_by_cid'):
+            if old_cid and app._window_by_cid.get(old_cid) is self:
+                del app._window_by_cid[old_cid]
+            app._window_by_cid[cid] = self
         self.split_view.set_show_sidebar(False)
 
     def _setup_css(self):
@@ -960,18 +1042,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.timeout_add(50, scroll_after)
 
     def _on_close_request(self, window):
-        # Cancelar el aviso pendiente de 'composing' para que no dispare
-        # contra una ventana ya destruida (enviaría un chatstate espurio).
-        if self._composing_timeout_id:
-            GLib.source_remove(self._composing_timeout_id)
-            self._composing_timeout_id = None
-        # Liberar el backend (XmppConversation: suelta sus handlers de la
-        # sesión compartida; LLMClient: no-op). Seguro llamarlo siempre.
-        if self.backend is not None:
-            self.backend.shutdown()
-        # El roster sidebar también tiene handlers en la sesión compartida.
-        if self.roster_sidebar is not None:
-            self.roster_sidebar.shutdown()
+        # Soltar backend/sidebar/timeout pendiente (spec 003, T7: mismo
+        # helper que usa _bind_backend para transformar la ventana in-place).
+        self._unbind_backend()
         # Eliminar del registro de ventanas (por valor: cubre tanto las
         # claves por CID de LLM como las claves "xmpp:…" de spec 002).
         app = self.get_application()
