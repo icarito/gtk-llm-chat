@@ -1,10 +1,17 @@
 """
-xmpp_account_dialog.py - diálogo "Add XMPP account…" (spec 001, T4).
+xmpp_account_dialog.py - diálogo de cuenta XMPP (spec 001, T4; edición
+de la cuenta ya conectada añadida después).
 
 Ventana simple: JID + contraseña, botón Connect. En éxito persiste la
 cuenta (xmpp_account.save_account) y notifica vía callback para que el
 selector pueda abrir el roster; en fallo muestra el error y deja
 reintentar sin perder lo escrito.
+
+Si ya hay una cuenta configurada (xmpp_account.load_account), el diálogo
+se abre en modo edición: título "XMPP Account", JID precargado (editable)
+y el campo de contraseña vacío con un placeholder que indica que dejarlo
+vacío conserva la contraseña actual — así no hay que leer ni mostrar la
+contraseña guardada solo para reabrir el diálogo.
 """
 import gi
 gi.require_version('Gtk', '4.0')
@@ -14,7 +21,7 @@ from gi.repository import Gtk, Adw, GLib
 from .chat_application import _
 from .debug_utils import debug_print
 from .style_manager import style_manager
-from .xmpp_account import save_account
+from .xmpp_account import load_account, save_account
 from .xmpp_client import XmppSession, STATE_CONNECTED, STATE_DISCONNECTED
 
 
@@ -26,7 +33,10 @@ class XmppAccountDialog(Adw.Window):
         self._on_account_ready = on_account_ready
         self._probe_session = None
 
-        self.set_title(_("Add XMPP Account"))
+        existing = load_account()
+        self._existing_jid, self._existing_password = existing or (None, None)
+
+        self.set_title(_("XMPP Account") if existing else _("Add XMPP Account"))
         self.set_default_size(380, -1)
         style_manager.apply_to_widget(self, "main-container")
 
@@ -34,7 +44,11 @@ class XmppAccountDialog(Adw.Window):
         header.set_show_end_title_buttons(True)
 
         self.jid_row = Adw.EntryRow(title=_("JID (e.g. user@yax.im)"))
+        if self._existing_jid:
+            self.jid_row.set_text(self._existing_jid)
         self.password_row = Adw.PasswordEntryRow(title=_("Password"))
+        if self._existing_jid:
+            self.password_row.set_title(_("Password (leave empty to keep current)"))
 
         group = Adw.PreferencesGroup()
         group.add(self.jid_row)
@@ -45,7 +59,8 @@ class XmppAccountDialog(Adw.Window):
         self.status_label.add_css_class("error")
         self.status_label.set_visible(False)
 
-        self.connect_button = Gtk.Button(label=_("Connect"))
+        self.connect_button = Gtk.Button(
+            label=_("Save") if self._existing_jid else _("Connect"))
         self.connect_button.add_css_class("suggested-action")
         self.connect_button.connect('clicked', self._on_connect_clicked)
 
@@ -90,6 +105,10 @@ class XmppAccountDialog(Adw.Window):
     def _on_connect_clicked(self, _widget):
         jid = self.jid_row.get_text().strip()
         password = self.password_row.get_text()
+        if not password and jid == self._existing_jid and self._existing_password:
+            # Modo edición, campo dejado vacío a propósito: mantener la
+            # contraseña ya guardada en vez de exigir volver a escribirla.
+            password = self._existing_password
         if not jid or not password:
             self._show_error(_("Enter both a JID and a password."))
             return

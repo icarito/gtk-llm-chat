@@ -69,29 +69,36 @@ class XmppRosterSidebar(Gtk.Box):
             row = Adw.ActionRow(title=_("No contacts in your roster yet"))
             row.set_selectable(False)
             self.list_box.append(row)
-            self._append_add_contact_row()
-            return
-
-        for bare_jid, item in sorted(self.session.roster_items.items()):
-            row = Adw.ActionRow(title=item.get('name') or bare_jid)
-            if item.get('name'):
-                row.set_subtitle(bare_jid)
-            row.set_activatable(True)
-            row.bare_jid = bare_jid
-            dot = self._presence_dot(item.get('presence', XmppSession.PRESENCE_OFFLINE))
-            row.add_prefix(dot)
-            self.list_box.append(row)
-            self._rows[bare_jid] = (row, dot)
+        else:
+            for bare_jid, item in sorted(self.session.roster_items.items()):
+                row = Adw.ActionRow(title=item.get('name') or bare_jid)
+                if item.get('name'):
+                    row.set_subtitle(bare_jid)
+                row.set_activatable(True)
+                row.bare_jid = bare_jid
+                dot = self._presence_dot(item.get('presence', XmppSession.PRESENCE_OFFLINE))
+                row.add_prefix(dot)
+                self.list_box.append(row)
+                self._rows[bare_jid] = (row, dot)
 
         self._append_add_contact_row()
 
     def _append_add_contact_row(self):
-        row = Adw.ActionRow(title=_("Add Contact…"))
-        row.add_css_class("dim-label")
-        row.add_prefix(resource_manager.create_icon_widget("list-add-symbolic"))
-        row.set_activatable(True)
+        # Fila final, sin label: solo un botón circular "+" centrado,
+        # visualmente distinto de las filas de contacto (que sí tienen
+        # texto). No es un ActionRow — evita que se vea como un contacto.
+        add_button = Gtk.Button()
+        add_button.set_child(resource_manager.create_icon_widget("list-add-symbolic"))
+        add_button.add_css_class("circular")
+        add_button.set_tooltip_text(_("Add Contact…"))
+        add_button.set_halign(Gtk.Align.CENTER)
+        add_button.connect("clicked", lambda _b: self._show_add_contact_dialog())
+
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        row.set_activatable(False)
         row.bare_jid = None  # marca especial: no es un contacto
-        row.connect("activated", lambda _r: self._show_add_contact_dialog())
+        row.set_child(add_button)
         self.list_box.append(row)
 
     def _show_add_contact_dialog(self):
