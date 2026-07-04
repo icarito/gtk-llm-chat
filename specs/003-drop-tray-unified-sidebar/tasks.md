@@ -72,7 +72,7 @@ do not merge.
 
 ## Phase 3 — Remaining work
 
-- [ ] **T7. Fix: selecting a contact/conversation should transform the
+- [x] **T7. Fix: selecting a contact/conversation should transform the
       current window, not open a new one and abandon the picker window.**
       Bug found in manual testing (not caught by the headless verification
       above, which checked *that* a new window opens, not *whether a
@@ -113,6 +113,29 @@ do not merge.
       registry) — this task is about not creating *extra* windows for the
       picker-style entry points, not about changing focus-or-open
       semantics generally.
+      *Result (2026-07-03, commit `ee8baa6`):* went with option (a),
+      the two-phase split, per the owner's call — chose durability over
+      the narrower patch. `__init__` still builds chrome once; the old
+      "Panel Lateral" section became `_bind_backend()`/`_unbind_backend()`,
+      callable again on a live window. `_on_roster_contact_selected` now
+      re-binds this window in place when it was the contact-less picker
+      (registering it under the right `xmpp:...` key), and still defers
+      to `open_xmpp_conversation`'s focus-or-open when the window already
+      had a conversation. `_on_llm_conversation_selected` focuses an
+      existing window for that cid if one is registered, else updates
+      `config['cid']` and re-runs `_bind_backend(backend=None)` — the
+      same LLM-branch code `__init__` uses to open an existing cid,
+      reused for an in-place switch. Verified headless: all three
+      pre-existing window modes unaffected; both new re-bind paths work
+      (XMPP picker→contact, LLM conversation switch); the
+      focus-existing-window fallback holds for both; the
+      `show-sidebar`↔toggle-button `GObject.Binding` doesn't stack across
+      repeated re-binds (tracked and `unbind()`'d in `_unbind_backend`,
+      which also now backs `_on_close_request`, removing a
+      previously-duplicated cleanup block). Real app clean on both entry
+      paths. Noted, not fixed (pre-existing, out of scope):
+      `LLMClient.cancel()` is a no-op, so switching conversations
+      mid-stream doesn't cancel the old backend's thread.
 
 - [x] **T9. Explicit no-regression pass** (criterion 5).
       *Result (2026-07-03):* independent agent-based verify pass, done

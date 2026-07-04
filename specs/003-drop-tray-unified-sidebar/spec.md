@@ -46,10 +46,11 @@ breakdown and evidence.
          conversations** (mirroring the XMPP roster: same widget style,
          same left dock, same toggle button), replacing the tray's
          conversation menu. Selecting one opens/focuses it.
-         Done: `llm_conversation_sidebar.py` (tasks.md T5). Caveat: see
-         criterion 5/T7 — "opens/focuses" today always opens a *second*
-         window rather than reusing a picker-mode window; whether that's
-         acceptable is exactly T7's open question.
+         Done: `llm_conversation_sidebar.py` (tasks.md T5). "Opens/
+         focuses" is now precise (tasks.md T7): picking a different
+         conversation transforms the current window in place unless the
+         target already has its own window, in which case that one is
+         focused — never a spurious extra window.
 - [~] 3. Secondary options (model parameters, system prompt, API keys
          for LLM; account for XMPP) move to a **second level** of the
          sidebar — the sidebar's top level is the list (conversations or
