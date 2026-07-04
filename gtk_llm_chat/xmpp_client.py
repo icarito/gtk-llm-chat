@@ -18,7 +18,7 @@ from gi.repository import GLib, GObject
 
 from nbxmpp.client import Client as NbxmppClient
 from nbxmpp.namespaces import Namespace
-from nbxmpp.protocol import JID, Message, Presence
+from nbxmpp.protocol import Iq, JID, Message, Presence
 from nbxmpp.simplexml import Node
 from nbxmpp.structs import StanzaHandler
 
@@ -178,6 +178,16 @@ class XmppSession(GObject.Object):
             debug_print(f"XmppSession: roster con {len(self.roster_items)} contactos")
         # Presence inicial: sin esto el servidor no rutea mensajes entrantes
         self._client.send_stanza(Presence())
+        # XEP-0280 Message Carbons: sin activarlo, si esta cuenta también
+        # está conectada desde otro cliente (p.ej. Gajim) en otro recurso,
+        # el servidor puede entregar un mensaje solo a ese otro recurso y
+        # esta ventana nunca se entera — aunque el filtro is_carbon_message
+        # ya existente en _on_message asume que sí llegan copias.
+        # <enable/> va como hijo directo del <iq>, no envuelto en <query>
+        # (por eso no se usa el parámetro payload= de Iq, que sí envuelve).
+        enable_carbons = Iq(typ='set')
+        enable_carbons.addChild('enable', namespace=Namespace.CARBONS)
+        self._client.send_stanza(enable_carbons)
         self._set_state(STATE_CONNECTED)
         if roster is not None:
             self.emit('roster-updated')
