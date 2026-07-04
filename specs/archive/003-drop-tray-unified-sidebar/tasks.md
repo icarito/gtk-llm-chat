@@ -193,11 +193,37 @@ do not merge.
       instead of starting fresh) — confirmed non-issue by killing the
       stale process and re-testing clean.
 
-- [ ] **T10. Update spec.md checkboxes to match reality**, then continue
+- [x] **T10. Update spec.md checkboxes to match reality**, then continue
       the normal cycle: docs (`architecture.md`'s tray section, once T8
       lands), review, archive to `specs/archive/003-drop-tray-unified-sidebar/`,
       merge (already on `main` — this becomes closing the loop rather than
       an actual merge).
+      *Result (2026-07-03):* independent adversarial review of the full
+      diff since `798dcf1` (tray removal + persistence fix + T7's
+      two-phase refactor). Found and fixed one real bug introduced by T7
+      (commit `ae9c948`): `_unbind_backend` dropped the old backend's
+      reference without disconnecting its GObject signal handlers, and
+      never reset the history-loaded flags or `messages_box`. Since
+      `LLMClient.cancel()` (and therefore the default
+      `ChatBackend.shutdown()`, which just calls `cancel()`) is a no-op,
+      switching an in-place window to a different LLM conversation left
+      the old `LLMClient`'s still-running stream thread able to mutate the
+      window's now-current state (`cid`, `accumulated_response`, the
+      active message widget) after the switch — and separately, the new
+      conversation's history never rendered because the "already loaded"
+      flags from the previous conversation were never cleared. Fixed by
+      tracking handler ids and disconnecting them in `_unbind_backend`,
+      alongside resetting the history flags and clearing `messages_box`
+      (the same reset `__init__` already did for a fresh window, now also
+      done on every rebind). Verified with a headless repro against the
+      real `_unbind_backend` method (not a mock). Two trivial cleanups
+      also applied: an orphaned `ChatSidebar` import (dead since T5) and a
+      stale tray-applet comment (dead since T8). Everything else in the
+      diff — tray removal, the `d03ef8e` persistence fix, the
+      `_sidebar_toggle_binding` lifecycle, `welcome.py`'s carousel
+      renumbering, reentrancy of sidebar replacement from within its own
+      signal callback — reviewed and confirmed clean, no further findings.
+      `docs/roadmap.md` updated to mark this spec done & archived.
 
 ## Housekeeping (low priority, not blocking)
 

@@ -13,11 +13,12 @@ shipped in v4.x is dropped from this list.
       roster with live presence, desktop notifications for incoming
       messages and subscription requests. Done & archived:
       [specs/archive/002-xmpp-roster-notifications/](../specs/archive/002-xmpp-roster-notifications/spec.md).
-- [ ] **Drop tray applet, unify sidebar navigation** — remove the
-      systray (portability blocker); conversation list moves into a
-      left sidebar mirroring the XMPP roster, options go a level deeper,
-      two-row header. Spec (draft):
-      [specs/003-drop-tray-unified-sidebar/](../specs/003-drop-tray-unified-sidebar/spec.md).
+- [x] **Drop tray applet, unify sidebar navigation** — removed the
+      systray (portability blocker); LLM conversation list now lives in
+      a left sidebar mirroring the XMPP roster, options a level deeper,
+      in-place window transformation on switch, Ctrl+Q + conditional
+      last-window-close. Done & archived:
+      [specs/archive/003-drop-tray-unified-sidebar/](../specs/archive/003-drop-tray-unified-sidebar/spec.md).
 - [ ] **XMPP Layer 3+** — MAM server-side history, MUC, PubSub, OMEMO.
 - [ ] _(further feature ideas start as `specs/<NNN>-<slug>/spec.md`)_
 

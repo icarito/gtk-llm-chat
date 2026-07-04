@@ -1,6 +1,6 @@
 # 003 — Drop the tray applet, unify navigation in sidebars
 
-**Status:** in progress — see tasks.md
+**Status:** done — see tasks.md
 **Created:** 2026-07-03
 **Owner:** Sebastian Silva
 **Depends on:** 001 (ChatBackend, XMPP window), 002 (roster sidebar,
