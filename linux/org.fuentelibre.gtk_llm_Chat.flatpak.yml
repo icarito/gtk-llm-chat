@@ -140,7 +140,7 @@ modules:
       # Usar los iconos PNG disponibles
       - cp gtk_llm_chat/hicolor/256x256/apps/org.fuentelibre.gtk_llm_Chat.png /app/share/icons/hicolor/256x256/apps/
       - cp gtk_llm_chat/hicolor/48x48/apps/org.fuentelibre.gtk_llm_Chat-symbolic.png /app/share/icons/hicolor/48x48/apps/
-      # Icono simbólico para tray
+      # Icono simbólico de la app
       - cp gtk_llm_chat/hicolor/symbolic/apps/org.fuentelibre.gtk_llm_Chat-symbolic.svg /app/share/icons/hicolor/symbolic/apps/
       # Scripts de diagnóstico
       - mkdir -p /app/bin
@@ -149,7 +149,6 @@ modules:
       # Aplicaciones
       - mkdir -p /app/share/applications
       - cp desktop/org.fuentelibre.gtk_llm_Chat.desktop /app/share/applications/
-      - cp desktop/org.fuentelibre.gtk_llm_Applet.desktop /app/share/applications/
       # Metadatos
       - mkdir -p /app/share/metainfo
       - cp linux/org.fuentelibre.gtk_llm_Chat.appdata.xml /app/share/metainfo/ || true

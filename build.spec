@@ -122,7 +122,6 @@ a = Analysis(
         'gtk_llm_chat.resource_manager',
         'gtk_llm_chat.style_manager',
         'gtk_llm_chat.llm_client',
-        'gtk_llm_chat.tray_applet',
         'gtk_llm_chat._version',
         'locale',
 	'gi.repository.DBus',

@@ -24,7 +24,6 @@ dependencies = [
     'markdown-it-py',
     'nbxmpp',
     'python-ulid',
-    'watchdog',
 ]
 
 requires-python = ">=3.8"

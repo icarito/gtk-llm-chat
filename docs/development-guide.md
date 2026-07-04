@@ -40,7 +40,7 @@ stays the same, so usually you don't even need to).
 ## Running
 
 ```bash
-.venv/bin/gtk-llm-chat                 # normal launch (spawns tray applet too)
+.venv/bin/gtk-llm-chat                 # normal launch (single process, no tray)
 .venv/bin/gtk-llm-chat --cid <CID>     # open a specific conversation
 .venv/bin/gtk-llm-chat -m <model> -s "system prompt"
 DEBUG=1 .venv/bin/gtk-llm-chat         # verbose debug output
@@ -84,13 +84,14 @@ in `stash@{0}` — see [branch-inventory.md](branch-inventory.md).)
 ## Submodules
 
 ```bash
-git submodule update --init linux/pystray linux/shared-modules
+git submodule update --init linux/shared-modules
 ```
 
-- `linux/pystray` → icarito/pystray fork (`pystray-freedesktop`), used on
-  Linux for the tray applet. Haiku experiments live in its
-  `haiku-experiments` branch.
 - `linux/shared-modules` → flathub shared modules for the Flatpak build.
+
+(The `linux/pystray` submodule was removed in spec 003 along with the
+tray applet. Haiku-related pystray experiments still live on
+`icarito/pystray@haiku-experiments` if that work resumes.)
 
 ## Gotchas
 

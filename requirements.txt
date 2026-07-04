@@ -11,4 +11,3 @@ llm-deepseek
 llm-perplexity
 llm-anthropic
 llm-openrouter
-watchdog

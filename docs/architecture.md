@@ -8,8 +8,8 @@ archived at [archive/spec-2025.md](archive/spec-2025.md).
 
 ```
                     ┌──────────────────────────────┐
- tray (pystray) ───▶│ LLMChatApplication (Adw.App) │◀── D-Bus OpenConversation(cid)
- llm gui / CLI ───▶ │  org.fuentelibre.gtk_llm_Chat│
+ llm gui / CLI ───▶ │ LLMChatApplication (Adw.App) │◀── D-Bus OpenConversation(cid)
+                    │  org.fuentelibre.gtk_llm_Chat│  (single-instance activation)
                     │  one process, many windows   │
                     └──────────┬───────────────────┘
                                │ window per conversation (CID)
@@ -50,17 +50,17 @@ main loop via nbxmpp — no threads needed there.
 ### Entry and lifecycle
 
 - `main.py` — CLI entry (`gtk-llm-chat`). Parses args (`--cid`, `-s`, `-m`,
-  `-c`, template options, `--applet`), applies frozen-app compatibility
-  patches (NumPy/Python 3.13), then either launches the tray applet or the
-  chat application. `fork_or_spawn_applet` in platform_utils decides how.
+  `-c`, template options), applies frozen-app compatibility patches
+  (NumPy/Python 3.13), then launches the chat application. Always a single
+  process — no fork, no separate applet.
 - `llm_gui.py` — registers the app as an `llm` plugin (`llm gui`).
 - `chat_application.py` — `LLMChatApplication(Adw.Application)`, application
   id `org.fuentelibre.gtk_llm_Chat`, `HANDLES_COMMAND_LINE`. Single instance
   per session; opening a conversation from outside goes through the D-Bus
   method `OpenConversation(cid)`. Keeps a CID → window map. Detects
-  first-run and shows the welcome assistant (`welcome.py`).
-- `single_instance.py` + `platform_utils.ensure_single_instance` — lockfile
-  guard, mainly for the tray applet.
+  first-run and shows the welcome assistant (`welcome.py`). Closing the last
+  window quits the app, unless an XMPP session is connected (spec 003) — see
+  `_on_close_request` in `chat_window.py`.
 
 ### Conversation UI
 
@@ -138,12 +138,19 @@ XMPP contact.
 
 ### Desktop integration
 
-- `tray_applet.py` — system tray icon (pystray; on Linux the
-  `pystray-freedesktop` fork, vendored as submodule `linux/pystray`).
-  Menu of recent conversations, watches `logs.db` with watchdog to stay
-  fresh, opens conversations via D-Bus.
+There is no system-tray applet (removed in spec 003 — it forked a second
+process, talked to the main app over D-Bus, and depended on a vendored
+`pystray` fork; a major portability and complexity cost for what the
+in-window sidebars now cover). Conversation browsing lives in
+`llm_conversation_sidebar.py` (LLM) and `xmpp_roster_sidebar.py` (XMPP),
+docked left in each window (see "Conversation backends" above). The app
+starts and stays a single process; `LLMChatApplication`'s D-Bus interface
+(`OpenConversation`) still provides single-instance activation, so a
+second `gtk-llm-chat --cid=…` invocation opens/focuses a window in the
+existing process instead of starting a new one.
+
 - `platform_utils.py` — platform detection, user dir resolution
-  (`llm.user_dir()`), applet spawn/fork logic, Flatpak detection.
+  (`llm.user_dir()`), Flatpak detection.
 - `resource_manager.py` — icons/resources across dev, frozen (PyInstaller)
   and Flatpak layouts.
 - `style_manager.py` — per-platform CSS and window-control quirks

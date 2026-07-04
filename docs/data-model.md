@@ -24,13 +24,13 @@ bidirectionally with the command line.
 | `schema_migrations` (managed by llm) | migration bookkeeping | never touched directly |
 
 Conversation ids are ULIDs (`python-ulid`), lexicographically sortable —
-"recent conversations" in the tray applet relies on that ordering.
+"recent conversations" in `llm_conversation_sidebar.py` relies on that
+ordering.
 
 ## Concurrency
 
 - `ChatHistory` keeps **thread-local** sqlite connections (UI thread vs
-  streaming thread vs tray watcher).
-- The tray applet watches `logs.db` with `watchdog` to refresh its menu
-  when the CLI or another window writes.
-- SQLite WAL/locking is the only coordination between the GUI, the tray
-  and the `llm` CLI — keep transactions short.
+  streaming thread).
+- SQLite WAL/locking is the only coordination between the GUI (possibly
+  several windows in the same process) and the `llm` CLI — keep
+  transactions short.

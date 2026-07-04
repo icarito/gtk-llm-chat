@@ -29,8 +29,9 @@ A GTK graphical interface for chatting with Large Language Models (LLMs).
     - `Ctrl+M`: Open model selector
     - `Ctrl+S`: Edit system prompt
     - `Ctrl+N`: New conversation window
-- **Conversation Management:** Rename and delete conversations.
-- **Tray Applet:** Use a system tray applet for quick access to recent conversations.
+    - `Ctrl+Q`: Quit the application
+- **Conversation Management:** Rename and delete conversations, browsable
+  from a left-docked sidebar in every window.
 - **Error Handling:** Clear error messages displayed in the chat.
 - **Dynamic Input:** The input area dynamically adjusts its height.
 
@@ -70,9 +71,9 @@ These dependency installation instructions are collected here for reference only
 
 ```
  # fedora: # sudo dnf install cairo-devel object-introspection-devel gtk4-devel pkgconf-pkg-config gcc redhat-rpm-config
- # debian: # sudo apt install libgtk-4-1 python3-gi python3-gi-cairo libadwaita-1-0 libayatana-appindicator3
+ # debian: # sudo apt install libgtk-4-1 python3-gi python3-gi-cairo libadwaita-1-0
  # arch: # sudo pacman -S python-gobject gtk4
- # windows (msys2): # pacman -S mingw-w64-$(uname -m)-gtk4 mingw-w64-$(uname -m)-python-pip mingw-w64-$(uname -m)-python3-gobject mingw-w64-$(uname -m)-libadwaita mingw-w64-x86_64-python3-pillow
+ # windows (msys2): # pacman -S mingw-w64-$(uname -m)-gtk4 mingw-w64-$(uname -m)-python-pip mingw-w64-$(uname -m)-python3-gobject mingw-w64-$(uname -m)-libadwaita
  # macos (homebrew): # brew install pygobject3 gtk4 adwaita-icon-theme libadwaita
 ```
 
@@ -80,12 +81,11 @@ These dependency installation instructions are collected here for reference only
 
 ### Running the Application
 
-To start the applet (system tray mode):
 ```
-llm gtk-applet
+gtk-llm-chat
 ```
 
-To start a single chat window:
+or, as an `llm` plugin:
 ```
 llm gtk-chat
 ```
