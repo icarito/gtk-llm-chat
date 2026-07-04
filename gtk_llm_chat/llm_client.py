@@ -285,16 +285,20 @@ class LLMClient(ChatBackend):
                 self._is_generating_flag = False
                 self._stream_thread = None
                 # Solo guardar en el historial si fue exitoso Y HUBO RESPUESTA DEL ASISTENTE
-                if success and full_response and full_response.strip(): 
+                if success and full_response and full_response.strip():
                     cid = self.config.get('cid')
                     model_id = self.get_model_id()
-                    
-                    # Asegurarse de que cid se cree si no existe (para nuevas conversaciones)
-                    if not cid and self.conversation and self.conversation.id:
+
+                    # Fuente de verdad: self.conversation.id, no config['cid'] (que
+                    # chat_window.py puede haber fijado ya en memoria al recibir el
+                    # primer chunk, antes de que la conversación exista en la BD).
+                    # create_conversation_if_not_exists es idempotente (INSERT OR
+                    # IGNORE), así que es seguro llamarla siempre que haya conversación.
+                    if self.conversation and self.conversation.id:
                         cid = self.conversation.id
-                        self.config['cid'] = cid # Guardar el nuevo cid en la config
-                        debug_print(f"LLMClient: New conversation detected, cid set to: {cid}")
-                        # Crear la conversación en la BD si es la primera vez que se guarda algo para ella
+                        if not self.config.get('cid'):
+                            self.config['cid'] = cid
+                            debug_print(f"LLMClient: New conversation detected, cid set to: {cid}")
                         self.chat_history.create_conversation_if_not_exists(cid, DEFAULT_CONVERSATION_NAME(), model_id)
 
                     if cid and model_id: 

@@ -874,23 +874,28 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.accumulated_response = ""
         self.input_text.grab_focus()
 
-        # Actualizar el conversation_id en la configuración si no existe
-        if success and not self.config.get('cid'):
+        # Red de seguridad: registrar la ventana por CID si _on_llm_response
+        # no llegó a hacerlo (p.ej. sin chunks pero success=True). El caso
+        # normal ya lo registra _on_llm_response con el primer chunk.
+        if success and not self.cid:
             conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
                 self.cid = conversation_id
                 debug_print(f"Conversation ID updated in config: {conversation_id}")
-                # Registrar la ventana en el mapa global de ventanas por CID
                 app = self.get_application()
                 if hasattr(app, '_window_by_cid'):
-                    # Elimina el registro anterior si existe
                     for key, win in list(app._window_by_cid.items()):
                         if win is self and key != conversation_id:
                             del app._window_by_cid[key]
                     app._window_by_cid[conversation_id] = self
-                if self.model_sidebar is not None:
-                    self.model_sidebar.refresh()
+
+        # Refrescar el sidebar de conversaciones: para el caso normal (CID
+        # nuevo) es aquí, no en _on_llm_response, donde la fila ya existe
+        # en la tabla conversations — LLMClient._process_stream la crea en
+        # su 'finally', que corre justo antes de emitir esta señal.
+        if success and self.model_sidebar is not None:
+            self.model_sidebar.refresh()
 
     def _on_llm_response(self, llm_client, response):
         """Maneja la señal de respuesta del backend.
@@ -909,8 +914,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not self.current_message_widget:
             return
 
-        # Actualizar el conversation_id en la configuración al recibir la primera respuesta
-        if not self.config.get('cid'):
+        # Actualizar el conversation_id en la configuración al recibir la primera
+        # respuesta. NO refrescar el sidebar aquí: la fila en la tabla
+        # conversations recién se crea en el 'finally' de
+        # LLMClient._process_stream, que corre después de terminado el
+        # streaming (señal 'finished'); refrescar antes no mostraría nada
+        # nuevo. El refresh vive en _on_llm_finished.
+        if not self.cid:
             conversation_id = self.backend.get_conversation_id()
             if conversation_id:
                 self.config['cid'] = conversation_id
