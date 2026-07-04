@@ -186,7 +186,6 @@ def debug_frozen_environment():
 def debug_database_monitoring():
     """
     Función de diagnóstico para problemas de monitoreo de base de datos.
-    Útil para el applet de bandeja que necesita monitorear logs.db.
     """
     debug_print("=== DIAGNÓSTICO DE MONITOREO DE BASE DE DATOS ===")
     

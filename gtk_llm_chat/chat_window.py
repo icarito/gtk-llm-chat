@@ -14,7 +14,6 @@ from .llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from .widgets import Message, MessageWidget, ErrorWidget
 from .db_operations import ChatHistory
 from .chat_application import _
-from .chat_sidebar import ChatSidebar # <--- Importar la nueva clase
 from llm import get_default_model
 from .style_manager import style_manager
 from .resource_manager import resource_manager
@@ -77,6 +76,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # porque el chrome del header construido más abajo decide su propio
         # aspecto (qué botón mostrar, a qué lado) según este flag.
         self.backend = None
+        self._backend_handler_ids = []
         self._xmpp_session = None
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
@@ -300,7 +300,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.source_remove(self._composing_timeout_id)
             self._composing_timeout_id = None
         if self.backend is not None:
+            # Desconectar las señales explícitamente antes de soltar la
+            # referencia: shutdown()/cancel() no garantiza que el backend
+            # deje de emitir (p.ej. LLMClient.cancel() es un no-op, su hilo
+            # de streaming sigue corriendo y llamando GLib.idle_add). Sin
+            # esto, una señal tardía del backend viejo llega igual a estos
+            # mismos handlers y corrompe el estado de la conversación nueva
+            # (self.cid, self.accumulated_response, current_message_widget).
+            for handler_id in self._backend_handler_ids:
+                self.backend.disconnect(handler_id)
             self.backend.shutdown()
+        self._backend_handler_ids = []
         if self.roster_sidebar is not None:
             self.roster_sidebar.shutdown()
             self.roster_sidebar = None
@@ -308,6 +318,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.model_options = None
         self.backend = None
         self._xmpp_session = None
+        # Una nueva conversación (o la misma reabierta) necesita su propio
+        # historial: sin esto, los flags "ya cargado" de la conversación
+        # anterior bloquean permanentemente _load_and_display_history.
+        self._history_loaded = False
+        self._history_displayed = False
+        self.current_message_widget = None
+        self.accumulated_response = ""
+        for child in list(self.messages_box):
+            self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
         # si no, cada _bind_backend acumularía otro binding sobre la misma
         # propiedad (fuga y comportamiento errático al alternar toggles).
@@ -357,12 +376,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.backend = backend
             session = getattr(backend, 'session', None) or xmpp_session
             if backend is not None:
-                backend.connect('ready', self._on_backend_ready)
-                backend.connect('response', self._on_llm_response)
-                backend.connect('error', self._on_llm_error)
-                backend.connect('finished', self._on_llm_finished)
-                backend.connect('state-changed', self._on_backend_state_changed)
-                backend.connect('typing', self._on_backend_typing)
+                self._backend_handler_ids = [
+                    backend.connect('ready', self._on_backend_ready),
+                    backend.connect('response', self._on_llm_response),
+                    backend.connect('error', self._on_llm_error),
+                    backend.connect('finished', self._on_llm_finished),
+                    backend.connect('state-changed', self._on_backend_state_changed),
+                    backend.connect('typing', self._on_backend_typing),
+                ]
                 self.title_widget.set_subtitle(backend.get_display_name())
             else:
                 # Sin contacto elegido aún: mostrar el roster, deshabilitar
@@ -392,10 +413,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(f"Inicializando LLMClient con config: {self.config}")
                 self.backend = LLMClient(self.config, self.chat_history)
                 # Connect ChatBackend signals *here*
-                self.backend.connect('ready', self._on_backend_ready)
-                self.backend.connect('response', self._on_llm_response)
-                self.backend.connect('error', self._on_llm_error)
-                self.backend.connect('finished', self._on_llm_finished)
+                self._backend_handler_ids = [
+                    self.backend.connect('ready', self._on_backend_ready),
+                    self.backend.connect('response', self._on_llm_response),
+                    self.backend.connect('error', self._on_llm_error),
+                    self.backend.connect('finished', self._on_llm_finished),
+                ]
 
                 if self.cid:
                     debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
