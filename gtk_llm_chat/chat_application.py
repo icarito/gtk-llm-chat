@@ -276,17 +276,15 @@ class LLMChatApplication(Adw.Application):
         debug_print(f"Argumentos recibidos: {args}")
 
         config = {}
-        only_applet = False
-        legacy_applet = False
         has_args = False  # Flag para saber si se recibieron argumentos relevantes
-        
+
         for arg in args:
             # Skip the executable path (first argument)
             if arg == args[0] and arg.endswith(("gtk-llm-chat", "gtk-llm-chat.exe", "python", "python.exe")):
                 continue
-                
+
             has_args = True  # Se recibió al menos un argumento válido
-                
+
             if arg.startswith("--cid="):
                 config['cid'] = arg.split("=", 1)[1]
                 debug_print(f"CID encontrado en argumentos: {config['cid']}")
@@ -294,33 +292,24 @@ class LLMChatApplication(Adw.Application):
                 config['model'] = arg.split("=", 1)[1]
             elif arg.startswith("--template="):
                 config['template'] = arg.split("=", 1)[1]
-            elif arg.startswith("--applet"):
-                only_applet = True
-            elif arg.startswith("--legacy-applet"):
-                legacy_applet = True
 
         # Guardar esta configuración para usarla
         debug_print(f"Configuración preparada: {config}")
 
-        # Solo proceder con la ventana si no es modo applet
-        if not only_applet:
-            if has_args:
-                # Intención explícita (--cid, --model, --template): abrir
-                # directo, sin picker. Este es el único camino que asume LLM,
-                # y solo porque el usuario ya lo pidió explícitamente.
-                if self._needs_initial_setup:
-                    debug_print("Mostrando asistente de configuración inicial desde command_line")
-                    self._show_welcome_window()
-                else:
-                    self.open_conversation_window(config)
+        if has_args:
+            # Intención explícita (--cid, --model, --template): abrir
+            # directo, sin picker. Este es el único camino que asume LLM,
+            # y solo porque el usuario ya lo pidió explícitamente.
+            if self._needs_initial_setup:
+                debug_print("Mostrando asistente de configuración inicial desde command_line")
+                self._show_welcome_window()
             else:
-                # Arranque genérico (sin argumentos): no asumir LLM ni XMPP,
-                # dejar que el usuario elija (spec 003).
-                debug_print("Sin argumentos: mostrando el selector de tipo de chat")
-                self._show_chat_type_picker()
-                    
-        if legacy_applet:
-            self._applet_loaded = True
+                self.open_conversation_window(config)
+        else:
+            # Arranque genérico (sin argumentos): no asumir LLM ni XMPP,
+            # dejar que el usuario elija (spec 003).
+            debug_print("Sin argumentos: mostrando el selector de tipo de chat")
+            self._show_chat_type_picker()
 
         return 0
 
@@ -687,11 +676,7 @@ class LLMChatApplication(Adw.Application):
         """
         # Asegurar que tenemos una configuración
         config = config or {}
-
-        # Evitar que se abra una ventana de applet
         conversation_config = dict(config)
-        if 'applet' in conversation_config:
-            conversation_config.pop('applet')
 
         # Si hay un CID específico en la configuración
         if 'cid' in conversation_config:

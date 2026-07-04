@@ -1,18 +1,10 @@
 import llm
 import click
 import time
-import sys
 
 
 @llm.hookimpl
 def register_commands(cli):
-
-    @cli.command(name="gtk-applet")
-    def run_applet():
-        """Runs the system tray applet without the main window"""
-        # Lanzamos solo el applet usando nuestro nuevo sistema unificado
-        from .platform_utils import launch_tray_applet
-        launch_tray_applet({})
 
     @cli.command(name="gtk-chat")
     @click.option("--cid", type=str,
@@ -56,12 +48,7 @@ def register_commands(cli):
         is_flag=True,
         help="Mide el tiempo hasta que la ventana se muestra y sale.",
     )
-    @click.option(
-        "--applet",
-        is_flag=True,
-        help="Iniciar como applet en bandeja del sistema sin ventana principal",
-    )
-    def run_gui(cid, system, model, continue_last, template, param, option, fragment, benchmark_startup, applet):
+    def run_gui(cid, system, model, continue_last, template, param, option, fragment, benchmark_startup):
         """Runs a GUI for the chatbot"""
         # Record start time if benchmarking
         start_time = time.time() if benchmark_startup else None
@@ -78,22 +65,11 @@ def register_commands(cli):
             'fragments': fragment,
             'benchmark_startup': benchmark_startup,
             'start_time': start_time,
-            'applet': applet
         }
-        
-        # Si solo se quiere el applet, lo lanzamos directamente
-        if applet and not cid and not continue_last:
-            from .platform_utils import launch_tray_applet
-            launch_tray_applet(config)
-            # El applet se lanza en otro proceso, así que tenemos que mantener vivo este
-            import time
-            while True:
-                time.sleep(1)
-        
-        # De lo contrario, iniciamos la aplicación completa
+
         from .chat_application import LLMChatApplication
         app = LLMChatApplication(config)
-        
+
         # Transformar la configuración en argumentos de línea de comandos
         cmd_args = []
         if config.get('cid'):
@@ -102,9 +78,7 @@ def register_commands(cli):
             cmd_args.append(f"--model={config['model']}")
         if config.get('template'):
             cmd_args.append(f"--template={config['template']}")
-        if config.get('applet'):
-            cmd_args.append(f"--applet")
-        
+
         if cmd_args:
             return app.run(cmd_args)
         else:

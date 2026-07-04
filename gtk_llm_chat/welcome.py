@@ -17,7 +17,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self._on_welcome_finished = on_welcome_finished
         self.set_default_size(900, 700)
         self.set_size_request(700, 500)  # Tamaño mínimo razonable para evitar colapsos
-        self.panel_titles = ["", _("Tray applet"), _("Default Model"), ""]
+        self.panel_titles = ["", _("Default Model"), ""]
         self.config_data = {}
         self._finish_clicked = False # Bandera para controlar el flujo de cierre
 
@@ -137,53 +137,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         centering_box.append(Gtk.Box(vexpand=True))  # Espaciador abajo
         page1.set_child(make_clamped(centering_box))
 
-        # Panel 2: Applet de bandeja
-        page2_vbox_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        page2_vbox_content.set_valign(Gtk.Align.CENTER)
-        page2_vbox_content.set_halign(Gtk.Align.CENTER)
-        page2_vbox_content.set_hexpand(False)
-        page2_vbox_content.set_vexpand(False)
-        # No forzar size_request aquí, dejar que el clamp lo limite
-        
-        self.panel2_app_icon_target_size = 64
-        # Usar resource_manager para crear el icono
-        self.panel2_app_icon = resource_manager.create_icon_widget("org.fuentelibre.gtk_llm_Chat-symbolic", 1)
-        self.panel2_app_icon.set_opacity(0.0)
-        self.panel2_app_icon.set_size_request(1, 1)
-        self.panel2_app_icon.set_halign(Gtk.Align.CENTER)
-        self.panel2_app_icon.set_margin_bottom(12)
-        page2_vbox_content.append(self.panel2_app_icon)
-        panel2_desc_label = Gtk.Label(label=_("Access conversations from the convenience of your system tray"))
-        panel2_desc_label.set_wrap(True)
-        panel2_desc_label.set_justify(Gtk.Justification.CENTER)
-        panel2_desc_label.set_halign(Gtk.Align.CENTER)
-        panel2_desc_label.set_max_width_chars(50)
-        page2_vbox_content.append(panel2_desc_label)
-        panel2_desc_label2 = Gtk.Label(label=_("Would you like to start the applet with your session?"))
-        panel2_desc_label2.set_wrap(True)
-        panel2_desc_label2.set_justify(Gtk.Justification.CENTER)
-        panel2_desc_label2.set_halign(Gtk.Align.CENTER)
-        panel2_desc_label2.set_max_width_chars(50)
-        page2_vbox_content.append(panel2_desc_label2)
-        self.tray_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.tray_group.set_hexpand(True)
-        self.tray_group.set_halign(Gtk.Align.CENTER)
-        self.tray_group.set_margin_top(12)
-        self.tray_radio1 = Gtk.CheckButton(label=_("Yes, with my session"))
-        self.tray_radio2 = Gtk.CheckButton(label=_("No, only when I start the app"))
-        self.tray_radio1.set_group(self.tray_radio2)
-        self._initialize_tray_options()
-        self.tray_radio1.connect('toggled', self._on_tray_option_changed)
-        self.tray_radio2.connect('toggled', self._on_tray_option_changed)
-        self.tray_group.append(self.tray_radio1)
-        self.tray_group.append(self.tray_radio2)
-        page2_vbox_content.append(self.tray_group)
-        panel2_app_animation_target = Adw.CallbackAnimationTarget.new(self._animate_panel2_app_icon_callback)
-        self.panel2_app_animation = Adw.TimedAnimation.new(self.panel2_app_icon, 0.0, 1.0, 700, panel2_app_animation_target)
-        self.panel2_app_animation.set_easing(Adw.Easing.EASE_OUT_EXPO)
-        self.panel2_app_animation_played = False
-
-        # Panel 3: Selección de modelo y API key
+        # Panel 2: Selección de modelo y API key
         page3_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         page3_container.set_hexpand(True)
         page3_container.set_halign(Gtk.Align.FILL)
@@ -229,16 +183,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         page4_vbox_content.append(checkmark_icon)
         page4.set_child(make_clamped(page4_vbox_content))
 
-        # Centrado vertical para el panel 2
-        centering_box2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        centering_box2.set_hexpand(True)
-        centering_box2.set_vexpand(True)
-        centering_box2.append(Gtk.Box(vexpand=True))  # Espaciador arriba
-        centering_box2.append(page2_vbox_content)
-        centering_box2.append(Gtk.Box(vexpand=True))  # Espaciador abajo
-
         self.carousel.append(page1)
-        self.carousel.append(make_clamped(centering_box2, fill_vertical=False))
         self.carousel.append(make_clamped(page3_container, fill_vertical=True))
         self.carousel.append(page4)
         self.indicator_dots = Adw.CarouselIndicatorDots(carousel=self.carousel)
@@ -276,7 +221,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def on_next_clicked(self, button):
         current_page_idx = int(round(self.carousel.get_position()))
         n_pages = self.carousel.get_n_pages()
-        if current_page_idx == 2:
+        if current_page_idx == 1:
             if self.model_selector:
                 status = self.model_selector.get_current_model_selection_status()
                 if not status["is_valid_for_next_step"]:
@@ -297,15 +242,11 @@ class WelcomeWindow(Adw.ApplicationWindow):
             self.set_title(self.panel_titles[current_page_as_int])
         else:
             self.set_title("")
-        if current_page_as_int == 1 and not self.panel2_app_animation_played:
-            if hasattr(self, 'panel2_app_animation'):
-                self.panel2_app_animation.play()
-                self.panel2_app_animation_played = True
-        if current_page_as_int == 2:
+        if current_page_as_int == 1:
             self.prev_button.set_can_focus(False)
             if self.model_selector and hasattr(self.model_selector, 'provider_sidebar') and self.model_selector.provider_sidebar:
                 def attempt_focus_and_reenable_prev_button():
-                    if int(round(self.carousel.get_position())) == 2:
+                    if int(round(self.carousel.get_position())) == 1:
                         if self.model_selector.provider_sidebar.get_realized() and self.model_selector.provider_sidebar.get_mapped():
                             self.model_selector.provider_sidebar.grab_focus()
                     if self.prev_button.is_sensitive():
@@ -363,7 +304,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         self.start_chatting_button.set_visible(False)
 
         # Página de selección de modelo
-        if current_page_idx == 2:
+        if current_page_idx == 1:
             if not self._models_loaded or not self._model_selector_created:
                 if not self.loading_spinner_packed:
                     self.header_bar.pack_start(self.loading_spinner)
@@ -523,19 +464,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 debug_print(f"Modelo por defecto configurado: {model_id}")
             except Exception as e:
                 debug_print(f"Error configurando modelo por defecto: {e}")
-            
-            from .platform_utils import spawn_tray_applet
-            spawn_tray_applet({})
         self.update_navigation_buttons()
-
-    def save_configuration(self):
-        if self.tray_radio1.get_active():
-            self.config_data['tray_startup'] = 'session'
-        elif self.tray_radio2.get_active():
-            self.config_data['tray_startup'] = 'application'
-        else:
-            self.config_data['tray_startup'] = 'never'
-        debug_print(f"Configuration saved: {self.config_data}")
 
     def get_configuration(self):
         return self.config_data.copy()
@@ -565,19 +494,12 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 debug_print(f"Error recargando modelos dinámicos: {e}")
 
         # Actualizar botones en cualquier caso
-        if int(round(self.carousel.get_position())) == 2:
+        if int(round(self.carousel.get_position())) == 1:
             self.update_navigation_buttons()
-
-    def _animate_panel2_app_icon_callback(self, value):
-        self.panel2_app_icon.set_opacity(value)
-        end_size = self.panel2_app_icon_target_size
-        current_size = int(end_size * value)
-        self.panel2_app_icon.set_size_request(current_size, current_size)
-        self.panel2_app_icon.set_pixel_size(current_size)
 
     def start_lazy_loading(self):
         if not self._models_loaded:
-            if int(round(self.carousel.get_position())) == 2:
+            if int(round(self.carousel.get_position())) == 1:
                 if not self.loading_spinner_packed:
                     self.header_bar.pack_start(self.loading_spinner)
                     self.loading_spinner_packed = True
@@ -642,7 +564,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def _on_models_loaded_completed(self, modelid=None):
         self._models_loaded = True
         self._ensure_loading_spinner_removed()
-        if int(round(self.carousel.get_position())) == 2:
+        if int(round(self.carousel.get_position())) == 1:
             self.update_navigation_buttons()
         
         if self.model_selector and modelid:
@@ -718,50 +640,11 @@ class WelcomeWindow(Adw.ApplicationWindow):
             if hasattr(self.model_selector, 'content_stack'):
                 self.model_selector.content_stack.connect('notify::visible-child-name', self._on_provider_changed)
 
-    def _on_tray_option_changed(self, checkbutton):
-        if not checkbutton.get_active():
-            return
-        try:
-            from .platform_utils import ensure_load_on_session_startup
-            if self.tray_radio1.get_active():
-                success = ensure_load_on_session_startup(True)
-                if success:
-                    debug_print("Autostart habilitado para inicio de sesión")
-                    self.config_data['tray_startup'] = 'session'
-                else:
-                    debug_print("Error habilitando autostart")
-            else:
-                success = ensure_load_on_session_startup(False)
-                if success:
-                    debug_print("Autostart deshabilitado")
-                    self.config_data['tray_startup'] = 'application'
-                else:
-                    debug_print("Error deshabilitando autostart")
-        except Exception as e:
-            debug_print(f"Error configurando autostart: {e}")
-
-    def _initialize_tray_options(self):
-        try:
-            from .platform_utils import is_loading_on_session_startup
-            autostart_enabled = is_loading_on_session_startup()
-            if autostart_enabled:
-                self.tray_radio1.set_active(True)
-                self.config_data['tray_startup'] = 'session'
-                debug_print("Autostart detectado como habilitado")
-            else:
-                self.tray_radio2.set_active(True)
-                self.config_data['tray_startup'] = 'application'
-                debug_print("Autostart detectado como deshabilitado")
-        except Exception as e:
-            debug_print(f"Error verificando estado de autostart: {e}")
-            self.tray_radio2.set_active(True)
-            self.config_data['tray_startup'] = 'application'
-
     def _on_provider_changed(self, stack, pspec):
         """Actualiza los botones cuando se cambia de proveedor."""
         current_provider = stack.get_visible_child_name()
         debug_print(f"Debug: Proveedor cambiado a: {current_provider}")
-        if int(round(self.carousel.get_position())) == 2:
+        if int(round(self.carousel.get_position())) == 1:
             # Usar un timeout pequeño para que el cambio se complete
             GLib.timeout_add(50, self.update_navigation_buttons)
 
