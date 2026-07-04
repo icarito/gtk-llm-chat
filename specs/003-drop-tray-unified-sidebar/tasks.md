@@ -114,40 +114,61 @@ do not merge.
       picker-style entry points, not about changing focus-or-open
       semantics generally.
 
-- [ ] **T8. Remove the tray applet entirely** (criterion 1 — the spec's
-      actual reason for existing; not done yet despite being the headline
-      goal). Break down:
-      - [ ] Delete `gtk_llm_chat/tray_applet.py`.
-      - [ ] Remove `pystray-freedesktop` / `pystray` from
-        `requirements.txt` and `pyproject.toml`.
-      - [ ] Remove the `linux/pystray` git submodule (confirm still present
-        in `.gitmodules` before touching — `haiku_port`/`haiku-experiments`
-        branches reference it too, don't break those if still wanted;
-        check with the user before deleting a submodule with cross-branch
-        history).
-      - [ ] Remove `--applet` CLI flag, D-Bus applet activation, and any
-        lockfile/fork logic that exists *solely* for the tray in
-        `main.py`, `platform_utils.py`, `welcome.py` (the welcome druid
-        offers to set up the tray), `chat_application.py`. Cross-check
-        against `docs/architecture.md`'s "Desktop integration" section,
-        which still documents `tray_applet.py` as load-bearing — update it
-        in the same change.
-      - [ ] Remove tray-specific PyInstaller hooks/spec entries
-        (`build.spec`, `hooks/`) and the `.desktop` autostart entry
-        (`desktop/org.fuentelibre.gtk_llm_Applet.desktop`) if it exists
-        only for the tray.
-      *Verify:* app builds/launches with `pystray` fully absent from the
-      venv; no `--applet` code path reachable; PyInstaller build (or at
-      least `build.spec` review) doesn't reference removed modules; a
-      packaging smoke build if feasible.
-
-- [ ] **T9. Explicit no-regression pass** (criterion 5). No formal
-      verification has run since T1–T6 landed. Walk, in the real running
-      app: LLM send/stream/rename/delete; XMPP 1:1 chat, typing indicators,
-      roster with live presence, subscription accept/deny, incoming-message
-      notifications (001+002's acceptance criteria). A second independent
-      review pass (agent-based, as done for 001/002) is worth it given how
-      much landed without one.
+- [x] **T9. Explicit no-regression pass** (criterion 5).
+      *Result (2026-07-03):* independent agent-based verify pass, done
+      *before* T8's surgery (deliberately reordered — a clean baseline
+      before touching the tray). 37/37 assertions PASS: LLM
+      send/stream/rename/delete, the full two-level sidebar navigation
+      (Ctrl+M/S, close-resets-stack), XMPP baseline (001: connect,
+      self-chat roundtrip, typing, status label), XMPP roster/
+      notifications (002: live presence, message/subscription
+      notification logic), and T1/T2/T4/T6's specific claims — all
+      re-verified against real network/XMPP traffic, not just mocks.
+      One real bug found (pre-dates spec 003, confirmed byte-identical
+      at `798dcf1`): new LLM conversations never got a row in the
+      `conversations` table (only `responses`), because
+      `chat_window.py`'s `_on_llm_response` eagerly set `config['cid']`
+      before `llm_client.py`'s creation guard ran, permanently
+      defeating it. This directly undermined T5's new sidebar (new
+      conversations were invisible to it) so it was fixed immediately
+      (commit `d03ef8e`) rather than deferred — verified end-to-end
+      against the real model: new conversation now appears in
+      `get_conversations()` and in the live sidebar right after send.
+- [x] **T8. Remove the tray applet entirely** (criterion 1 — the spec's
+      actual reason for existing).
+      *Result (2026-07-03):* done in three commits
+      (`b51f501`/`ba44ae5`/`51f6981`). `tray_applet.py` deleted;
+      `pystray`/`pystray-freedesktop`/`pyxdg`/`pillow`/`watchdog` dropped
+      from dependencies (all were tray-only — `watchdog` fed the file
+      watcher for the tray menu, `pyxdg`/`pillow` fed autostart/icon
+      rendering); `linux/pystray` submodule removed via
+      `deinit`+`rm` (haiku_port/haiku_build keep their own history,
+      untouched — confirmed before touching it, per the earlier
+      decision to ask first). `--applet` flag, `launch_tray_applet`/
+      `fork_or_spawn_applet`/`spawn_tray_applet`/
+      `send_ipc_open_conversation`/`ensure_single_instance`/autostart
+      helpers all removed from `main.py`/`platform_utils.py`
+      (738→285 lines)/`chat_application.py`/`llm_gui.py`.
+      `welcome.py`'s entire tray-setup wizard page removed (was page 2
+      of 4 in the `Adw.Carousel`), with every hardcoded page-index
+      reference renumbered and verified via a real `GLib.MainLoop`
+      (index math is easy to get wrong silently — confirmed 0→1→2
+      navigation and button visibility at each page with actual
+      wall-clock animation timing, not just iteration counts).
+      `single_instance.py` also removed (orphaned once
+      `ensure_single_instance` — its only caller — was gone).
+      `build.spec`, the Flatpak manifest, and the Applet `.desktop` file
+      updated/removed; `docs/architecture.md`, `development-guide.md`,
+      `data-model.md`, `README.md` updated to drop stale tray mentions.
+      *Verify:* real app launch shows **exactly one process** (`ps`
+      confirmed no forked/spawned child) — the core goal. Zero
+      tracebacks on both entry paths (`--model=...` opens directly; a
+      bare launch shows the chat-type picker). One false-positive during
+      verification, resolved: a stale D-Bus-registered instance from an
+      earlier manual test made a bare launch look silently broken
+      (`Gio.Application` forwarded args to the existing primary instance
+      instead of starting fresh) — confirmed non-issue by killing the
+      stale process and re-testing clean.
 
 - [ ] **T10. Update spec.md checkboxes to match reality**, then continue
       the normal cycle: docs (`architecture.md`'s tray section, once T8

@@ -29,17 +29,19 @@ served by an in-window sidebar, consistent with the XMPP roster from 002.
 
 ## Acceptance criteria (MVP)
 
-Status as of `236860c` (2026-07-03) — see tasks.md for the task-level
+Status as of `51f6981` (2026-07-03) — see tasks.md for the task-level
 breakdown and evidence.
 
-- [ ] 1. The tray applet is gone: no `tray_applet.py`, no `--applet`
+- [x] 1. The tray applet is gone: no `tray_applet.py`, no `--applet`
          path, no `pystray` dependency, no `linux/pystray` submodule, no
          D-Bus/fork/lockfile machinery introduced solely for it. The app
          starts as a single process.
-         **Not started.** `tray_applet.py`, `pystray`/`pystray-freedesktop`
-         (requirements.txt, pyproject.toml) and the `linux/pystray`
-         submodule are all still present and unchanged. This is the
-         spec's actual reason for existing — see tasks.md T8.
+         Done (tasks.md T8): `tray_applet.py` deleted; `pystray` and its
+         transitive tray-only deps (`pyxdg`, `pillow`, `watchdog`) dropped;
+         `linux/pystray` submodule removed; all `--applet`/fork/lockfile
+         code removed from `main.py`/`platform_utils.py`/
+         `chat_application.py`/`llm_gui.py`/`welcome.py`. Verified: `ps`
+         shows exactly one process on launch.
 - [x] 2. LLM conversation windows have a **left sidebar listing recent
          conversations** (mirroring the XMPP roster: same widget style,
          same left dock, same toggle button), replacing the tray's
@@ -66,12 +68,14 @@ breakdown and evidence.
          (Verified headless 2026-07-03: `_on_close_request` checks
          `app._xmpp_session.is_connected` before quitting; also added
          Ctrl+Q as an explicit, unconditional quit shortcut.)
-- [ ] 5. No regression: LLM chat (send/stream/rename/delete) and all of
+- [x] 5. No regression: LLM chat (send/stream/rename/delete) and all of
          001/002's XMPP behavior (chat, typing, roster, presence,
          notifications) keep working.
-         **Not formally verified since T1–T6 landed** — no pass has run
-         end-to-end against the live app since these six commits went in
-         ad-hoc. See tasks.md T9.
+         Verified (tasks.md T9): independent agent-based pass, 37/37
+         assertions PASS against real network/XMPP traffic. Found and
+         fixed one pre-existing bug (predates spec 003) that undermined
+         criterion 2's new sidebar: new LLM conversations weren't
+         persisted to the `conversations` table (commit `d03ef8e`).
 
 ## Out of scope
 
