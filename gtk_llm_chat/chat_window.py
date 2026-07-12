@@ -8,7 +8,7 @@ import locale
 import gettext
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject
+from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject, Pango
 
 from .llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from .widgets import Message, MessageWidget, ErrorWidget
@@ -128,7 +128,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Crear header bar
         self.header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle.new(title, "")
-        self.header.set_title_widget(self.title_widget)
+        self.title_presence_dot = Gtk.Image.new_from_icon_name("media-record-symbolic")
+        self.title_presence_dot.add_css_class("success")
+        self.title_presence_dot.set_tooltip_text(_("Online"))
+        self.title_presence_dot.set_valign(Gtk.Align.CENTER)
+        self.title_presence_dot.set_visible(False)
+
+        self.header_title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.header_title_box.set_valign(Gtk.Align.CENTER)
+        self.header_title_box.append(self.title_presence_dot)
+        self.header_title_box.append(self.title_widget)
+        self.header.set_title_widget(self.header_title_box)
         self.set_title(title)  # Set window title based on initial title
 
         # Workaround de controles nativos en macOS (centralizado, con delay para asegurar renderizado)
@@ -139,13 +149,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return False  # Ejecutar solo una vez
             GLib.idle_add(_apply_native_controls)
 
-        # --- Indicador de estado de conexión (solo backends no-LLM, spec 001) ---
+        # --- Barra de estado XMPP: mantiene el headerbar solo para título y acciones. ---
+        self.xmpp_status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.xmpp_status_bar.add_css_class("toolbar")
+        self.xmpp_status_bar.add_css_class("flat")
+        self.xmpp_status_bar.set_margin_start(12)
+        self.xmpp_status_bar.set_margin_end(12)
+        self.xmpp_status_bar.set_margin_top(0)
+        self.xmpp_status_bar.set_margin_bottom(0)
+        self.xmpp_status_bar.set_visible(self._injected_backend)
+        self.title_presence_dot.set_visible(False)
+
         self.connection_status_label = Gtk.Label()
         self.connection_status_label.add_css_class("dim-label")
         self.connection_status_label.add_css_class("caption")
-        self.connection_status_label.set_visible(self._injected_backend)
-        if self._injected_backend:
-            self.header.pack_start(self.connection_status_label)
+        self.connection_status_label.set_xalign(0)
+
+        self.contact_status_label = Gtk.Label()
+        self.contact_status_label.add_css_class("dim-label")
+        self.contact_status_label.add_css_class("caption")
+        self.contact_status_label.set_xalign(1)
+        self.contact_status_label.set_hexpand(True)
+        self.contact_status_label.set_ellipsize(Pango.EllipsizeMode.END)
+
+        self.xmpp_status_bar.append(self.connection_status_label)
+        self.xmpp_status_bar.append(self.contact_status_label)
 
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
@@ -193,7 +221,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header.pack_end(self.agent_menu_button)
         self.header.pack_end(self.sidebar_button)
         self.header.pack_end(rename_button)
-        self.header.pack_start(self.roster_button)
+        self.header.pack_end(self.roster_button)
 
         # --- Fin Botones Header Bar ---
 
@@ -293,6 +321,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root_box.append(self.header)
+        root_box.append(self.xmpp_status_bar)
         root_box.append(self.split_view) # Añadir el split_view aquí
 
         # Establecer el contenido de la ventana
@@ -388,7 +417,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # backend; se actualiza aquí porque puede cambiar entre llamadas
         # (p.ej. una ventana XMPP vacía nunca pasa a modo LLM en la práctica,
         # pero el flag sí puede alternar entre "sin contacto" y "con contacto").
-        self.connection_status_label.set_visible(self._injected_backend)
+        self.xmpp_status_bar.set_visible(self._injected_backend)
         self.sidebar_button.set_visible(False)
         self.roster_button.set_visible(True)
         self.agent_menu_button.set_visible(False)
@@ -426,7 +455,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             else:
                 # Sin contacto elegido aún: mostrar el roster, deshabilitar
                 # el chat hasta que el usuario elija una fila (spec 003).
-                self.title_widget.set_subtitle(_("Choose a contact"))
+                self.title_widget.set_subtitle("")
+                self.title_presence_dot.set_visible(False)
+                self.contact_status_label.set_label(_("Choose a contact"))
                 self.set_enabled(False)
             # Estado inicial: la sesión puede ya estar 'connected' antes de
             # que esta ventana exista (el roster picker implica sesión viva).
@@ -437,6 +468,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._session_handler_ids = [
                     session.connect('contact-status-changed',
                                     self._on_contact_status_changed),
+                    session.connect('presence-changed',
+                                    self._on_contact_presence_changed),
                 ]
                 from .chat_roster_sidebar import ChatRosterSidebar
                 self.roster_sidebar = ChatRosterSidebar(
@@ -513,6 +546,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._session_handler_ids = [
                     session.connect('contact-status-changed',
                                     self._on_contact_status_changed),
+                    session.connect('presence-changed',
+                                    self._on_contact_presence_changed),
                 ]
 
             # Roster unificado: conversaciones LLM y contactos XMPP en el
@@ -594,6 +629,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._session_handler_ids = [
                 session.connect('contact-status-changed',
                                 self._on_contact_status_changed),
+                session.connect('presence-changed',
+                                self._on_contact_presence_changed),
             ]
         from .chat_roster_sidebar import ChatRosterSidebar
         self.model_sidebar = ChatRosterSidebar(
@@ -755,6 +792,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.set_text(title)
         self.set_title(title)  # Actualizar también el título de la ventana
 
+    def _restore_header_title_widget(self):
+        self.header.set_title_widget(self.header_title_box)
+
     def _on_save_title(self, widget):
         app = self.get_application()
         conversation_id = self.config.get('cid')
@@ -775,7 +815,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                         conversation_id, self.title_entry.get_text())
                     self.backend.disconnect_by_func(update_title_on_next_prompt)
             self.backend.connect('response', update_title_on_next_prompt)
-        self.header.set_title_widget(self.title_widget)
+        self._restore_header_title_widget()
         new_title = self.title_entry.get_text()
 
         self.title_widget.set_title(new_title)
@@ -784,7 +824,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _cancel_set_title(self, controller, keyval, keycode, state):
         """Cancela la edición y restaura el título anterior"""
         if keyval == Gdk.KEY_Escape:
-            self.header.set_title_widget(self.title_widget)
+            self._restore_header_title_widget()
             self.title_entry.set_text(self.title_widget.get_title())
 
 
@@ -914,7 +954,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return message_widget
 
     def _update_connection_status(self, state):
-        """Refleja el estado de conexión del backend en el header (spec 001, T7)."""
+        """Refleja el estado de conexión del backend en la barra XMPP."""
         labels = {
             'connecting': _("Connecting…"),
             'reconnecting': _("Reconnecting…"),
@@ -962,14 +1002,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_backend_typing(self, backend, is_typing):
         """Maneja la señal 'typing' del backend: el contacto está escribiendo
-        (spec 001, T8, XEP-0085). Reusa el indicador de conexión, ya que
-        ambos son estados efímeros de la contraparte."""
+        (spec 001, T8, XEP-0085)."""
         if is_typing:
-            self.connection_status_label.set_label(_("Typing…"))
-            self.connection_status_label.remove_css_class("error")
+            bare_jid = getattr(self.backend, 'bare_jid', None)
+            self.contact_status_label.set_label(
+                f"{bare_jid} - {_('Typing…')}" if bare_jid else _("Typing…"))
         else:
-            state = getattr(self, '_last_connection_state', 'connected')
-            self._update_connection_status(state)
+            self._update_xmpp_title_status()
 
     def _on_contact_status_changed(self, session, bare_jid):
         active_bare = getattr(self.backend, 'bare_jid', None)
@@ -977,16 +1016,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._update_xmpp_title_status()
             self._refresh_agent_menu()
 
+    def _on_contact_presence_changed(self, session, bare_jid, state):
+        active_bare = getattr(self.backend, 'bare_jid', None)
+        if bare_jid == active_bare:
+            self._update_xmpp_title_status()
+
     def _update_xmpp_title_status(self):
         if self.backend is None:
             return
         session = getattr(self.backend, 'session', None)
         bare_jid = getattr(self.backend, 'bare_jid', None)
         if session is None or bare_jid is None:
-            self.title_widget.set_subtitle(self.backend.get_display_name())
+            self.title_widget.set_subtitle("")
+            self.title_presence_dot.set_visible(False)
+            self.contact_status_label.set_label(self.backend.get_display_name())
             return
+        display_name = self.backend.get_display_name()
+        self.title_widget.set_title(display_name)
+        self.title_widget.set_subtitle("")
+        self.set_title(display_name)
         status = session.get_contact_status(bare_jid)
-        self.title_widget.set_subtitle(status or self.backend.get_display_name())
+        presence = session.get_presence(bare_jid)
+        is_online = presence == 'online'
+        self.title_presence_dot.set_visible(is_online)
+        presence_label = _("Online") if is_online else _("Offline")
+        self.contact_status_label.set_label(f"{bare_jid} - {status or presence_label}")
 
     def _refresh_agent_menu(self):
         if self.backend is None:
@@ -1186,10 +1240,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         batch = self._xmpp_history_batch
         is_backfill = self._xmpp_backfill_remaining > 0
         if batch:
-            for body, direction, timestamp in batch:
-                if is_backfill:
+            if is_backfill:
+                for body, direction, timestamp in batch:
                     self._display_history_bubble(body, direction, timestamp)
-                else:
+            else:
+                for body, direction, timestamp in reversed(batch):
                     self._prepend_history_bubble(body, direction, timestamp)
             self._history_displayed = True
         if is_backfill:

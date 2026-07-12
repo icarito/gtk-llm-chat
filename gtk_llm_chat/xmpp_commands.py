@@ -111,7 +111,9 @@ class XmppCommandFormDialog(Adw.Window):
             self._hidden_fields.append(field)
             return
         if typ == 'fixed':
-            row = Adw.ActionRow(title=field.value)
+            # Fila de solo texto (sin var), usada para instrucciones sueltas.
+            # field.value puede venir vacío; no dejar el título en None.
+            row = Adw.ActionRow(title=field.value or '')
             row.set_selectable(False)
             group.add(row)
             self._fixed_fields.append(field)
@@ -123,36 +125,54 @@ class XmppCommandFormDialog(Adw.Window):
             self._field_widgets[field.var] = (field, row)
             return
         if typ == 'list-single':
+            # ComboRow es el control Adwaita idiomático para list-single.
+            # iter_options() de nbxmpp yield (value, label) en ese orden.
             options = list(field.iter_options())
             labels = [label for _value, label in options]
-            row = Adw.ActionRow(title=field.label)
-            dropdown = Gtk.DropDown.new_from_strings(labels)
+            row = Adw.ComboRow(title=field.label)
+            row.set_model(Gtk.StringList.new(labels))
             active = 0
             for index, (value, _label) in enumerate(options):
                 if value == field.value:
                     active = index
                     break
-            dropdown.set_selected(active)
-            dropdown.set_valign(Gtk.Align.CENTER)
-            row.add_suffix(dropdown)
-            row.set_activatable_widget(dropdown)
+            row.set_selected(active)
             group.add(row)
-            self._field_widgets[field.var] = (field, dropdown, options)
+            self._field_widgets[field.var] = (field, row, options)
             return
         if typ == 'text-multi':
-            row = Adw.ActionRow(title=field.label)
+            # Un TextView no cabe en el suffix de un ActionRow (se ve
+            # apretado): va en su propia fila de ancho completo, con label
+            # encima y el área de texto dentro de un ScrolledWindow con
+            # borde. field.value nunca es None en nbxmpp, pero se normaliza
+            # por si el tipo real difiere.
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            box.set_margin_top(6)
+            box.set_margin_bottom(6)
+            label = Gtk.Label(label=field.label, xalign=0)
+            label.add_css_class("caption-heading")
+            box.append(label)
             text_view = Gtk.TextView()
             text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-            text_view.set_size_request(-1, 96)
-            text_view.get_buffer().set_text(field.value, -1)
-            row.add_suffix(text_view)
-            group.add(row)
+            text_view.set_top_margin(6)
+            text_view.set_bottom_margin(6)
+            text_view.set_left_margin(6)
+            text_view.set_right_margin(6)
+            text_view.get_buffer().set_text(field.value or '', -1)
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_min_content_height(96)
+            scrolled.set_child(text_view)
+            frame = Gtk.Frame()
+            frame.set_child(scrolled)
+            box.append(frame)
+            group.add(box)
             self._field_widgets[field.var] = (field, text_view)
             return
 
         row_cls = Adw.PasswordEntryRow if typ == 'text-private' else Adw.EntryRow
         row = row_cls(title=field.label)
-        row.set_text(getattr(field, 'value', '') or '')
+        row.set_text(field.value or '')
         group.add(row)
         self._field_widgets[field.var] = (field, row)
 

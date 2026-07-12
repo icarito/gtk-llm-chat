@@ -63,8 +63,10 @@ class XmppHistory:
     def get_recent(self, bare_jid: str, limit: int = 50):
         conn = self.get_connection()
         cursor = conn.execute(
+            "SELECT body, direction, timestamp FROM ("
             "SELECT body, direction, timestamp FROM messages "
-            "WHERE bare_jid = ? ORDER BY timestamp ASC LIMIT ?",
+            "WHERE bare_jid = ? ORDER BY timestamp DESC LIMIT ?"
+            ") ORDER BY timestamp ASC",
             (bare_jid, limit),
         )
         return [dict(row) for row in cursor.fetchall()]
@@ -72,9 +74,11 @@ class XmppHistory:
     def get_before(self, bare_jid: str, before_timestamp: str, limit: int = 50):
         conn = self.get_connection()
         cursor = conn.execute(
+            "SELECT body, direction, timestamp FROM ("
             "SELECT body, direction, timestamp FROM messages "
             "WHERE bare_jid = ? AND timestamp < ? "
-            "ORDER BY timestamp ASC LIMIT ?",
+            "ORDER BY timestamp DESC LIMIT ?"
+            ") ORDER BY timestamp ASC",
             (bare_jid, before_timestamp, limit),
         )
         return [dict(row) for row in cursor.fetchall()]
