@@ -16,6 +16,9 @@ Hallazgos del spike (specs/001-xmpp-backend/design.md) aplicados aquí:
 """
 from gi.repository import GLib, GObject
 
+import os
+import uuid
+
 from nbxmpp.client import Client as NbxmppClient
 from nbxmpp.namespaces import Namespace
 from nbxmpp.protocol import Iq, JID, Message, Presence
@@ -25,6 +28,7 @@ from nbxmpp.structs import StanzaHandler
 from .chat_backend import ChatBackend
 from .chat_application import _
 from .debug_utils import debug_print
+from .xmpp_history import XmppHistory
 
 STATE_DISCONNECTED = 'disconnected'
 STATE_CONNECTING = 'connecting'
@@ -77,11 +81,10 @@ class XmppSession(GObject.Object):
         # bare jid (str) -> dict(name=..., subscription=..., presence=...)
         self.roster_items = {}
         self._roster_loaded = False
-        # bare jid (str) -> set de recursos online; un contacto está
-        # 'online' si tiene al menos un recurso disponible (spec 002 spike)
         self._online_resources = {}
-        # bare jid (str) -> XmppConversation
         self._conversations = {}
+        self._pending_mam_queries: dict = {}
+        self.history: XmppHistory | None = None
 
     # --- Estado ---
 
@@ -333,6 +336,70 @@ class XmppSession(GObject.Object):
                 self.roster_items[bare].get('agent_full_jid') != old_agent_full_jid):
             self.emit('contact-status-changed', bare)
 
+    def _ensure_history(self):
+        if self.history is None:
+            from .platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
+            self.history = XmppHistory(os.path.join(user_dir, "xmpp_history.db"))
+
+    # --- Mensajes ---
+
+    def query_mam(self, bare_jid: str, after: str = None, end: str = None,
+                  callback: 'callable' = None):
+        """Issue a MAM query for conversation history (XEP-0313).
+
+        Returns the queryid for correlation, or None if not connected.
+        Results arrive as ordinary 'message' stanzas routed through
+        _on_message's MAM branch, collected in _pending_mam_queries;
+        the done-callback fires on query completion with the buffered
+        messages and complete flag.
+
+        This nbxmpp version's make_query has no before= parameter,
+        only start/end/after (max_ for page size). Scroll-to-load-older
+        uses end= (the timestamp of the oldest message currently shown)
+        without after= to get the page immediately preceding it.
+        """
+        if not self.is_connected:
+            return None
+        self._ensure_history()
+        queryid = str(uuid.uuid4())
+        self._pending_mam_queries[queryid] = {
+            'buffer': [],
+            'callback': callback,
+            'bare_jid': bare_jid,
+        }
+        try:
+            kwargs = {'jid': self._jid, 'queryid': queryid, 'with_': bare_jid, 'max_': 50}
+            if after is not None:
+                kwargs['after'] = after
+            if end is not None:
+                kwargs['end'] = end
+            task = self._client.get_module('MAM').make_query(**kwargs)
+            task.add_done_callback(lambda t: self._on_mam_query_done(t, queryid))
+        except Exception as err:
+            debug_print(f"XmppSession: MAM query failed: {err}")
+            entry = self._pending_mam_queries.pop(queryid, None)
+            if entry and entry['callback']:
+                entry['callback']([], False)
+            return None
+        return queryid
+
+    def _on_mam_query_done(self, task, queryid):
+        entry = self._pending_mam_queries.pop(queryid, None)
+        if entry is None:
+            return
+        try:
+            result = task.finish()
+            complete = result.complete
+            debug_print(f"XmppSession: MAM query done for {entry['bare_jid']} "
+                        f"complete={complete} first={result.rsm.first} "
+                        f"last={result.rsm.last}")
+        except Exception as err:
+            debug_print(f"XmppSession: MAM query errored: {err}")
+            complete = False
+        if entry['callback']:
+            entry['callback'](entry['buffer'], complete)
+
     # --- Mensajes ---
 
     def _on_message(self, _client, _stanza, properties):
@@ -343,6 +410,16 @@ class XmppSession(GObject.Object):
             return
         bare = str(properties.jid.bare)
         conversation = self._conversations.get(bare)
+
+        if getattr(properties, 'is_mam_message', False):
+            mam = properties.mam
+            pending = self._pending_mam_queries.get(mam.query_id)
+            if pending is not None and properties.body:
+                direction = 'out' if properties.jid.bare == self._jid.bare else 'in'
+                pending['buffer'].append(
+                    (properties.body, direction, mam.timestamp, mam.id))
+            return
+
         if properties.has_chatstate and conversation is not None:
             conversation.notify_chatstate(str(properties.chatstate))
         if not properties.body:
@@ -431,12 +508,15 @@ class XmppConversation(ChatBackend):
         ChatBackend.__init__(self)
         self.session = session
         self.bare_jid = bare_jid
+        session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
         self._session_handlers = [
             session.connect('state-changed', self._on_session_state),
             session.connect('session-error', self._on_session_error),
         ]
+        self._history_shown_from: str | None = None
+        self._pending_mam_queryid: str | None = None
         if session.is_connected:
             GLib.idle_add(self._emit_ready)
 
@@ -455,7 +535,12 @@ class XmppConversation(ChatBackend):
     # --- Entrantes (llamados por la sesión) ---
 
     def deliver(self, body: str, quick_responses=None):
-        """Un mensaje del contacto: response + finished (sin streaming)."""
+        """Un mensaje del contacto: response + finished, cached."""
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        history = self.session.history
+        if history is not None:
+            history.record_message(self.bare_jid, body, 'in', ts)
         self.emit('response', body)
         if quick_responses:
             self.emit('quick-responses', quick_responses)
@@ -471,8 +556,12 @@ class XmppConversation(ChatBackend):
             self.emit('error', _("Not connected to the XMPP server"))
             self.emit('finished', False)
             return
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        history = self.session.history
+        if history is not None:
+            history.record_message(self.bare_jid, prompt, 'out', ts)
         self.session.send_text(self.bare_jid, prompt)
-        # El envío no genera respuesta propia: liberar la UI de inmediato
         self.emit('finished', True)
 
     def send_quick_response(self, value: str, label: str):
@@ -480,6 +569,11 @@ class XmppConversation(ChatBackend):
             self.emit('error', _("Not connected to the XMPP server"))
             self.emit('finished', False)
             return
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        history = self.session.history
+        if history is not None:
+            history.record_message(self.bare_jid, value, 'out', ts)
         self.session.send_text(self.bare_jid, value)
         self.emit('finished', True)
 
@@ -487,8 +581,7 @@ class XmppConversation(ChatBackend):
         pass
 
     def get_conversation_id(self):
-        # Sin historial local en el MVP (spec 001): no hay CID persistente
-        return None
+        return f"xmpp:{self.session.bare_jid}:{self.bare_jid}"
 
     def get_display_name(self) -> str:
         return self.session.get_contact_name(self.bare_jid)
@@ -496,6 +589,56 @@ class XmppConversation(ChatBackend):
     def notify_composing(self, is_composing: bool):
         state = 'composing' if is_composing else 'active'
         self.session.send_chatstate(self.bare_jid, state)
+
+    # --- History (spec 004) ---
+
+    def load_history_from_cache(self):
+        history = self.session.history
+        if history is None:
+            self.emit('history-complete', False)
+            return
+        messages = history.get_recent(self.bare_jid)
+        if not messages:
+            self.emit('history-complete', False)
+            return
+        for msg in messages:
+            self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+        self._history_shown_from = messages[0]['timestamp']
+        self.emit('history-complete', True)
+
+    def load_history_from_mam(self):
+        if not self.session.is_connected or self._pending_mam_queryid is not None:
+            return
+        history = self.session.history
+        after_ts = history.get_latest_timestamp(self.bare_jid) if history else None
+        self._pending_mam_queryid = self.session.query_mam(
+            self.bare_jid, after=after_ts, callback=self._on_mam_page)
+
+    def load_more_history(self):
+        history = self.session.history
+        if history is None:
+            return
+        older = history.get_before(self.bare_jid, self._history_shown_from, limit=50)
+        if older:
+            for msg in older:
+                self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+            self._history_shown_from = older[0]['timestamp']
+            self.emit('history-complete', True)
+            return
+        if self.session.is_connected:
+            self._pending_mam_queryid = self.session.query_mam(
+                self.bare_jid, end=self._history_shown_from, callback=self._on_mam_page)
+
+    def _on_mam_page(self, messages, complete):
+        self._pending_mam_queryid = None
+        for body, direction, timestamp, mam_id in messages:
+            history = self.session.history
+            if history is not None:
+                history.record_message(self.bare_jid, body, direction, timestamp, mam_id)
+            self.emit('history-message', body, direction, timestamp)
+        if messages:
+            self._history_shown_from = messages[0][2]
+        self.emit('history-complete', not complete)
 
     def shutdown(self):
         # La sesión es compartida (la cierra quien la posee), pero sí hay

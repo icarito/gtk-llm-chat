@@ -221,6 +221,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.connect("edge-reached", self._on_edge_reached)
+        self.message_scroll = scroll
         
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
@@ -300,6 +302,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
 
+        self._xmpp_history_batch = None
+
 
     def _unbind_backend(self):
         """Suelta el backend y el sidebar actuales de esta ventana (spec 003,
@@ -340,6 +344,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._history_displayed = False
         self.current_message_widget = None
         self.accumulated_response = ""
+        self._xmpp_history_batch = []
+        self._xmpp_history_loaded = False
+        self._xmpp_backfill_remaining = 0
         for child in list(self.messages_box):
             self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
@@ -991,12 +998,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
         debug_print(f"Backend listo: {display_name}")
 
-        # Actualizar el subtítulo de la ventana con el nombre a mostrar
         if self._injected_backend:
             self._update_xmpp_title_status()
-        else:
-            self.title_widget.set_subtitle(display_name)
-        
+            self._load_xmpp_history()
+            return
+
+        self.title_widget.set_subtitle(display_name)
+
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
             debug_print(f"Verificando conversación existente para CID: {self.cid}")
@@ -1034,7 +1042,59 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(traceback.format_exc())
         else:
             debug_print("Sin CID específico, no se carga ninguna conversación")
-            
+
+    def _load_xmpp_history(self):
+        if not hasattr(self, '_xmpp_history_loaded') or not self._xmpp_history_loaded:
+            self._xmpp_history_loaded = True
+            backend = self.backend
+            if backend is None:
+                return
+            for child in list(self.messages_box):
+                self.messages_box.remove(child)
+            self._history_displayed = False
+            self._xmpp_backfill_remaining = 2
+            self._xmpp_history_batch = []
+            hid1 = backend.connect('history-message', self._on_xmpp_history_message)
+            hid2 = backend.connect('history-complete', self._on_xmpp_history_complete)
+            self._backend_handler_ids.append(hid1)
+            self._backend_handler_ids.append(hid2)
+            GLib.idle_add(lambda: (backend.load_history_from_cache(),
+                                    backend.load_history_from_mam(), GLib.SOURCE_REMOVE)[2])
+
+    def _on_xmpp_history_message(self, backend, body, direction, timestamp):
+        self._xmpp_history_batch.append((body, direction, timestamp))
+
+    def _on_xmpp_history_complete(self, backend, has_more):
+        batch = self._xmpp_history_batch
+        is_backfill = self._xmpp_backfill_remaining > 0
+        if batch:
+            for body, direction, timestamp in batch:
+                if is_backfill:
+                    self._display_history_bubble(body, direction, timestamp)
+                else:
+                    self._prepend_history_bubble(body, direction, timestamp)
+            self._history_displayed = True
+        if is_backfill:
+            self._xmpp_backfill_remaining -= 1
+        self._xmpp_history_batch = []
+        GLib.idle_add(self._scroll_to_bottom)
+
+    def _display_history_bubble(self, body, direction, timestamp):
+        sender = "user" if direction == 'out' else "assistant"
+        msg = Message(body, sender)
+        widget = MessageWidget(msg)
+        self.messages_box.append(widget)
+
+    def _prepend_history_bubble(self, body, direction, timestamp):
+        sender = "user" if direction == 'out' else "assistant"
+        msg = Message(body, sender)
+        widget = MessageWidget(msg)
+        self.messages_box.prepend(widget)
+
+    def _on_edge_reached(self, scroll, pos):
+        if pos == Gtk.PositionType.TOP and self.backend is not None:
+            self.backend.load_more_history()
+
     def _load_and_display_history(self, history_entries):
         """Método auxiliar para cargar y mostrar el historial después de que la UI esté lista."""
         try:

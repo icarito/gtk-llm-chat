@@ -36,6 +36,9 @@ class ChatBackend(GObject.Object):
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object,)),
+        'history-message': (GObject.SignalFlags.RUN_LAST, None,
+                            (str, str, str)),
+        'history-complete': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
 
     def send_message(self, prompt: str):
@@ -63,3 +66,8 @@ class ChatBackend(GObject.Object):
     def shutdown(self):
         """Libera recursos (desconexión, hilos). Por defecto: cancel()."""
         self.cancel()
+
+    def load_more_history(self):
+        """Request one more page of older history, if the backend has any
+        concept of history. No-op by default."""
+        pass

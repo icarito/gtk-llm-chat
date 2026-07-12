@@ -45,36 +45,36 @@ behavior.
 
 ## Acceptance criteria (MVP)
 
-- [ ] 1. **Local cache**: a new SQLite database, separate from `llm`'s
+- [x] 1. **Local cache**: a new SQLite database, separate from `llm`'s
       `logs.db` (never touch that schema — see data-model.md's existing
       rule), storing XMPP messages per contact (bare JID), with enough
       fields to render history (body, direction, timestamp, XEP-0313
       archive id for dedup/resume). Lives in the same config directory as
       `logs.db` but as its own file.
-- [ ] 2. **Instant local history on open**: opening a conversation with an
+- [x] 2. **Instant local history on open**: opening a conversation with an
       existing contact immediately renders the most recent cached
       messages (no network wait), styled consistently with the LLM
       history view (`chat_window.py`'s existing
       `_display_conversation_history` bubble rendering, reused or mirrored
       — not reinvented).
-- [ ] 3. **MAM backfill on open**: after showing the local cache, query
+- [x] 3. **MAM backfill on open**: after showing the local cache, query
       the server via MAM (`nbxmpp`'s `MAM` module, XEP-0059 RSM paging,
       `max_=50`-ish page size) for anything newer than the latest cached
       message for that JID; merge results into the cache and the visible
       view, deduped by MAM archive id. If the server has nothing new (or
       is unreachable), the cached view stands as-is — never block the
       window on this.
-- [ ] 4. **Scroll-to-load-more**: scrolling to the top of the message view
+- [x] 4. **Scroll-to-load-more**: scrolling to the top of the message view
       requests one more page — from the local cache first if it has older
       messages not yet shown, else via MAM (RSM `before`) — appending
       further back until MAM reports the archive's start (`complete`
       flag) or the user stops scrolling.
-- [ ] 5. **Every live message gets cached**: messages sent or received
+- [x] 5. **Every live message gets cached**: messages sent or received
       during a live session (already working via `XmppConversation`'s
       existing `response`/`deliver` path) are written to the new cache as
       they happen, not just MAM-fetched ones — so the cache is
       self-sufficient even for a contact never queried via MAM yet.
-- [ ] 6. **No regression**: 001/002's live chat, typing, presence,
+- [x] 6. **No regression**: 001/002's live chat, typing, presence,
       notifications, and 003's roster/session lifecycle keep working
       exactly as before for contacts/sessions that exercise no history at
       all (e.g. a brand new contact with nothing to show).

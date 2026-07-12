@@ -90,11 +90,16 @@ XMPP contact.
   (connection state; local backends may never emit it), `typing(bool)`,
   `quick-responses(object)` (button definitions for the last received
   message; optional, used by NanoClaw XMPP).
+  History signals (spec 004): `history-message(str, str, str)`
+  (body, direction, timestamp) and `history-complete(bool)` (has_more),
+  plus `load_more_history()` (no-op default; XMPP backends override
+  for scroll-to-load paging). LLM backends do not use these —
+  their history comes from `logs.db` via `ChatHistory`.
   Methods: `send_message`, `cancel`, `get_conversation_id`,
-  `get_display_name`, `notify_composing`, `shutdown`. `response` may
-  stream (many emits) or arrive whole (one emit); always followed by
-  `finished`. `LLMChatWindow(backend=…)` injects a non-LLM backend;
-  when omitted it builds an `LLMClient` and shows the model sidebar.
+  `get_display_name`, `notify_composing`, `shutdown`, `load_more_history`.
+  `response` may stream (many emits) or arrive whole (one emit); always
+  followed by `finished`. `LLMChatWindow(backend=…)` injects a non-LLM
+  backend; when omitted it builds an `LLMClient` and shows the model sidebar.
 - `llm_client.py` — `LLMClient(ChatBackend)`. Deferred model loading;
   `send_message()` streams in a thread; emits `ready` on model load.
   Cancellation supported.
@@ -151,7 +156,11 @@ XMPP contact.
 - `db_operations.py` — `ChatHistory`: read/write conversations in `llm`'s
   own `logs.db` (sqlite-utils + `llm.migrations.migrate`). ULIDs for ids.
   Thread-local connections. **XMPP conversations are not persisted here**
-  (spec 001: no local history in the MVP).
+  — they use `xmpp_history.py` (spec 004) for local message cache with
+  MAM backfill.
+- `xmpp_history.py` — `XmppHistory`: local SQLite cache for XMPP messages
+  per bare JID, with dedup via MAM archive id. Thread-local connections,
+  same pattern as `ChatHistory` but own schema and file (`xmpp_history.db`).
 - `stubs/llm/` — stub of the `llm` module enabling `--no-llm` UI-only mode
   (see `plans/NO_LLM_MODE_DOCUMENTATION.md`).
 
