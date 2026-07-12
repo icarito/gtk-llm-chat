@@ -108,6 +108,7 @@ class MessageWidget(Gtk.Box):
         time_label.set_size_request(60, -1)
         message_box.append(time_label)
         self.message_box = message_box
+        self._quick_response_row = None
 
         self.append(margin_box)
 
@@ -138,3 +139,9 @@ class MessageWidget(Gtk.Box):
             buttons.append(button)
 
         self.message_box.append(row)
+        self._quick_response_row = row
+
+    def hide_quick_responses(self):
+        if self._quick_response_row is not None:
+            self.message_box.remove(self._quick_response_row)
+            self._quick_response_row = None

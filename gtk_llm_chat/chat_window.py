@@ -348,7 +348,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
         self._agent_command_client = None
-        self._agent_command_client = None
+        self._last_quick_response_widget = None
         for child in list(self.messages_box):
             self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
@@ -1230,6 +1230,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         entrante completo e independiente; crea su propia burbuja.
         """
         if self._injected_backend:
+            if self._last_quick_response_widget is not None:
+                self._last_quick_response_widget.hide_quick_responses()
+                self._last_quick_response_widget = None
             self.accumulated_response = ""
             self.current_message_widget = self.display_message(
                 response, sender="assistant")
@@ -1278,6 +1281,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.send_quick_response(value, label)
 
         self.current_message_widget.add_quick_responses(responses, on_selected)
+        self._last_quick_response_widget = self.current_message_widget
         GLib.idle_add(self._scroll_to_bottom, False)
 
     def _scroll_to_bottom(self, force=True):
