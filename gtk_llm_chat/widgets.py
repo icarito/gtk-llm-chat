@@ -67,7 +67,7 @@ class MessageWidget(Gtk.Box):
         # Crear un contenedor con margen para centrar el contenido
         margin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         margin_box.set_hexpand(True)
-        margin_box.set_size_request(180, -1)  # Ancho mínimo para evitar colapsos
+        margin_box.set_size_request(180, -1)
 
         # Crear el contenedor del mensaje
         message_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -107,9 +107,46 @@ class MessageWidget(Gtk.Box):
         time_label.set_halign(Gtk.Align.END)
         time_label.set_size_request(60, -1)
         message_box.append(time_label)
+        self.message_box = message_box
+        self._quick_response_row = None
 
         self.append(margin_box)
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.content_view.set_markdown(new_content)
+
+    def add_quick_responses(self, responses, on_selected):
+        """Adjunta botones de respuesta rápida a esta burbuja."""
+        if not responses:
+            return
+        flow = Gtk.FlowBox()
+        flow.set_margin_top(6)
+        flow.set_max_children_per_line(99)
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_halign(Gtk.Align.FILL)
+        flow.set_valign(Gtk.Align.START)
+        flow.add_css_class("quick-responses")
+
+        buttons = []
+
+        def handle_click(_button, response):
+            for btn in buttons:
+                btn.set_sensitive(False)
+            on_selected(response)
+
+        for response in responses:
+            label = response.get('label') or response.get('name') or response.get('value', '')
+            button = Gtk.Button(label=label)
+            button.add_css_class("pill")
+            button.connect("clicked", handle_click, response)
+            flow.append(button)
+            buttons.append(button)
+
+        self.message_box.append(flow)
+        self._quick_response_row = flow
+
+    def hide_quick_responses(self):
+        if self._quick_response_row is not None:
+            self.message_box.remove(self._quick_response_row)
+            self._quick_response_row = None

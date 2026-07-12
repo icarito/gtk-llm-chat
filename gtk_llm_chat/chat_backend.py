@@ -18,6 +18,8 @@ Reglas del contrato (ver specs/001-xmpp-backend/design.md):
   no emitirla nunca.
 - 'typing' indica que la otra parte está escribiendo (p.ej. XEP-0085).
   Backends que no lo soportan (LLMClient) simplemente no la emiten.
+- 'quick-responses' adjunta acciones de respuesta rápida al último
+  mensaje recibido. Backends que no lo soportan simplemente no la emiten.
 """
 from gi.repository import GObject
 
@@ -33,6 +35,11 @@ class ChatBackend(GObject.Object):
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
+        'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object,)),
+        'commands': (GObject.SignalFlags.RUN_LAST, None, (object,)),
+        'history-message': (GObject.SignalFlags.RUN_LAST, None,
+                            (str, str, str)),
+        'history-complete': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
 
     def send_message(self, prompt: str):
@@ -60,3 +67,13 @@ class ChatBackend(GObject.Object):
     def shutdown(self):
         """Libera recursos (desconexión, hilos). Por defecto: cancel()."""
         self.cancel()
+
+    def load_more_history(self):
+        """Request one more page of older history, if the backend has any
+        concept of history. No-op by default."""
+        pass
+
+    def send_command(self, jid: str, node: str, name: str):
+        """Execute an ad-hoc command (XEP-0050) via IQ set. No-op for
+        backends that don't support inline disco#items commands."""
+        pass

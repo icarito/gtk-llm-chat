@@ -77,6 +77,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # aspecto (qué botón mostrar, a qué lado) según este flag.
         self.backend = None
         self._backend_handler_ids = []
+        self._session_handler_ids = []
         self._xmpp_session = None
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
@@ -150,16 +151,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
         self.sidebar_button = Gtk.ToggleButton()
         resource_manager.set_widget_icon_name(self.sidebar_button, "brain-symbolic")
-        self.sidebar_button.set_tooltip_text(_("Model Settings"))
+        self.sidebar_button.set_tooltip_text(_("Roster"))
         # No conectar 'toggled' aquí si usamos bind_property
         # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
-        self.sidebar_button.set_visible(not self._injected_backend)
+        self.sidebar_button.set_visible(False)
 
-        # Botón de contactos (roster) a la IZQUIERDA, solo para XMPP (spec 002)
+        # Botón de roster: misma superficie para LLM y XMPP.
         self.roster_button = Gtk.ToggleButton()
         resource_manager.set_widget_icon_name(self.roster_button, "system-users-symbolic")
-        self.roster_button.set_tooltip_text(_("Contacts"))
-        self.roster_button.set_visible(self._injected_backend)
+        self.roster_button.set_tooltip_text(_("Roster"))
+        self.roster_button.set_visible(True)
 
         # Crear botón Rename
         rename_button = Gtk.Button()
@@ -170,17 +171,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # --- Menú principal (hamburguesa): punto de entrada a nuevas
         # conversaciones LLM y XMPP (spec 002) ---
         primary_menu = Gio.Menu()
-        primary_menu.append(_("New LLM Conversation"), "app.new-conversation")
-        primary_menu.append(_("New XMPP Conversation…"), "app.new-xmpp-conversation")
+        primary_menu.append(_("New Conversation"), "app.new-conversation")
         xmpp_section = Gio.Menu()
         xmpp_section.append(_("XMPP Account…"), "app.xmpp-account")
+        xmpp_section.append(_("Reconnect XMPP"), "app.xmpp-reconnect")
+        xmpp_section.append(_("Disconnect XMPP"), "app.xmpp-disconnect")
+        xmpp_section.append(_("Remove XMPP Account…"), "app.xmpp-remove-account")
         primary_menu.append_section(None, xmpp_section)
         self.primary_menu_button = Gtk.MenuButton()
         resource_manager.set_widget_icon_name(self.primary_menu_button, "view-more-symbolic")
         self.primary_menu_button.set_tooltip_text(_("Main Menu"))
         self.primary_menu_button.set_menu_model(primary_menu)
 
+        self.agent_menu_button = Gtk.MenuButton()
+        resource_manager.set_widget_icon_name(
+            self.agent_menu_button, "applications-system-symbolic")
+        self.agent_menu_button.set_tooltip_text(_("Agent"))
+        self.agent_menu_button.set_visible(False)
+
         self.header.pack_end(self.primary_menu_button)
+        self.header.pack_end(self.agent_menu_button)
         self.header.pack_end(self.sidebar_button)
         self.header.pack_end(rename_button)
         self.header.pack_start(self.roster_button)
@@ -210,6 +220,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.connect("edge-reached", self._on_edge_reached)
+        self.message_scroll = scroll
+        # Al redimensionar la ventana, mantener anclado el último mensaje
+        # visible: se guarda la distancia al fondo mientras el usuario hace
+        # scroll y se restaura cuando cambia el alto del viewport (page_size).
+        self._scroll_bottom_distance = 0.0
+        self._scroll_last_page_size = 0.0
+        self._restoring_scroll = False
+        vadj = scroll.get_vadjustment()
+        vadj.connect("value-changed", self._on_vadj_value_changed)
+        vadj.connect("changed", self._on_vadj_changed)
         
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
@@ -289,6 +310,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         focus_controller_window.connect("enter", self._on_focus_enter)
         self.add_controller(focus_controller_window)
 
+        self._xmpp_history_batch = None
+
 
     def _unbind_backend(self):
         """Suelta el backend y el sidebar actuales de esta ventana (spec 003,
@@ -311,6 +334,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.backend.disconnect(handler_id)
             self.backend.shutdown()
         self._backend_handler_ids = []
+        if self._xmpp_session is not None:
+            for handler_id in self._session_handler_ids:
+                self._xmpp_session.disconnect(handler_id)
+        self._session_handler_ids = []
         if self.roster_sidebar is not None:
             self.roster_sidebar.shutdown()
             self.roster_sidebar = None
@@ -325,6 +352,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._history_displayed = False
         self.current_message_widget = None
         self.accumulated_response = ""
+        self._xmpp_history_batch = []
+        self._xmpp_history_loaded = False
+        self._xmpp_backfill_remaining = 0
+        self._agent_command_client = None
         for child in list(self.messages_box):
             self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
@@ -358,9 +389,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # (p.ej. una ventana XMPP vacía nunca pasa a modo LLM en la práctica,
         # pero el flag sí puede alternar entre "sin contacto" y "con contacto").
         self.connection_status_label.set_visible(self._injected_backend)
-        self.sidebar_button.set_visible(not self._injected_backend)
-        self.roster_button.set_visible(self._injected_backend)
-        toggle_button = self.roster_button if self._injected_backend else self.sidebar_button
+        self.sidebar_button.set_visible(False)
+        self.roster_button.set_visible(True)
+        self.agent_menu_button.set_visible(False)
+        toggle_button = self.roster_button
         self._sidebar_toggle_binding = self.split_view.bind_property(
             "show-sidebar", toggle_button, "active",
             GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
@@ -375,6 +407,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
             self.backend = backend
             session = getattr(backend, 'session', None) or xmpp_session
+            self._xmpp_session = session
             if backend is not None:
                 self._backend_handler_ids = [
                     backend.connect('ready', self._on_backend_ready),
@@ -383,8 +416,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     backend.connect('finished', self._on_llm_finished),
                     backend.connect('state-changed', self._on_backend_state_changed),
                     backend.connect('typing', self._on_backend_typing),
+                    backend.connect('quick-responses', self._on_quick_responses),
+                    backend.connect('commands', self._on_commands),
                 ]
-                self.title_widget.set_subtitle(backend.get_display_name())
+                self._update_xmpp_title_status()
+                self._refresh_agent_menu()
             else:
                 # Sin contacto elegido aún: mostrar el roster, deshabilitar
                 # el chat hasta que el usuario elija una fila (spec 003).
@@ -394,12 +430,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # que esta ventana exista (el roster picker implica sesión viva).
             self._last_connection_state = session.state if session else 'connected'
             self._update_connection_status(self._last_connection_state)
-            # Panel de contactos (roster) dockeado a la IZQUIERDA (spec 002),
-            # opuesto al sidebar de modelo LLM que va a la derecha.
+            # Roster unificado dockeado a la izquierda.
             if session is not None:
-                from .xmpp_roster_sidebar import XmppRosterSidebar
-                self.roster_sidebar = XmppRosterSidebar(
-                    session, on_contact_selected=self._on_roster_contact_selected)
+                self._session_handler_ids = [
+                    session.connect('contact-status-changed',
+                                    self._on_contact_status_changed),
+                ]
+                from .chat_roster_sidebar import ChatRosterSidebar
+                self.roster_sidebar = ChatRosterSidebar(
+                    config=self.config,
+                    chat_history=self.chat_history,
+                    xmpp_session=session,
+                    on_llm_conversation_selected=self._on_llm_conversation_selected,
+                    on_xmpp_contact_selected=self._on_roster_contact_selected,
+                    on_xmpp_account=self._open_xmpp_account_from_sidebar)
+                self.model_sidebar = self.roster_sidebar
+                self.model_options = self.roster_sidebar.options_sidebar
                 self.split_view.set_sidebar_position(Gtk.PackType.START)
                 self.split_view.set_sidebar(self.roster_sidebar)
                 if backend is None:
@@ -456,17 +502,32 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             self.title_widget.set_subtitle(self.config['model'])
 
-            # Sidebar de conversaciones LLM recientes (spec 003), con las
-            # opciones existentes (modelo/parámetros/system prompt) como
-            # segundo nivel navegable — self.model_options es ese ChatSidebar
-            # interno, para los atajos que necesitan ir directo a una página.
-            from .llm_conversation_sidebar import LLMConversationSidebar
-            self.model_sidebar = LLMConversationSidebar(
-                config=self.config, llm_client=self.backend, chat_history=self.chat_history,
-                on_conversation_selected=self._on_llm_conversation_selected)
+            app = self.get_application()
+            session = None
+            if app is not None and hasattr(app, 'get_xmpp_session_for_roster'):
+                session = app.get_xmpp_session_for_roster()
+            self._xmpp_session = session
+            if session is not None:
+                self._session_handler_ids = [
+                    session.connect('contact-status-changed',
+                                    self._on_contact_status_changed),
+                ]
+
+            # Roster unificado: conversaciones LLM y contactos XMPP en el
+            # mismo panel. Las opciones de modelo quedan como segundo nivel.
+            from .chat_roster_sidebar import ChatRosterSidebar
+            self.model_sidebar = ChatRosterSidebar(
+                config=self.config,
+                llm_client=self.backend,
+                chat_history=self.chat_history,
+                xmpp_session=session,
+                on_llm_conversation_selected=self._on_llm_conversation_selected,
+                on_xmpp_contact_selected=self._on_roster_contact_selected,
+                on_xmpp_account=self._open_xmpp_account_from_sidebar)
+            self.roster_sidebar = self.model_sidebar
             self.model_options = self.model_sidebar.options_sidebar
-            # Establecer el panel lateral en el split_view
             self.split_view.set_sidebar(self.model_sidebar)
+            self.split_view.set_sidebar_position(Gtk.PackType.START)
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
@@ -479,8 +540,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.input_text.grab_focus()
 
     def _on_roster_contact_selected(self, bare_jid):
-        """Un contacto elegido en el roster sidebar (spec 002/003): abre/
-        enfoca su ventana de conversación."""
+        """Un contacto elegido en el roster unificado: abre/enfoca su chat."""
         app = self.get_application()
         session = getattr(self.backend, 'session', None) or self._xmpp_session
         if session is None:
@@ -500,11 +560,56 @@ class LLMChatWindow(Adw.ApplicationWindow):
             app.open_xmpp_conversation(session, bare_jid)
             self.split_view.set_show_sidebar(False)
 
+    def _open_xmpp_account_from_sidebar(self):
+        app = self.get_application()
+        if app is None:
+            return
+        if hasattr(app, '_open_xmpp_account_dialog'):
+            app._open_xmpp_account_dialog(
+                on_ready=lambda _jid: self._refresh_xmpp_session_from_account())
+        elif hasattr(app, 'on_xmpp_account_activate'):
+            app.on_xmpp_account_activate(None, None)
+
+    def _refresh_xmpp_session_from_account(self):
+        app = self.get_application()
+        if app is None or not hasattr(app, 'get_xmpp_session_for_roster'):
+            return
+        session = app.get_xmpp_session_for_roster()
+        if self.backend is None or getattr(self.backend, 'session', None) is not None:
+            self._bind_backend(xmpp_session=session)
+        else:
+            self._replace_roster_sidebar(session)
+
+    def _replace_roster_sidebar(self, session):
+        if self._xmpp_session is not None:
+            for handler_id in self._session_handler_ids:
+                self._xmpp_session.disconnect(handler_id)
+        self._session_handler_ids = []
+        if self.roster_sidebar is not None:
+            self.roster_sidebar.shutdown()
+        self._xmpp_session = session
+        if session is not None:
+            self._session_handler_ids = [
+                session.connect('contact-status-changed',
+                                self._on_contact_status_changed),
+            ]
+        from .chat_roster_sidebar import ChatRosterSidebar
+        self.model_sidebar = ChatRosterSidebar(
+            config=self.config,
+            llm_client=self.backend,
+            chat_history=self.chat_history,
+            xmpp_session=session,
+            on_llm_conversation_selected=self._on_llm_conversation_selected,
+            on_xmpp_contact_selected=self._on_roster_contact_selected,
+            on_xmpp_account=self._open_xmpp_account_from_sidebar)
+        self.roster_sidebar = self.model_sidebar
+        self.model_options = self.model_sidebar.options_sidebar
+        self.split_view.set_sidebar_position(Gtk.PackType.START)
+        self.split_view.set_sidebar(self.model_sidebar)
+
     def _on_llm_conversation_selected(self, cid):
-        """Una conversación LLM elegida en el sidebar (spec 003): cambia
-        esta ventana a esa conversación in-place (T7), salvo que ya tenga
-        su propia ventana registrada — en ese caso se enfoca esa, en vez
-        de tener la misma conversación abierta dos veces."""
+        """Una conversación LLM elegida en el roster: cambia esta ventana
+        in-place salvo que ya tenga una ventana registrada."""
         if cid == self.cid:
             self.split_view.set_show_sidebar(False)
             return
@@ -520,12 +625,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # LLMClient correcto (mismo camino que __init__ usa al abrir con
         # un CID existente), así que basta con actualizarlo antes de llamar.
         old_cid = self.cid
+        old_xmpp_key = None
+        old_session = getattr(self.backend, 'session', None)
+        old_bare_jid = getattr(self.backend, 'bare_jid', None)
+        if old_session is not None and old_bare_jid:
+            old_xmpp_key = f"xmpp:{old_session.bare_jid}:{old_bare_jid}"
         self.config['cid'] = cid
         self.cid = cid
         self._bind_backend(backend=None)
         if app is not None and hasattr(app, '_window_by_cid'):
             if old_cid and app._window_by_cid.get(old_cid) is self:
                 del app._window_by_cid[old_cid]
+            if old_xmpp_key and app._window_by_cid.get(old_xmpp_key) is self:
+                del app._window_by_cid[old_xmpp_key]
             app._window_by_cid[cid] = self
         self.split_view.set_show_sidebar(False)
 
@@ -803,6 +915,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Refleja el estado de conexión del backend en el header (spec 001, T7)."""
         labels = {
             'connecting': _("Connecting…"),
+            'reconnecting': _("Reconnecting…"),
             'connected': _("Connected"),
             'disconnected': _("Disconnected"),
         }
@@ -820,8 +933,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_backend_state_changed(self, backend, state):
         """Maneja la señal 'state-changed' del backend (spec 001, T7)."""
         debug_print(f"Estado de conexión del backend: {state}")
+        previous = getattr(self, '_last_connection_state', None)
         self._last_connection_state = state
         self._update_connection_status(state)
+        # Al (re)conectar, ponerse al día con los mensajes que llegaron
+        # mientras la sesión estuvo caída. La carga inicial la hace
+        # _load_xmpp_history; aquí solo cubrimos la transición de un estado
+        # no-conectado a 'connected' una vez que el historial ya se mostró.
+        if (state == 'connected' and previous not in (None, 'connected')
+                and getattr(self, '_xmpp_history_loaded', False)):
+            self._catch_up_xmpp_history()
+
+    def _catch_up_xmpp_history(self):
+        """Trae por MAM los mensajes recibidos mientras estábamos offline y
+        los añade al final de la conversación (spec 004, reconexión)."""
+        backend = self.backend
+        if backend is None or not hasattr(backend, 'load_history_from_mam'):
+            return
+        # Tratar el lote resultante como backfill para que se anexe abajo
+        # (mensajes más nuevos), no como scroll-hacia-arriba (prepend).
+        # Solo subir el contador si de verdad se lanzó la consulta, o el
+        # 'history-complete' que lo decrementa nunca llegaría.
+        self._xmpp_backfill_remaining += 1
+        if not backend.load_history_from_mam():
+            self._xmpp_backfill_remaining -= 1
 
     def _on_backend_typing(self, backend, is_typing):
         """Maneja la señal 'typing' del backend: el contacto está escribiendo
@@ -831,15 +966,150 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.connection_status_label.set_label(_("Typing…"))
             self.connection_status_label.remove_css_class("error")
         else:
-            self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
+            state = getattr(self, '_last_connection_state', 'connected')
+            self._update_connection_status(state)
+
+    def _on_contact_status_changed(self, session, bare_jid):
+        active_bare = getattr(self.backend, 'bare_jid', None)
+        if bare_jid == active_bare:
+            self._update_xmpp_title_status()
+            self._refresh_agent_menu()
+
+    def _update_xmpp_title_status(self):
+        if self.backend is None:
+            return
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            self.title_widget.set_subtitle(self.backend.get_display_name())
+            return
+        status = session.get_contact_status(bare_jid)
+        self.title_widget.set_subtitle(status or self.backend.get_display_name())
+
+    def _refresh_agent_menu(self):
+        if self.backend is None:
+            self.agent_menu_button.set_visible(False)
+            return
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None or not session.is_agent_contact(bare_jid):
+            self.agent_menu_button.set_visible(False)
+            return
+        self.agent_menu_button.set_visible(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+
+        compact = Gtk.Button(label=_("Compact Context"))
+        compact.connect("clicked", lambda _b: self._confirm_agent_text_command(
+            _("Compact Context"), _("Ask the agent to compact its current context?"),
+            "/compact"))
+        clear = Gtk.Button(label=_("Clear Context"))
+        clear.add_css_class("destructive-action")
+        clear.connect("clicked", lambda _b: self._confirm_agent_text_command(
+            _("Clear Context"), _("Ask the agent to clear its current context?"),
+            "/clear", destructive=True))
+        box.append(compact)
+        box.append(clear)
+
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        box.append(separator)
+
+        loading = Gtk.Label(label=_("Loading commands…"))
+        loading.add_css_class("dim-label")
+        box.append(loading)
+        popover = Gtk.Popover()
+        popover.set_child(box)
+        self.agent_menu_button.set_popover(popover)
+        self._load_agent_commands(box, loading)
+
+    def _confirm_agent_text_command(self, heading, body, command, destructive=False):
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            modal=True,
+            heading=heading,
+            body=body,
+        )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("send", _("Send"))
+        if destructive:
+            dialog.set_response_appearance("send", Adw.ResponseAppearance.DESTRUCTIVE)
+        else:
+            dialog.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+
+        def on_response(_dialog, response):
+            if response == "send" and self.backend is not None:
+                self.display_message(command, sender="user")
+                self.backend.send_message(command)
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _load_agent_commands(self, box, loading):
+        from .xmpp_commands import XmppCommandClient
+
+        client = XmppCommandClient(self.backend.session, self.backend.bare_jid)
+        self._agent_command_client = client
+
+        def on_success(commands):
+            box.remove(loading)
+            for command in commands:
+                button = Gtk.Button(label=command.name or command.node)
+                button.connect("clicked", self._on_agent_command_clicked, client, command)
+                box.append(button)
+            if not commands:
+                empty = Gtk.Label(label=_("No agent commands"))
+                empty.add_css_class("dim-label")
+                box.append(empty)
+
+        def on_error(message):
+            loading.set_label(message)
+            loading.add_css_class("error")
+
+        client.request_commands(on_success, on_error)
+
+    def _on_agent_command_clicked(self, _button, client, command):
+        from .xmpp_commands import (
+            XmppCommandFormDialog,
+            is_completed,
+            next_action_for,
+            show_command_result,
+        )
+
+        def on_error(message):
+            self._on_llm_error(self.backend, message)
+
+        def handle_result(result):
+            if is_completed(result):
+                show_command_result(self, result)
+                return
+            if result.data is None:
+                show_command_result(self, result)
+                return
+
+            def on_submit(dataform):
+                client.execute(
+                    result, handle_result, on_error,
+                    action=next_action_for(result), dataform=dataform)
+
+            XmppCommandFormDialog(self, result, on_submit).present()
+
+        client.execute(command, handle_result, on_error)
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
         debug_print(f"Backend listo: {display_name}")
 
-        # Actualizar el subtítulo de la ventana con el nombre a mostrar
+        if self._injected_backend:
+            self._update_xmpp_title_status()
+            self._load_xmpp_history()
+            return
+
         self.title_widget.set_subtitle(display_name)
-        
+
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
             debug_print(f"Verificando conversación existente para CID: {self.cid}")
@@ -877,7 +1147,86 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(traceback.format_exc())
         else:
             debug_print("Sin CID específico, no se carga ninguna conversación")
-            
+
+    def _load_xmpp_history(self):
+        if not hasattr(self, '_xmpp_history_loaded') or not self._xmpp_history_loaded:
+            self._xmpp_history_loaded = True
+            backend = self.backend
+            if backend is None:
+                return
+            for child in list(self.messages_box):
+                self.messages_box.remove(child)
+            self._history_displayed = False
+            self._xmpp_backfill_remaining = 2
+            self._xmpp_history_batch = []
+            hid1 = backend.connect('history-message', self._on_xmpp_history_message)
+            hid2 = backend.connect('history-complete', self._on_xmpp_history_complete)
+            self._backend_handler_ids.append(hid1)
+            self._backend_handler_ids.append(hid2)
+            GLib.idle_add(lambda: (backend.load_history_from_cache(),
+                                    backend.load_history_from_mam(), GLib.SOURCE_REMOVE)[2])
+
+    def _on_xmpp_history_message(self, backend, body, direction, timestamp):
+        self._xmpp_history_batch.append((body, direction, timestamp))
+
+    def _on_xmpp_history_complete(self, backend, has_more):
+        batch = self._xmpp_history_batch
+        is_backfill = self._xmpp_backfill_remaining > 0
+        if batch:
+            for body, direction, timestamp in batch:
+                if is_backfill:
+                    self._display_history_bubble(body, direction, timestamp)
+                else:
+                    self._prepend_history_bubble(body, direction, timestamp)
+            self._history_displayed = True
+        if is_backfill:
+            self._xmpp_backfill_remaining -= 1
+        self._xmpp_history_batch = []
+        GLib.idle_add(self._scroll_to_bottom)
+
+    def _display_history_bubble(self, body, direction, timestamp):
+        sender = "user" if direction == 'out' else "assistant"
+        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
+        widget = MessageWidget(msg)
+        self.messages_box.append(widget)
+
+    def _prepend_history_bubble(self, body, direction, timestamp):
+        sender = "user" if direction == 'out' else "assistant"
+        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
+        widget = MessageWidget(msg)
+        self.messages_box.prepend(widget)
+
+    @staticmethod
+    def _parse_history_ts(timestamp):
+        """Convierte el timestamp del historial (ISO-8601, o epoch en cachés
+        viejas) a datetime local para la burbuja. None si no se puede: así
+        Message cae en datetime.now() como último recurso.
+
+        Se muestra en hora local (astimezone) porque los timestamps se
+        guardan en UTC pero MessageWidget hace strftime('%H:%M')."""
+        if timestamp is None:
+            return None
+        from datetime import datetime
+        try:
+            if isinstance(timestamp, (int, float)):
+                return datetime.fromtimestamp(timestamp)
+            text = str(timestamp)
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                # Cachés viejas guardaron epoch como texto ("1752341421.7").
+                return datetime.fromtimestamp(float(text))
+        except (ValueError, TypeError, OSError):
+            return None
+        # ISO aware (UTC) -> hora local; naive se asume ya local.
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        return dt
+
+    def _on_edge_reached(self, scroll, pos):
+        if pos == Gtk.PositionType.TOP and self.backend is not None:
+            self.backend.load_more_history()
+
     def _load_and_display_history(self, history_entries):
         """Método auxiliar para cargar y mostrar el historial después de que la UI esté lista."""
         try:
@@ -1043,6 +1392,73 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
         GLib.idle_add(self._scroll_to_bottom, False)
+
+    def _on_quick_responses(self, backend, responses):
+        if self.current_message_widget is None:
+            return
+
+        # Multi-pregunta: NO ocultar los botones de preguntas anteriores al
+        # llegar una nueva. NanoClaw admite varias preguntas abiertas a la
+        # vez y su backend retira los botones de cada pregunta cuando se
+        # responde; el cliente ya no fuerza "solo la más reciente"
+        # (divergencia deliberada de XEP-0439 §6).
+        def on_selected(response):
+            value = response.get('value', '')
+            label = response.get('label') or value
+            if not value:
+                return
+            self.display_message(label, sender="user")
+            if hasattr(backend, 'send_quick_response'):
+                backend.send_quick_response(value, label)
+
+        self.current_message_widget.add_quick_responses(responses, on_selected)
+        GLib.idle_add(self._scroll_to_bottom, False)
+
+    def _on_commands(self, backend, commands):
+        if self.current_message_widget is None:
+            return
+
+        def on_selected(command):
+            name = command.get('name', '')
+            if not name:
+                return
+            self.display_message(name, sender="user")
+            if hasattr(backend, 'send_command'):
+                backend.send_command(
+                    command.get('jid', ''),
+                    command.get('node', ''),
+                    name)
+
+        self.current_message_widget.add_quick_responses(commands, on_selected)
+        GLib.idle_add(self._scroll_to_bottom, False)
+
+    def _on_vadj_value_changed(self, adj):
+        """El usuario (o el código) movió el scroll: recordar la distancia
+        actual al fondo, para poder reanclarla al redimensionar. Se ignora
+        mientras nosotros mismos restauramos el valor (evita realimentación)."""
+        if self._restoring_scroll:
+            return
+        upper = adj.get_upper()
+        page_size = adj.get_page_size()
+        self._scroll_bottom_distance = max(0.0, upper - (adj.get_value() + page_size))
+
+    def _on_vadj_changed(self, adj):
+        """Cambió el rango del adjustment. Si fue por un cambio de alto del
+        viewport (page_size), es un redimensionado: reanclar el último
+        mensaje visible restaurando la distancia al fondo guardada. Un cambio
+        que solo afecta 'upper' (mensaje nuevo, carga de historial) no se
+        toca aquí — de eso se encarga _scroll_to_bottom."""
+        page_size = adj.get_page_size()
+        if page_size == self._scroll_last_page_size:
+            return
+        self._scroll_last_page_size = page_size
+        upper = adj.get_upper()
+        target = max(0.0, upper - page_size - self._scroll_bottom_distance)
+        if abs(target - adj.get_value()) < 1.0:
+            return
+        self._restoring_scroll = True
+        adj.set_value(target)
+        self._restoring_scroll = False
 
     def _scroll_to_bottom(self, force=True):
         scroll = self.messages_box.get_parent()

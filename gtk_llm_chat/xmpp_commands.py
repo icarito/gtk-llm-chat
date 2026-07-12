@@ -1,0 +1,218 @@
+"""
+xmpp_commands.py - cliente XEP-0050/XEP-0004 para agentes NanoClaw.
+
+Mantiene la ejecución de comandos ad-hoc fuera de xmpp_client.py, que se
+queda como transporte/sesión. Usa los módulos nbxmpp existentes.
+"""
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw
+
+from nbxmpp.const import AdHocAction, AdHocStatus
+from nbxmpp.modules.dataforms import SimpleDataForm, create_field, extend_form
+
+from .chat_application import _
+from .debug_utils import debug_print
+
+
+class XmppCommandClient:
+    def __init__(self, session, bare_jid: str):
+        self.session = session
+        self.bare_jid = bare_jid
+        self._pending_callbacks = []
+
+    @property
+    def target_jid(self):
+        return self.session.get_agent_full_jid(self.bare_jid) or self.bare_jid
+
+    def _done_callback(self, on_success, on_error):
+        def cb(task):
+            self._pending_callbacks.remove(cb)
+            self._finish_task(task, on_success, on_error)
+        self._pending_callbacks.append(cb)
+        return cb
+
+    def request_commands(self, on_success, on_error):
+        if not self.session.is_connected:
+            on_error(_("Not connected to the XMPP server"))
+            return
+        task = self.session._client.get_module('AdHoc').request_command_list(
+            self.target_jid)
+        task.add_done_callback(self._done_callback(on_success, on_error))
+
+    def execute(self, command, on_success, on_error, action=None, dataform=None):
+        if not self.session.is_connected:
+            on_error(_("Not connected to the XMPP server"))
+            return
+        task = self.session._client.get_module('AdHoc').execute_command(
+            command, action=action, dataform=dataform)
+        task.add_done_callback(self._done_callback(on_success, on_error))
+
+    def _finish_task(self, task, on_success, on_error):
+        try:
+            on_success(task.finish())
+        except Exception as err:
+            debug_print(f"XmppCommandClient: {err}")
+            on_error(str(err))
+
+
+class XmppCommandFormDialog(Adw.Window):
+    def __init__(self, parent, command, on_submit):
+        super().__init__(modal=True, transient_for=parent)
+        self.command = command
+        self._on_submit = on_submit
+        self._field_widgets = {}
+        self._fixed_fields = []
+        self._hidden_fields = []
+
+        form = extend_form(command.data)
+        title = form.title or command.name or _("Agent Command")
+        self.set_title(title)
+        self.set_default_size(420, -1)
+
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(True)
+
+        group = Adw.PreferencesGroup(title=title)
+        if form.instructions:
+            group.set_description(form.instructions)
+
+        for field in form.iter_fields():
+            self._add_field(group, field)
+
+        cancel_button = Gtk.Button(label=_("Cancel"))
+        cancel_button.connect("clicked", lambda _b: self.close())
+        submit_button = Gtk.Button(label=_("Submit"))
+        submit_button.add_css_class("suggested-action")
+        submit_button.connect("clicked", self._submit)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.set_halign(Gtk.Align.END)
+        buttons.append(cancel_button)
+        buttons.append(submit_button)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(24)
+        content.set_margin_bottom(24)
+        content.set_margin_start(24)
+        content.set_margin_end(24)
+        content.append(group)
+        content.append(buttons)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(content)
+        self.set_content(toolbar_view)
+
+    def _add_field(self, group, field):
+        typ = field.type_
+        if typ == 'hidden':
+            self._hidden_fields.append(field)
+            return
+        if typ == 'fixed':
+            row = Adw.ActionRow(title=field.value)
+            row.set_selectable(False)
+            group.add(row)
+            self._fixed_fields.append(field)
+            return
+        if typ == 'boolean':
+            row = Adw.SwitchRow(title=field.label)
+            row.set_active(bool(field.value))
+            group.add(row)
+            self._field_widgets[field.var] = (field, row)
+            return
+        if typ == 'list-single':
+            options = list(field.iter_options())
+            labels = [label for _value, label in options]
+            row = Adw.ActionRow(title=field.label)
+            dropdown = Gtk.DropDown.new_from_strings(labels)
+            active = 0
+            for index, (value, _label) in enumerate(options):
+                if value == field.value:
+                    active = index
+                    break
+            dropdown.set_selected(active)
+            dropdown.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(dropdown)
+            row.set_activatable_widget(dropdown)
+            group.add(row)
+            self._field_widgets[field.var] = (field, dropdown, options)
+            return
+        if typ == 'text-multi':
+            row = Adw.ActionRow(title=field.label)
+            text_view = Gtk.TextView()
+            text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            text_view.set_size_request(-1, 96)
+            text_view.get_buffer().set_text(field.value, -1)
+            row.add_suffix(text_view)
+            group.add(row)
+            self._field_widgets[field.var] = (field, text_view)
+            return
+
+        row_cls = Adw.PasswordEntryRow if typ == 'text-private' else Adw.EntryRow
+        row = row_cls(title=field.label)
+        row.set_text(getattr(field, 'value', '') or '')
+        group.add(row)
+        self._field_widgets[field.var] = (field, row)
+
+    def _submit(self, _button):
+        fields = []
+        for field in self._hidden_fields:
+            fields.append(create_field('hidden', var=field.var, value=field.value))
+        for var, entry in self._field_widgets.items():
+            field = entry[0]
+            typ = field.type_
+            if typ == 'boolean':
+                value = entry[1].get_active()
+            elif typ == 'list-single':
+                dropdown, options = entry[1], entry[2]
+                selected = dropdown.get_selected()
+                value = options[selected][0] if selected < len(options) else ''
+            elif typ == 'text-multi':
+                buffer = entry[1].get_buffer()
+                value = buffer.get_text(
+                    buffer.get_start_iter(), buffer.get_end_iter(), True)
+            else:
+                value = entry[1].get_text()
+            fields.append(create_field(typ, var=var, value=value))
+
+        self._on_submit(SimpleDataForm(type_='submit', fields=fields))
+        self.close()
+
+
+def show_command_result(parent, command):
+    parts = []
+    for note in command.notes or []:
+        if note.text:
+            parts.append(note.text)
+    if command.data is not None:
+        try:
+            form = extend_form(command.data)
+            for field in form.iter_fields():
+                value = getattr(field, 'value', '')
+                if value:
+                    parts.append(f"{field.label}: {value}")
+        except Exception as err:
+            debug_print(f"show_command_result: {err}")
+    body = "\n".join(parts) or _("Command completed.")
+    dialog = Adw.MessageDialog(
+        transient_for=parent,
+        modal=True,
+        heading=command.name or _("Agent Command"),
+        body=body,
+    )
+    dialog.add_response("ok", _("OK"))
+    dialog.present()
+
+
+def next_action_for(command):
+    if command.default in (AdHocAction.NEXT, AdHocAction.COMPLETE):
+        return command.default
+    if command.actions and AdHocAction.NEXT in command.actions:
+        return AdHocAction.NEXT
+    return AdHocAction.COMPLETE
+
+
+def is_completed(command):
+    return command.status == AdHocStatus.COMPLETED

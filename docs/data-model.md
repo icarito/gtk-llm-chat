@@ -34,3 +34,33 @@ ordering.
 - SQLite WAL/locking is the only coordination between the GUI (possibly
   several windows in the same process) and the `llm` CLI — keep
   transactions short.
+
+## XMPP history: `xmpp_history.db`
+
+XMPP message history (spec 004) lives in its own SQLite file,
+`xmpp_history.db`, located in the same `llm.user_dir()` directory as
+`logs.db`. Unlike `logs.db`, this database is app-owned: the schema is
+defined and migrated by `gtk_llm_chat.xmpp_history.XmppHistory`, not by
+`llm.migrations`. The file is created lazily on first write.
+
+### Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bare_jid TEXT NOT NULL,       -- contact's bare JID; the conversation key
+    body TEXT NOT NULL,
+    direction TEXT NOT NULL,      -- 'in' | 'out'
+    timestamp TEXT NOT NULL,      -- ISO 8601 UTC
+    mam_id TEXT,                  -- XEP-0313 archive id; NULL for unsynced local
+    UNIQUE(bare_jid, mam_id)      -- dedup MAM refetches; NULLs don't collide
+);
+CREATE INDEX IF NOT EXISTS idx_messages_jid_ts ON messages(bare_jid, timestamp);
+```
+
+### Concurrency
+
+Same thread-local-connection pattern as `ChatHistory` (`threading.local()`,
+lazy connect via `get_connection()`), but with WAL journal mode.
+Transactions are short — one `INSERT OR IGNORE` per message, committed
+immediately. No shared state with `logs.db`.
