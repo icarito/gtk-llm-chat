@@ -36,6 +36,7 @@ class ChatBackend(GObject.Object):
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object,)),
+        'commands': (GObject.SignalFlags.RUN_LAST, None, (object,)),
         'history-message': (GObject.SignalFlags.RUN_LAST, None,
                             (str, str, str)),
         'history-complete': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
@@ -70,4 +71,9 @@ class ChatBackend(GObject.Object):
     def load_more_history(self):
         """Request one more page of older history, if the backend has any
         concept of history. No-op by default."""
+        pass
+
+    def send_command(self, jid: str, node: str, name: str):
+        """Execute an ad-hoc command (XEP-0050) via IQ set. No-op for
+        backends that don't support inline disco#items commands."""
         pass

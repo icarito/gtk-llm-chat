@@ -344,20 +344,44 @@ class XmppSession(GObject.Object):
 
     # --- Mensajes ---
 
-    def query_mam(self, bare_jid: str, after: str = None, end: str = None,
-                  callback: 'callable' = None):
+    @staticmethod
+    def _parse_iso(value):
+        """Convierte un timestamp ISO-8601 (o epoch, por compatibilidad con
+        cachés viejas) a datetime aware en UTC. None si no hay valor o no
+        se puede parsear."""
+        if value is None:
+            return None
+        from datetime import datetime, timezone
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, timezone.utc)
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def query_mam(self, bare_jid: str, start: str = None, end: str = None,
+                  after: str = None, callback: 'callable' = None):
         """Issue a MAM query for conversation history (XEP-0313).
 
         Returns the queryid for correlation, or None if not connected.
         Results arrive as ordinary 'message' stanzas routed through
         _on_message's MAM branch, collected in _pending_mam_queries;
         the done-callback fires on query completion with the buffered
-        messages and complete flag.
+        messages, the complete flag and the RSM `last` UID (for paging).
 
-        This nbxmpp version's make_query has no before= parameter,
-        only start/end/after (max_ for page size). Scroll-to-load-older
-        uses end= (the timestamp of the oldest message currently shown)
-        without after= to get the page immediately preceding it.
+        start/end are the XEP-0313 query-form time filters, given here as
+        ISO-8601 strings and converted to aware datetimes for nbxmpp's
+        make_query (which expects datetime, not str). `after` is the RSM
+        page anchor — an archive UID (NOT a timestamp), used to fetch the
+        NEXT page of an incomplete result set.
+
+        Catch-up on open uses start= (fetch everything newer than the last
+        cached message) and pages forward with after= until complete.
+        Scroll-to-load-older uses end= (the timestamp of the oldest message
+        currently shown) to get the preceding page.
         """
         if not self.is_connected:
             return None
@@ -370,17 +394,28 @@ class XmppSession(GObject.Object):
         }
         try:
             kwargs = {'jid': self._jid, 'queryid': queryid, 'with_': bare_jid, 'max_': 50}
+            start_dt = self._parse_iso(start)
+            end_dt = self._parse_iso(end)
+            if start_dt is not None:
+                kwargs['start'] = start_dt
+            if end_dt is not None:
+                kwargs['end'] = end_dt
             if after is not None:
                 kwargs['after'] = after
-            if end is not None:
-                kwargs['end'] = end
             task = self._client.get_module('MAM').make_query(**kwargs)
-            task.add_done_callback(lambda t: self._on_mam_query_done(t, queryid))
+            # weak=False es imprescindible: add_done_callback guarda el
+            # callback como weakref por defecto (weak=True). Una lambda
+            # local se recolecta en cuanto query_mam retorna, y al terminar
+            # el task nbxmpp la desreferencia a None y la salta en silencio
+            # — el callback nunca corre y la query queda colgada. (Mismo
+            # patrón que el fix de GC de commit a8f88cd.)
+            task.add_done_callback(
+                lambda t: self._on_mam_query_done(t, queryid), weak=False)
         except Exception as err:
             debug_print(f"XmppSession: MAM query failed: {err}")
             entry = self._pending_mam_queries.pop(queryid, None)
             if entry and entry['callback']:
-                entry['callback']([], False)
+                entry['callback']([], False, None)
             return None
         return queryid
 
@@ -388,17 +423,19 @@ class XmppSession(GObject.Object):
         entry = self._pending_mam_queries.pop(queryid, None)
         if entry is None:
             return
+        rsm_last = None
         try:
             result = task.finish()
             complete = result.complete
+            rsm_last = result.rsm.last
             debug_print(f"XmppSession: MAM query done for {entry['bare_jid']} "
                         f"complete={complete} first={result.rsm.first} "
-                        f"last={result.rsm.last}")
+                        f"last={rsm_last}")
         except Exception as err:
             debug_print(f"XmppSession: MAM query errored: {err}")
             complete = False
         if entry['callback']:
-            entry['callback'](entry['buffer'], complete)
+            entry['callback'](entry['buffer'], complete, rsm_last)
 
     # --- Mensajes ---
 
@@ -416,8 +453,16 @@ class XmppSession(GObject.Object):
             pending = self._pending_mam_queries.get(mam.query_id)
             if pending is not None and properties.body:
                 direction = 'out' if properties.jid.bare == self._jid.bare else 'in'
+                # nbxmpp entrega mam.timestamp como epoch (float); lo
+                # normalizamos a ISO UTC para que en la caché conviva y
+                # ordene junto a los mensajes en vivo (que ya se guardan
+                # como isoformat()). Sin esto, get_latest_timestamp mezcla
+                # floats y strings y el orden es indefinido.
+                from datetime import datetime, timezone
+                ts = datetime.fromtimestamp(
+                    mam.timestamp, timezone.utc).isoformat()
                 pending['buffer'].append(
-                    (properties.body, direction, mam.timestamp, mam.id))
+                    (properties.body, direction, ts, mam.id))
             return
 
         if properties.has_chatstate and conversation is not None:
@@ -426,8 +471,9 @@ class XmppSession(GObject.Object):
             return
         debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
         quick_responses = self._parse_quick_responses(_stanza)
+        commands = self._parse_inline_commands(_stanza)
         if conversation is not None:
-            conversation.deliver(properties.body, quick_responses)
+            conversation.deliver(properties.body, quick_responses, commands)
         # Emitir siempre para que la app pueda notificar si la ventana de
         # esa conversación no tiene foco (o no existe) — spec 002 T5.
         self.emit('message-received', bare, properties.body)
@@ -440,6 +486,20 @@ class XmppSession(GObject.Object):
             if value and label:
                 responses.append({'value': value, 'label': label})
         return responses
+
+    def _parse_inline_commands(self, stanza) -> list[dict[str, str]]:
+        commands = []
+        for query in stanza.getTags('query', namespace=Namespace.DISCO_ITEMS):
+            node = query.getAttr('node')
+            if node != Namespace.COMMANDS:
+                continue
+            for item in query.getTags('item'):
+                jid = item.getAttr('jid')
+                cmd_node = item.getAttr('node')
+                name = item.getAttr('name')
+                if jid and cmd_node and name:
+                    commands.append({'jid': jid, 'node': cmd_node, 'name': name})
+        return commands
 
     def send_text(self, to_bare_jid: str, text: str):
         # XEP-0085: marcar 'active' junto con cada mensaje
@@ -517,6 +577,7 @@ class XmppConversation(ChatBackend):
         ]
         self._history_shown_from: str | None = None
         self._pending_mam_queryid: str | None = None
+        self._mam_catchup_start: str | None = None
         if session.is_connected:
             GLib.idle_add(self._emit_ready)
 
@@ -534,7 +595,7 @@ class XmppConversation(ChatBackend):
 
     # --- Entrantes (llamados por la sesión) ---
 
-    def deliver(self, body: str, quick_responses=None):
+    def deliver(self, body: str, quick_responses=None, commands=None):
         """Un mensaje del contacto: response + finished, cached."""
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
@@ -544,6 +605,8 @@ class XmppConversation(ChatBackend):
         self.emit('response', body)
         if quick_responses:
             self.emit('quick-responses', quick_responses)
+        if commands:
+            self.emit('commands', commands)
         self.emit('finished', True)
 
     def notify_chatstate(self, chatstate: str):
@@ -577,6 +640,46 @@ class XmppConversation(ChatBackend):
         self.session.send_text(self.bare_jid, value)
         self.emit('finished', True)
 
+    def send_command(self, jid: str, node: str, name: str):
+        if not self.session.is_connected:
+            self.emit('error', _("Not connected to the XMPP server"))
+            self.emit('finished', False)
+            return
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        history = self.session.history
+        if history is not None:
+            history.record_message(self.bare_jid, name, 'out', ts)
+        iq = Iq(typ='set', to=jid)
+        cmd = Node('command', attrs={
+            'xmlns': Namespace.COMMANDS,
+            'node': node,
+            'action': 'execute',
+        })
+        iq.addChild(node=cmd)
+
+        def _on_command_result(response):
+            if response.getType() == 'error':
+                error = response.getTag('error')
+                text = ''
+                if error is not None:
+                    text_elem = error.getTag('text')
+                    text = text_elem.getData() if text_elem is not None else str(error)
+                GLib.idle_add(lambda: self.emit('error', text or _("Command failed")) and False)
+                return
+            cmd_elem = response.getTag('command', namespace=Namespace.COMMANDS)
+            if cmd_elem is None:
+                return
+            note = cmd_elem.getTag('note')
+            if note is not None:
+                result_text = note.getData()
+                if result_text:
+                    GLib.idle_add(lambda: (self.emit('response', result_text),
+                                            self.emit('finished', True), False)[2])
+
+        self.session._client.send_stanza(iq, callback=_on_command_result)
+        self.emit('finished', True)
+
     def cancel(self):
         pass
 
@@ -606,13 +709,42 @@ class XmppConversation(ChatBackend):
         self._history_shown_from = messages[0]['timestamp']
         self.emit('history-complete', True)
 
-    def load_history_from_mam(self):
+    def load_history_from_mam(self) -> bool:
+        """Consulta MAM los mensajes más nuevos que el último cacheado y
+        pagina hacia adelante hasta agotar el archivo.
+
+        Devuelve True si se lanzó una consulta (y por tanto llegará un
+        'history-complete'), False si se ignoró (ya hay una en curso, no
+        hay conexión, o make_query falló). El llamador usa esto para no
+        desbalancear su contador de lotes en la reconexión.
+
+        Clave: con más mensajes que el tamaño de página (50), MAM devuelve
+        los 50 MÁS VIEJOS del rango con complete=False; sin paginar, los
+        mensajes recientes nunca se cargarían (se veían en Gajim pero no
+        aquí). Por eso _on_mam_catchup_page reitera con after=<rsm.last>.
+        """
         if not self.session.is_connected or self._pending_mam_queryid is not None:
-            return
+            return False
         history = self.session.history
-        after_ts = history.get_latest_timestamp(self.bare_jid) if history else None
+        latest = history.get_latest_timestamp(self.bare_jid) if history else None
+        # start= es inclusivo en XEP-0313; arrancar 1µs después del último
+        # mensaje cacheado para no volver a traer ese mismo mensaje (que
+        # además pudo entrar en vivo con mam_id NULL, sin deduplicar).
+        start_ts = self._next_timestamp(latest)
+        self._mam_catchup_start = start_ts
         self._pending_mam_queryid = self.session.query_mam(
-            self.bare_jid, after=after_ts, callback=self._on_mam_page)
+            self.bare_jid, start=start_ts, callback=self._on_mam_catchup_page)
+        return self._pending_mam_queryid is not None
+
+    @staticmethod
+    def _next_timestamp(iso_value):
+        """ISO justo después del dado (para un start= exclusivo). None si no
+        hay valor."""
+        dt = XmppSession._parse_iso(iso_value)
+        if dt is None:
+            return None
+        from datetime import timedelta
+        return (dt + timedelta(microseconds=1)).isoformat()
 
     def load_more_history(self):
         history = self.session.history
@@ -629,13 +761,34 @@ class XmppConversation(ChatBackend):
             self._pending_mam_queryid = self.session.query_mam(
                 self.bare_jid, end=self._history_shown_from, callback=self._on_mam_page)
 
-    def _on_mam_page(self, messages, complete):
-        self._pending_mam_queryid = None
+    def _record_and_emit(self, messages):
+        """Persiste en caché y emite a la UI cada mensaje de una página MAM."""
+        history = self.session.history
         for body, direction, timestamp, mam_id in messages:
-            history = self.session.history
             if history is not None:
                 history.record_message(self.bare_jid, body, direction, timestamp, mam_id)
             self.emit('history-message', body, direction, timestamp)
+
+    def _on_mam_catchup_page(self, messages, complete, rsm_last):
+        """Página del catch-up hacia adelante (start=). Emite lo recibido y,
+        si el archivo no está completo, pide la siguiente página con
+        after=<rsm.last>. Solo al terminar (o sin más páginas) emite
+        history-complete, para que la UI trate todo como un lote de
+        backfill."""
+        self._pending_mam_queryid = None
+        self._record_and_emit(messages)
+        # Paginar hacia adelante mientras haya más y sepamos desde dónde.
+        if not complete and rsm_last and self.session.is_connected:
+            self._pending_mam_queryid = self.session.query_mam(
+                self.bare_jid, start=self._mam_catchup_start,
+                after=rsm_last, callback=self._on_mam_catchup_page)
+            if self._pending_mam_queryid is not None:
+                return
+        self.emit('history-complete', False)
+
+    def _on_mam_page(self, messages, complete, rsm_last=None):
+        self._pending_mam_queryid = None
+        self._record_and_emit(messages)
         if messages:
             self._history_shown_from = messages[0][2]
         self.emit('history-complete', not complete)

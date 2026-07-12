@@ -210,7 +210,7 @@ class StyleManager:
 
         .message-content {
             padding: 6px;
-            min-width: 400px;
+            min-width: 200px;
         }
 
         .user-message .message-content {
@@ -221,6 +221,23 @@ class StyleManager:
         .assistant-message .message-content {
             background-color: @card_bg_color;
             border-radius: 12px 12px 12px 0;
+        }
+
+        /* Quick response / inline command pill buttons */
+        .quick-responses {
+            padding: 2px;
+        }
+
+        .quick-responses button.pill {
+            padding: 3px 10px;
+            font-size: 0.85em;
+            border-radius: 999px;
+            min-height: 24px;
+            min-width: 48px;
+        }
+
+        .quick-responses button.pill label {
+            font-size: 0.85em;
         }
 
         .timestamp {

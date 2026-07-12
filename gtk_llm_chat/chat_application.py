@@ -50,6 +50,9 @@ class LLMChatApplication(Adw.Application):
 
         self._shutting_down = False  # Bandera para controlar proceso de cierre
         self._window_by_cid = {}  # Mapa de CID -> ventana
+        # La restauración de la sesión de ventanas se hace una sola vez, en el
+        # primer arranque; las reinvocaciones single-instance no re-restauran.
+        self._session_restored = False
         
         debug_print("LLMChatApplication.__init__: Verificando si se necesita configuración inicial...")
         self._needs_initial_setup = self._check_initial_setup_needed()
@@ -253,9 +256,128 @@ class LLMChatApplication(Adw.Application):
     def on_shutdown(self, app):
         """Handles application shutdown and unregisters D-Bus."""
         self._shutting_down = True
+        # Guardar el estado de las ventanas abiertas para restaurarlo al
+        # próximo arranque (misma sesión de ventanas que al salir).
+        self._save_session_state()
         if hasattr(self, 'dbus_registration_id'):
             connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             connection.unregister_object(self.dbus_registration_id)
+
+    # --- Persistencia del estado de ventanas ---
+
+    def _session_state_path(self):
+        """Ruta del archivo JSON con el estado de ventanas de la última salida."""
+        try:
+            from .platform_utils import ensure_user_dir_exists
+            user_dir = ensure_user_dir_exists()
+            if not user_dir:
+                return None
+            return os.path.join(user_dir, "window_session.json")
+        except Exception as e:
+            debug_print(f"No se pudo resolver la ruta de window_session.json: {e}")
+            return None
+
+    def _window_descriptor(self, window):
+        """Descriptor serializable de una ventana con contenido, o None.
+
+        Solo devuelve algo para ventanas que valga la pena restaurar:
+        conversaciones LLM con CID, o conversaciones XMPP con un contacto.
+        Las ventanas vacías / borrador (sin CID ni contacto, o el picker de
+        roster) devuelven None y no se persisten.
+        """
+        backend = getattr(window, 'backend', None)
+        bare_jid = getattr(backend, 'bare_jid', None)
+        session = getattr(backend, 'session', None)
+        if bare_jid and session is not None:
+            return {'type': 'xmpp', 'bare_jid': bare_jid}
+        cid = getattr(window, 'cid', None) or (window.config.get('cid')
+                                               if hasattr(window, 'config') else None)
+        if cid:
+            return {'type': 'llm', 'cid': cid}
+        return None
+
+    def _save_session_state(self):
+        """Escribe los descriptores de las ventanas abiertas a disco."""
+        path = self._session_state_path()
+        if path is None:
+            return
+        descriptors = []
+        seen = set()
+        for window in self.get_windows():
+            try:
+                descriptor = self._window_descriptor(window)
+            except Exception as e:
+                debug_print(f"Error describiendo ventana para guardar sesión: {e}")
+                continue
+            if descriptor is None:
+                continue
+            key = tuple(sorted(descriptor.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            descriptors.append(descriptor)
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump({'windows': descriptors}, f)
+            debug_print(f"Estado de sesión guardado: {len(descriptors)} ventana(s)")
+        except Exception as e:
+            debug_print(f"Error guardando estado de sesión: {e}")
+
+    def _load_session_descriptors(self):
+        """Lee los descriptores guardados; lista vacía si no hay o hay error."""
+        path = self._session_state_path()
+        if path is None or not os.path.exists(path):
+            return []
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            windows = data.get('windows', []) if isinstance(data, dict) else []
+            return [w for w in windows if isinstance(w, dict)]
+        except Exception as e:
+            debug_print(f"Error leyendo estado de sesión: {e}")
+            return []
+
+    def _restore_session_state(self):
+        """Reabre las ventanas guardadas al salir. Devuelve True si abrió
+        al menos una."""
+        descriptors = self._load_session_descriptors()
+        if not descriptors:
+            return False
+        # La sesión XMPP se crea de forma perezosa; solo si hay algún
+        # contacto XMPP que restaurar.
+        xmpp_session = None
+        restored = 0
+        for descriptor in descriptors:
+            dtype = descriptor.get('type')
+            try:
+                if dtype == 'llm':
+                    cid = descriptor.get('cid')
+                    if cid:
+                        self.open_conversation_window({'cid': cid})
+                        restored += 1
+                elif dtype == 'xmpp':
+                    bare_jid = descriptor.get('bare_jid')
+                    if not bare_jid:
+                        continue
+                    if xmpp_session is None:
+                        xmpp_session = self.get_xmpp_session_for_roster()
+                    if xmpp_session is None:
+                        debug_print(
+                            "No hay cuenta XMPP: no se restaura la conversación "
+                            f"con {bare_jid}")
+                        continue
+                    self.open_xmpp_conversation(xmpp_session, bare_jid)
+                    restored += 1
+            except Exception as e:
+                debug_print(f"Error restaurando ventana {descriptor}: {e}")
+        return restored > 0
+
+    def _open_default_window(self):
+        """Abre la ventana por defecto: siempre el roster (en una ventana
+        vacía). Si hay cuenta XMPP se conecta la sesión; si no, el sidebar
+        muestra la acción de configurar cuenta sin bifurcar la UI."""
+        session = self.get_xmpp_session_for_roster()
+        self._create_new_window_with_config({}, xmpp_session=session)
 
     def get_application_version(self):
         """
@@ -318,10 +440,17 @@ class LLMChatApplication(Adw.Application):
             else:
                 self.open_conversation_window(config)
         else:
-            # Arranque genérico (sin argumentos): no asumir LLM ni XMPP,
-            # dejar que el usuario elija (spec 003).
-            debug_print("Sin argumentos: mostrando el selector de tipo de chat")
-            self._show_chat_type_picker()
+            if self._needs_initial_setup:
+                self._show_welcome_window()
+            elif not self._session_restored:
+                # Primer arranque sin argumentos: restaurar la sesión de
+                # ventanas de la última salida (o abrir el roster por defecto).
+                self._session_restored = True
+                self._restore_or_open_default()
+            else:
+                # Reinvocación de la instancia ya viva (single-instance):
+                # abrir una ventana nueva sin re-restaurar toda la sesión.
+                self._open_default_window()
 
         return 0
 
@@ -366,28 +495,20 @@ class LLMChatApplication(Adw.Application):
         debug_print("do_activate invocado")
         debug_print(f"do_activate: self._needs_initial_setup = {self._needs_initial_setup}")
 
-        # Arranque sin argumentos (D-Bus activation / primer lanzamiento):
-        # no asumir LLM ni XMPP, dejar que el usuario elija (spec 003).
-        debug_print("Mostrando el selector de tipo de chat")
-        self._show_chat_type_picker()
+        if self._needs_initial_setup:
+            self._show_welcome_window()
+        elif not self._session_restored:
+            self._session_restored = True
+            self._restore_or_open_default()
+        else:
+            self._open_default_window()
 
-    def _show_chat_type_picker(self):
-        """Muestra el selector inicial LLM/XMPP (spec 003): ni un backend ni
-        otro se asumen por defecto."""
-        from .chat_type_picker import ChatTypePickerWindow
-
-        def on_pick_llm():
-            if self._needs_initial_setup:
-                self._show_welcome_window()
-            else:
-                self.open_conversation_window()
-
-        def on_pick_xmpp():
-            self.on_new_xmpp_conversation_activate(None, None)
-
-        picker = ChatTypePickerWindow(
-            self, on_pick_llm=on_pick_llm, on_pick_xmpp=on_pick_xmpp)
-        picker.present()
+    def _restore_or_open_default(self):
+        """Restaura las ventanas de la última salida; si no había estado
+        guardado (o no se pudo restaurar nada), abre el roster en una
+        ventana vacía."""
+        if not self._restore_session_state():
+            self._open_default_window()
 
     def _show_welcome_window(self):
         """Muestra el asistente de configuración inicial."""
@@ -678,6 +799,20 @@ class LLMChatApplication(Adw.Application):
         """Abre una ventana XMPP sin contacto elegido: muestra el roster
         normal (spec 003) en vez de un diálogo modal aparte."""
         self._create_new_window_with_config({}, xmpp_session=session)
+
+    def get_xmpp_session_for_roster(self):
+        """Devuelve la sesión XMPP compartida para el roster unificado.
+
+        Si hay cuenta guardada, conecta o reutiliza la sesión. Si no hay
+        cuenta, devuelve None para que el roster muestre la acción de
+        configuración sin bifurcar la UI.
+        """
+        from .xmpp_account import load_account
+        account = load_account()
+        if account is None:
+            return None
+        jid, password = account
+        return self._ensure_xmpp_session(jid, password)
 
     def open_xmpp_conversation(self, session, bare_jid):
         """Abre (o enfoca, si ya existe) la ventana de conversación con un
