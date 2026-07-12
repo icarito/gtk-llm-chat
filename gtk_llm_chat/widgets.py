@@ -107,9 +107,34 @@ class MessageWidget(Gtk.Box):
         time_label.set_halign(Gtk.Align.END)
         time_label.set_size_request(60, -1)
         message_box.append(time_label)
+        self.message_box = message_box
 
         self.append(margin_box)
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.content_view.set_markdown(new_content)
+
+    def add_quick_responses(self, responses, on_selected):
+        """Adjunta botones de respuesta rápida a esta burbuja."""
+        if not responses:
+            return
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.set_margin_top(6)
+        row.add_css_class("quick-responses")
+
+        buttons = []
+
+        def handle_click(_button, response):
+            for btn in buttons:
+                btn.set_sensitive(False)
+            on_selected(response)
+
+        for response in responses:
+            button = Gtk.Button(label=response.get('label', response.get('value', '')))
+            button.add_css_class("pill")
+            button.connect("clicked", handle_click, response)
+            row.append(button)
+            buttons.append(button)
+
+        self.message_box.append(row)

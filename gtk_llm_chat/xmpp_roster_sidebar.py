@@ -48,6 +48,8 @@ class XmppRosterSidebar(Gtk.Box):
             'roster-updated', lambda _s: self._populate())
         self._presence_handler = session.connect(
             'presence-changed', self._on_presence_changed)
+        self._status_handler = session.connect(
+            'contact-status-changed', self._on_contact_status_changed)
 
     def _presence_dot(self, state):
         dot = Gtk.Image.new_from_icon_name("media-record-symbolic")
@@ -72,8 +74,9 @@ class XmppRosterSidebar(Gtk.Box):
         else:
             for bare_jid, item in sorted(self.session.roster_items.items()):
                 row = Adw.ActionRow(title=item.get('name') or bare_jid)
-                if item.get('name'):
-                    row.set_subtitle(bare_jid)
+                subtitle = item.get('status') or (bare_jid if item.get('name') else '')
+                if subtitle:
+                    row.set_subtitle(subtitle)
                 row.set_activatable(True)
                 row.bare_jid = bare_jid
                 dot = self._presence_dot(item.get('presence', XmppSession.PRESENCE_OFFLINE))
@@ -134,6 +137,15 @@ class XmppRosterSidebar(Gtk.Box):
         row.add_prefix(new_dot)
         self._rows[bare_jid] = (row, new_dot)
 
+    def _on_contact_status_changed(self, session, bare_jid):
+        entry = self._rows.get(bare_jid)
+        if entry is None:
+            return
+        row, _dot = entry
+        item = session.roster_items.get(bare_jid, {})
+        subtitle = item.get('status') or (bare_jid if item.get('name') else '')
+        row.set_subtitle(subtitle)
+
     def _on_row_activated(self, _list_box, row):
         bare_jid = getattr(row, 'bare_jid', None)
         if bare_jid and self._on_contact_selected:
@@ -143,3 +155,4 @@ class XmppRosterSidebar(Gtk.Box):
         """Suelta los handlers de la sesión compartida."""
         self.session.disconnect(self._roster_handler)
         self.session.disconnect(self._presence_handler)
+        self.session.disconnect(self._status_handler)

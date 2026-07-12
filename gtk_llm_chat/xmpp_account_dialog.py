@@ -118,7 +118,7 @@ class XmppAccountDialog(Adw.Window):
 
         # Sesión de prueba: solo valida credenciales, no se reutiliza.
         # send_message() no aplica aquí (aún no hay UI de conversación).
-        self._probe_session = XmppSession(jid, password)
+        self._probe_session = XmppSession(jid, password, auto_reconnect=False)
 
         def on_state(_session, state):
             self._on_probe_state(jid, password, state)

@@ -192,6 +192,18 @@ class LLMChatApplication(Adw.Application):
         xmpp_account_action.connect("activate", self.on_xmpp_account_activate)
         self.add_action(xmpp_account_action)
 
+        xmpp_reconnect_action = Gio.SimpleAction.new("xmpp-reconnect", None)
+        xmpp_reconnect_action.connect("activate", self.on_xmpp_reconnect_activate)
+        self.add_action(xmpp_reconnect_action)
+
+        xmpp_disconnect_action = Gio.SimpleAction.new("xmpp-disconnect", None)
+        xmpp_disconnect_action.connect("activate", self.on_xmpp_disconnect_activate)
+        self.add_action(xmpp_disconnect_action)
+
+        xmpp_remove_action = Gio.SimpleAction.new("xmpp-remove-account", None)
+        xmpp_remove_action.connect("activate", self.on_xmpp_remove_account_activate)
+        self.add_action(xmpp_remove_action)
+
         # Acciones parametrizadas por bare JID, invocadas desde las
         # notificaciones XMPP (spec 002 T5/T6).
         open_xmpp_action = Gio.SimpleAction.new(
@@ -562,6 +574,45 @@ class LLMChatApplication(Adw.Application):
         la primera vez): permite configurar o cambiar la cuenta."""
         self._open_xmpp_account_dialog()
 
+    def on_xmpp_reconnect_activate(self, action, param):
+        """Reconecta la sesión XMPP activa sin recrear ventanas."""
+        session = getattr(self, '_xmpp_session', None)
+        if session is not None:
+            session.reconnect_now()
+
+    def on_xmpp_disconnect_activate(self, action, param):
+        """Desconecta la sesión XMPP activa y cancela reconexiones pendientes."""
+        session = getattr(self, '_xmpp_session', None)
+        if session is not None:
+            session.disconnect_from_server()
+
+    def on_xmpp_remove_account_activate(self, action, param):
+        """Elimina credenciales XMPP guardadas y cierra la sesión activa."""
+        window = self.get_active_window()
+        dialog = Adw.MessageDialog(
+            transient_for=window,
+            modal=True,
+            heading=_("Remove XMPP Account"),
+            body=_("Remove the saved XMPP account from this device?"),
+        )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("remove", _("Remove"))
+        dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+
+        def on_response(_dialog, response):
+            if response != "remove":
+                return
+            from .xmpp_account import delete_account
+            session = getattr(self, '_xmpp_session', None)
+            if session is not None:
+                session.shutdown()
+                self._xmpp_session = None
+            delete_account()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
     def _open_xmpp_account_dialog(self, on_ready=None):
         from .xmpp_account_dialog import XmppAccountDialog
 
@@ -582,13 +633,19 @@ class LLMChatApplication(Adw.Application):
         """Devuelve la sesión XMPP de la app, creándola (y cableando sus
         notificaciones) la primera vez."""
         session = getattr(self, '_xmpp_session', None)
-        if session is None or not session.is_connected:
+        if session is not None and session.bare_jid != jid:
+            session.shutdown()
+            self._xmpp_session = None
+            session = None
+        if session is None:
             from .xmpp_client import XmppSession
             session = XmppSession(jid, password)
             self._xmpp_session = session
             session.connect('message-received', self._on_xmpp_message_received)
             session.connect('subscription-request', self._on_xmpp_subscription_request)
             session.connect_to_server()
+        elif not session.is_connected:
+            session.reconnect_now()
         return session
 
     def _on_xmpp_message_received(self, session, bare_jid, body):

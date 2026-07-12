@@ -77,6 +77,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # aspecto (qué botón mostrar, a qué lado) según este flag.
         self.backend = None
         self._backend_handler_ids = []
+        self._session_handler_ids = []
         self._xmpp_session = None
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
@@ -174,13 +175,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
         primary_menu.append(_("New XMPP Conversation…"), "app.new-xmpp-conversation")
         xmpp_section = Gio.Menu()
         xmpp_section.append(_("XMPP Account…"), "app.xmpp-account")
+        xmpp_section.append(_("Reconnect XMPP"), "app.xmpp-reconnect")
+        xmpp_section.append(_("Disconnect XMPP"), "app.xmpp-disconnect")
+        xmpp_section.append(_("Remove XMPP Account…"), "app.xmpp-remove-account")
         primary_menu.append_section(None, xmpp_section)
         self.primary_menu_button = Gtk.MenuButton()
         resource_manager.set_widget_icon_name(self.primary_menu_button, "view-more-symbolic")
         self.primary_menu_button.set_tooltip_text(_("Main Menu"))
         self.primary_menu_button.set_menu_model(primary_menu)
 
+        self.agent_menu_button = Gtk.MenuButton()
+        resource_manager.set_widget_icon_name(
+            self.agent_menu_button, "applications-system-symbolic")
+        self.agent_menu_button.set_tooltip_text(_("Agent"))
+        self.agent_menu_button.set_visible(False)
+
         self.header.pack_end(self.primary_menu_button)
+        self.header.pack_end(self.agent_menu_button)
         self.header.pack_end(self.sidebar_button)
         self.header.pack_end(rename_button)
         self.header.pack_start(self.roster_button)
@@ -311,6 +322,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.backend.disconnect(handler_id)
             self.backend.shutdown()
         self._backend_handler_ids = []
+        if self._xmpp_session is not None:
+            for handler_id in self._session_handler_ids:
+                self._xmpp_session.disconnect(handler_id)
+        self._session_handler_ids = []
         if self.roster_sidebar is not None:
             self.roster_sidebar.shutdown()
             self.roster_sidebar = None
@@ -360,6 +375,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.connection_status_label.set_visible(self._injected_backend)
         self.sidebar_button.set_visible(not self._injected_backend)
         self.roster_button.set_visible(self._injected_backend)
+        self.agent_menu_button.set_visible(False)
         toggle_button = self.roster_button if self._injected_backend else self.sidebar_button
         self._sidebar_toggle_binding = self.split_view.bind_property(
             "show-sidebar", toggle_button, "active",
@@ -375,6 +391,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
             self.backend = backend
             session = getattr(backend, 'session', None) or xmpp_session
+            self._xmpp_session = session
             if backend is not None:
                 self._backend_handler_ids = [
                     backend.connect('ready', self._on_backend_ready),
@@ -383,8 +400,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     backend.connect('finished', self._on_llm_finished),
                     backend.connect('state-changed', self._on_backend_state_changed),
                     backend.connect('typing', self._on_backend_typing),
+                    backend.connect('quick-responses', self._on_quick_responses),
                 ]
-                self.title_widget.set_subtitle(backend.get_display_name())
+                self._update_xmpp_title_status()
+                self._refresh_agent_menu()
             else:
                 # Sin contacto elegido aún: mostrar el roster, deshabilitar
                 # el chat hasta que el usuario elija una fila (spec 003).
@@ -397,6 +416,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Panel de contactos (roster) dockeado a la IZQUIERDA (spec 002),
             # opuesto al sidebar de modelo LLM que va a la derecha.
             if session is not None:
+                self._session_handler_ids = [
+                    session.connect('contact-status-changed',
+                                    self._on_contact_status_changed),
+                ]
                 from .xmpp_roster_sidebar import XmppRosterSidebar
                 self.roster_sidebar = XmppRosterSidebar(
                     session, on_contact_selected=self._on_roster_contact_selected)
@@ -803,6 +826,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Refleja el estado de conexión del backend en el header (spec 001, T7)."""
         labels = {
             'connecting': _("Connecting…"),
+            'reconnecting': _("Reconnecting…"),
             'connected': _("Connected"),
             'disconnected': _("Disconnected"),
         }
@@ -831,14 +855,147 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.connection_status_label.set_label(_("Typing…"))
             self.connection_status_label.remove_css_class("error")
         else:
-            self._update_connection_status(getattr(self, '_last_connection_state', 'connected'))
+            state = getattr(self, '_last_connection_state', 'connected')
+            self._update_connection_status(state)
+
+    def _on_contact_status_changed(self, session, bare_jid):
+        active_bare = getattr(self.backend, 'bare_jid', None)
+        if bare_jid == active_bare:
+            self._update_xmpp_title_status()
+            self._refresh_agent_menu()
+
+    def _update_xmpp_title_status(self):
+        if self.backend is None:
+            return
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            self.title_widget.set_subtitle(self.backend.get_display_name())
+            return
+        status = session.get_contact_status(bare_jid)
+        self.title_widget.set_subtitle(status or self.backend.get_display_name())
+
+    def _refresh_agent_menu(self):
+        if self.backend is None:
+            self.agent_menu_button.set_visible(False)
+            return
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None or not session.is_agent_contact(bare_jid):
+            self.agent_menu_button.set_visible(False)
+            return
+        self.agent_menu_button.set_visible(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+
+        compact = Gtk.Button(label=_("Compact Context"))
+        compact.connect("clicked", lambda _b: self._confirm_agent_text_command(
+            _("Compact Context"), _("Ask the agent to compact its current context?"),
+            "/compact"))
+        clear = Gtk.Button(label=_("Clear Context"))
+        clear.add_css_class("destructive-action")
+        clear.connect("clicked", lambda _b: self._confirm_agent_text_command(
+            _("Clear Context"), _("Ask the agent to clear its current context?"),
+            "/clear", destructive=True))
+        box.append(compact)
+        box.append(clear)
+
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        box.append(separator)
+
+        loading = Gtk.Label(label=_("Loading commands…"))
+        loading.add_css_class("dim-label")
+        box.append(loading)
+        popover = Gtk.Popover()
+        popover.set_child(box)
+        self.agent_menu_button.set_popover(popover)
+        self._load_agent_commands(box, loading)
+
+    def _confirm_agent_text_command(self, heading, body, command, destructive=False):
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            modal=True,
+            heading=heading,
+            body=body,
+        )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("send", _("Send"))
+        if destructive:
+            dialog.set_response_appearance("send", Adw.ResponseAppearance.DESTRUCTIVE)
+        else:
+            dialog.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+
+        def on_response(_dialog, response):
+            if response == "send" and self.backend is not None:
+                self.display_message(command, sender="user")
+                self.backend.send_message(command)
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _load_agent_commands(self, box, loading):
+        from .xmpp_commands import XmppCommandClient
+
+        client = XmppCommandClient(self.backend.session, self.backend.bare_jid)
+
+        def on_success(commands):
+            box.remove(loading)
+            for command in commands:
+                button = Gtk.Button(label=command.name or command.node)
+                button.connect("clicked", self._on_agent_command_clicked, client, command)
+                box.append(button)
+            if not commands:
+                empty = Gtk.Label(label=_("No agent commands"))
+                empty.add_css_class("dim-label")
+                box.append(empty)
+
+        def on_error(message):
+            loading.set_label(message)
+            loading.add_css_class("error")
+
+        client.request_commands(on_success, on_error)
+
+    def _on_agent_command_clicked(self, _button, client, command):
+        from .xmpp_commands import (
+            XmppCommandFormDialog,
+            is_completed,
+            next_action_for,
+            show_command_result,
+        )
+
+        def on_error(message):
+            self._on_llm_error(self.backend, message)
+
+        def handle_result(result):
+            if is_completed(result):
+                show_command_result(self, result)
+                return
+            if result.data is None:
+                show_command_result(self, result)
+                return
+
+            def on_submit(dataform):
+                client.execute(
+                    result, handle_result, on_error,
+                    action=next_action_for(result), dataform=dataform)
+
+            XmppCommandFormDialog(self, result, on_submit).present()
+
+        client.execute(command, handle_result, on_error)
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
         debug_print(f"Backend listo: {display_name}")
 
         # Actualizar el subtítulo de la ventana con el nombre a mostrar
-        self.title_widget.set_subtitle(display_name)
+        if self._injected_backend:
+            self._update_xmpp_title_status()
+        else:
+            self.title_widget.set_subtitle(display_name)
         
         # Verificar si necesitamos cargar una conversación existente basada en CID
         if self.cid:
@@ -1042,6 +1199,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.accumulated_response += response
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
+        GLib.idle_add(self._scroll_to_bottom, False)
+
+    def _on_quick_responses(self, backend, responses):
+        if self.current_message_widget is None:
+            return
+
+        def on_selected(response):
+            value = response.get('value', '')
+            label = response.get('label') or value
+            if not value:
+                return
+            self.display_message(label, sender="user")
+            if hasattr(backend, 'send_quick_response'):
+                backend.send_quick_response(value, label)
+
+        self.current_message_widget.add_quick_responses(responses, on_selected)
         GLib.idle_add(self._scroll_to_bottom, False)
 
     def _scroll_to_bottom(self, force=True):

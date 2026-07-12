@@ -18,6 +18,8 @@ Reglas del contrato (ver specs/001-xmpp-backend/design.md):
   no emitirla nunca.
 - 'typing' indica que la otra parte está escribiendo (p.ej. XEP-0085).
   Backends que no lo soportan (LLMClient) simplemente no la emiten.
+- 'quick-responses' adjunta acciones de respuesta rápida al último
+  mensaje recibido. Backends que no lo soportan simplemente no la emiten.
 """
 from gi.repository import GObject
 
@@ -33,6 +35,7 @@ class ChatBackend(GObject.Object):
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
+        'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object,)),
     }
 
     def send_message(self, prompt: str):

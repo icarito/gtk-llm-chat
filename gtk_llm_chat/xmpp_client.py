@@ -28,9 +28,12 @@ from .debug_utils import debug_print
 
 STATE_DISCONNECTED = 'disconnected'
 STATE_CONNECTING = 'connecting'
+STATE_RECONNECTING = 'reconnecting'
 STATE_CONNECTED = 'connected'
 
 RESOURCE = 'gtk-llm-chat'
+NANOCLAW_CAPS_NODE = 'https://github.com/nanocoai/nanoclaw'
+QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
 
 
 class XmppSession(GObject.Object):
@@ -49,6 +52,8 @@ class XmppSession(GObject.Object):
         'message-received': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # bare_jid, state ('online'/'offline') — presencia de un contacto (spec 002)
         'presence-changed': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        # bare_jid — cambió el status/caps de un contacto agente (spec 005)
+        'contact-status-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # bare_jid — alguien pide suscribirse a nuestra presencia (spec 002 T6)
         'subscription-request': (GObject.SignalFlags.RUN_LAST, None, (str,)),
     }
@@ -56,14 +61,19 @@ class XmppSession(GObject.Object):
     PRESENCE_ONLINE = 'online'
     PRESENCE_OFFLINE = 'offline'
 
-    def __init__(self, jid: str, password: str, resource: str = RESOURCE):
+    def __init__(self, jid: str, password: str, resource: str = RESOURCE,
+                 auto_reconnect: bool = True):
         GObject.Object.__init__(self)
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = resource
+        self._auto_reconnect = auto_reconnect
         self._client = None
         self._state = STATE_DISCONNECTED
         self._disconnect_requested = False
+        self._reconnect_requested = False
+        self._reconnect_timeout_id = None
+        self._reconnect_attempt = 0
         # bare jid (str) -> dict(name=..., subscription=..., presence=...)
         self.roster_items = {}
         self._roster_loaded = False
@@ -96,11 +106,15 @@ class XmppSession(GObject.Object):
 
     # --- Ciclo de vida de la conexión ---
 
-    def connect_to_server(self):
+    def connect_to_server(self, reset_backoff: bool = True):
         """Inicia la conexión. No bloqueante; el progreso llega por señales."""
-        if self._state != STATE_DISCONNECTED:
+        if self._state not in (STATE_DISCONNECTED, STATE_RECONNECTING):
             debug_print(f"XmppSession: connect_to_server ignorado en estado {self._state}")
             return
+        self._cancel_reconnect_timer()
+        if reset_backoff:
+            self._reconnect_attempt = 0
+        self._disconnect_requested = False
         client = NbxmppClient(log_context=f'xmpp-{self.bare_jid}')
         client.set_username(self._jid.localpart)
         client.set_domain(self._jid.domain)
@@ -114,14 +128,26 @@ class XmppSession(GObject.Object):
         client.register_handler(
             StanzaHandler(name='presence', callback=self._on_presence))
         self._client = client
-        self._disconnect_requested = False
         self._set_state(STATE_CONNECTING)
         client.connect()
 
     def disconnect_from_server(self):
+        self._disconnect_requested = True
+        self._cancel_reconnect_timer()
         if self._client is not None and self._state != STATE_DISCONNECTED:
-            self._disconnect_requested = True
             self._client.disconnect()
+        else:
+            self._set_state(STATE_DISCONNECTED)
+
+    def reconnect_now(self):
+        """Cancela el backoff pendiente y reconecta de inmediato."""
+        self._cancel_reconnect_timer()
+        self._reconnect_attempt = 0
+        if self._client is not None and self._state != STATE_DISCONNECTED:
+            self._reconnect_requested = True
+            self._client.disconnect(immediate=True)
+            return
+        self.connect_to_server()
 
     def _on_connected(self, _client, _signal_name):
         # Orden RFC 6121: roster primero, luego presence inicial, y solo
@@ -141,6 +167,12 @@ class XmppSession(GObject.Object):
             debug_print(f"XmppSession: desconectado con error: {message}")
             self.emit('session-error', message)
         self._set_state(STATE_DISCONNECTED)
+        if self._reconnect_requested:
+            self._reconnect_requested = False
+            GLib.idle_add(lambda: (self.connect_to_server(), GLib.SOURCE_REMOVE)[1])
+            return
+        if self._should_reconnect(error, text):
+            self._schedule_reconnect()
 
     def _on_connection_failed(self, _client, _signal_name):
         error, text, _extra = self._client.get_error()
@@ -148,6 +180,37 @@ class XmppSession(GObject.Object):
         debug_print(f"XmppSession: fallo de conexión: {message}")
         self.emit('session-error', message)
         self._set_state(STATE_DISCONNECTED)
+        if self._should_reconnect(error, text):
+            self._schedule_reconnect()
+
+    def _should_reconnect(self, error, text) -> bool:
+        if self._disconnect_requested or self._reconnect_requested or not self._auto_reconnect:
+            return False
+        message = f"{error or ''} {text or ''}".lower()
+        auth_markers = ('not-authorized', 'not authorized', 'sasl', 'authentication')
+        return not any(marker in message for marker in auth_markers)
+
+    def _schedule_reconnect(self):
+        if self._reconnect_timeout_id is not None:
+            return
+        self._reconnect_attempt += 1
+        delay = min(60, 2 ** min(self._reconnect_attempt, 5))
+        debug_print(f"XmppSession: reconectando en {delay}s")
+        self._set_state(STATE_RECONNECTING)
+
+        def do_reconnect():
+            self._reconnect_timeout_id = None
+            if self._disconnect_requested:
+                return GLib.SOURCE_REMOVE
+            self.connect_to_server(reset_backoff=False)
+            return GLib.SOURCE_REMOVE
+
+        self._reconnect_timeout_id = GLib.timeout_add_seconds(delay, do_reconnect)
+
+    def _cancel_reconnect_timer(self):
+        if self._reconnect_timeout_id is not None:
+            GLib.source_remove(self._reconnect_timeout_id)
+            self._reconnect_timeout_id = None
 
     # --- Roster ---
 
@@ -173,6 +236,9 @@ class XmppSession(GObject.Object):
                     'subscription': item.subscription,
                     # Presencia inicial desconocida = offline hasta recibir <presence>
                     'presence': self.PRESENCE_OFFLINE,
+                    'status': '',
+                    'is_agent': False,
+                    'agent_full_jid': None,
                 }
             self._roster_loaded = True
             debug_print(f"XmppSession: roster con {len(self.roster_items)} contactos")
@@ -188,6 +254,7 @@ class XmppSession(GObject.Object):
         enable_carbons = Iq(typ='set')
         enable_carbons.addChild('enable', namespace=Namespace.CARBONS)
         self._client.send_stanza(enable_carbons)
+        self._reconnect_attempt = 0
         self._set_state(STATE_CONNECTED)
         if roster is not None:
             self.emit('roster-updated')
@@ -201,6 +268,18 @@ class XmppSession(GObject.Object):
     def get_presence(self, bare_jid: str) -> str:
         item = self.roster_items.get(bare_jid)
         return item.get('presence', self.PRESENCE_OFFLINE) if item else self.PRESENCE_OFFLINE
+
+    def get_contact_status(self, bare_jid: str) -> str:
+        item = self.roster_items.get(bare_jid)
+        return item.get('status', '') if item else ''
+
+    def is_agent_contact(self, bare_jid: str) -> bool:
+        item = self.roster_items.get(bare_jid)
+        return bool(item and item.get('is_agent'))
+
+    def get_agent_full_jid(self, bare_jid: str) -> str | None:
+        item = self.roster_items.get(bare_jid)
+        return item.get('agent_full_jid') if item else None
 
     # --- Presencia (spec 002) ---
 
@@ -226,6 +305,17 @@ class XmppSession(GObject.Object):
             # Presencia de alguien fuera del roster (p.ej. nosotros mismos);
             # no la mostramos en la lista de contactos.
             return
+        old_status = self.roster_items[bare].get('status', '')
+        old_is_agent = self.roster_items[bare].get('is_agent', False)
+        old_agent_full_jid = self.roster_items[bare].get('agent_full_jid')
+        status = getattr(properties, 'status', None) or ''
+        entity_caps = getattr(properties, 'entity_caps', None)
+        caps_node = getattr(entity_caps, 'node', None)
+        if caps_node == NANOCLAW_CAPS_NODE:
+            self.roster_items[bare]['is_agent'] = True
+            self.roster_items[bare]['agent_full_jid'] = str(properties.jid)
+        if status != old_status:
+            self.roster_items[bare]['status'] = status
         resources = self._online_resources.setdefault(bare, set())
         was_online = bool(resources)
         if ptype.value == 'unavailable':
@@ -238,6 +328,10 @@ class XmppSession(GObject.Object):
             self.roster_items[bare]['presence'] = state
             debug_print(f"XmppSession: presencia {bare} -> {state}")
             self.emit('presence-changed', bare, state)
+        if (status != old_status or
+                self.roster_items[bare].get('is_agent') != old_is_agent or
+                self.roster_items[bare].get('agent_full_jid') != old_agent_full_jid):
+            self.emit('contact-status-changed', bare)
 
     # --- Mensajes ---
 
@@ -254,11 +348,21 @@ class XmppSession(GObject.Object):
         if not properties.body:
             return
         debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
+        quick_responses = self._parse_quick_responses(_stanza)
         if conversation is not None:
-            conversation.deliver(properties.body)
+            conversation.deliver(properties.body, quick_responses)
         # Emitir siempre para que la app pueda notificar si la ventana de
         # esa conversación no tiene foco (o no existe) — spec 002 T5.
         self.emit('message-received', bare, properties.body)
+
+    def _parse_quick_responses(self, stanza) -> list[dict[str, str]]:
+        responses = []
+        for child in stanza.getTags('response', namespace=QUICK_RESPONSE_NS):
+            value = child.getAttr('value')
+            label = child.getAttr('label') or value
+            if value and label:
+                responses.append({'value': value, 'label': label})
+        return responses
 
     def send_text(self, to_bare_jid: str, text: str):
         # XEP-0085: marcar 'active' junto con cada mensaje
@@ -315,6 +419,7 @@ class XmppSession(GObject.Object):
         self._conversations.pop(bare_jid, None)
 
     def shutdown(self):
+        self._cancel_reconnect_timer()
         self._conversations.clear()
         self.disconnect_from_server()
 
@@ -349,9 +454,11 @@ class XmppConversation(ChatBackend):
 
     # --- Entrantes (llamados por la sesión) ---
 
-    def deliver(self, body: str):
+    def deliver(self, body: str, quick_responses=None):
         """Un mensaje del contacto: response + finished (sin streaming)."""
         self.emit('response', body)
+        if quick_responses:
+            self.emit('quick-responses', quick_responses)
         self.emit('finished', True)
 
     def notify_chatstate(self, chatstate: str):
@@ -366,6 +473,14 @@ class XmppConversation(ChatBackend):
             return
         self.session.send_text(self.bare_jid, prompt)
         # El envío no genera respuesta propia: liberar la UI de inmediato
+        self.emit('finished', True)
+
+    def send_quick_response(self, value: str, label: str):
+        if not self.session.is_connected:
+            self.emit('error', _("Not connected to the XMPP server"))
+            self.emit('finished', False)
+            return
+        self.session.send_text(self.bare_jid, value)
         self.emit('finished', True)
 
     def cancel(self):

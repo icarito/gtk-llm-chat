@@ -18,7 +18,8 @@ archived at [archive/spec-2025.md](archive/spec-2025.md).
                     │  sidebar, selector  │ chat_sidebar.py, markdownview.py
                     └──────────┬──────────┘
                                │ ChatBackend contract (GObject signals:
-                               │ response/error/finished/ready/state-changed/typing)
+                               │ response/error/finished/ready/state-changed/
+                               │ typing/quick-responses)
                     ┌──────────▼──────────────────────────┐
                     │            ChatBackend               │  chat_backend.py
                     ├──────────────────┬───────────────────┤
@@ -86,7 +87,9 @@ XMPP contact.
 - `chat_backend.py` — `ChatBackend(GObject.Object)`, the contract.
   Signals: `response(str)`, `error(str)`, `finished(bool)`,
   `ready(str)` (backend can send / display name), `state-changed(str)`
-  (connection state; local backends may never emit it), `typing(bool)`.
+  (connection state; local backends may never emit it), `typing(bool)`,
+  `quick-responses(object)` (button definitions for the last received
+  message; optional, used by NanoClaw XMPP).
   Methods: `send_message`, `cancel`, `get_conversation_id`,
   `get_display_name`, `notify_composing`, `shutdown`. `response` may
   stream (many emits) or arrive whole (one emit); always followed by
@@ -100,16 +103,30 @@ XMPP contact.
   presence and incoming-message routing; shared by all conversations of
   that account. Signals: `state-changed`, `session-error`,
   `roster-updated`, `message-received(jid, body)`,
-  `presence-changed(jid, state)`, `subscription-request(jid)`. Presence
-  is keyed on **bare JID**, aggregated across resources
+  `presence-changed(jid, state)`, `contact-status-changed(jid)`,
+  `subscription-request(jid)`. Presence is keyed on **bare JID**,
+  aggregated across resources
   (`_online_resources`); a presence handler guards `jid is None` (an
   nbxmpp 7.2.0 bug crashes its own base handler on from-less presences).
+  Transient disconnects schedule automatic reconnect with exponential
+  backoff; deliberate disconnects and account-dialog probe sessions do not
+  reconnect. NanoClaw contacts are detected from entity caps node
+  `https://github.com/nanocoai/nanoclaw`; the full resource JID is retained
+  for agent IQ commands, and presence `<status>` is exposed to the roster
+  and chat header. Incoming message stanzas are also scanned for XEP-0439
+  quick responses (`urn:xmpp:tmp:quick-response`), delivered through
+  `ChatBackend.quick-responses`.
   `accept_subscription`/`deny_subscription` use the `BasePresence`
   module. `XmppConversation(ChatBackend)`: one per bare JID, maps XMPP
   messages/chat-states onto the contract (a whole message = `response` +
-  `finished`). See `specs/archive/001-xmpp-backend/` for the base design
+  optional `quick-responses` + `finished`). See
+  `specs/archive/001-xmpp-backend/` for the base design
   and gotchas (silent auth failure, startup order, disconnect-as-error);
   `specs/002-xmpp-roster-notifications/` for presence/roster/notifications.
+- `xmpp_commands.py` — XEP-0050/XEP-0004 client for NanoClaw agent
+  commands. It uses nbxmpp's `AdHoc` and dataforms helpers to discover
+  commands from the agent full JID, execute commands, render common form
+  fields in a libadwaita dialog, and submit with `next`/`complete`.
 - `xmpp_account.py` / `xmpp_account_dialog.py` — XMPP account: JID in a
   plain JSON file under the user dir, password in the system keyring
   (Secret Service, service `gtk-llm-chat-xmpp`); the dialog validates
@@ -123,9 +140,11 @@ XMPP contact.
   `xmpp:<account>:<contact>`).
 - Header entry points: a primary menu (`Gtk.MenuButton` in the window
   header) with "New LLM Conversation" (`app.new-conversation`), "New XMPP
-  Conversation…" (`app.new-xmpp-conversation`) and "XMPP Account…"
-  (`app.xmpp-account`). XMPP windows add a left roster toggle button and
-  a connection-status label; incoming-message and subscription-request
+  Conversation…" (`app.new-xmpp-conversation`), "XMPP Account…"
+  (`app.xmpp-account`), reconnect/disconnect, and remove-account actions.
+  XMPP windows add a left roster toggle button and a connection-status
+  label; NanoClaw chats add an Agent menu with context actions (`/compact`,
+  `/clear`) and discovered ad-hoc commands; incoming-message and subscription-request
   desktop notifications go through `Gio.Application.send_notification`
   with `app.open-xmpp` / `app.accept-xmpp-sub` / `app.deny-xmpp-sub`
   actions.
