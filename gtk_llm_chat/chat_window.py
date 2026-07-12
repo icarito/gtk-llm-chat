@@ -1483,8 +1483,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """
         if self._injected_backend:
             self.accumulated_response = ""
-            self.current_message_widget = self.display_message(
-                response, sender="assistant")
+            if self._is_context_unavailable_response(response):
+                self.current_message_widget = None
+                self._display_context_unavailable(response)
+            else:
+                self.current_message_widget = self.display_message(
+                    response, sender="assistant")
             GLib.idle_add(self._scroll_to_bottom, False)
             return
 
@@ -1515,6 +1519,47 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
         GLib.idle_add(self._scroll_to_bottom, False)
+
+    @staticmethod
+    def _is_context_unavailable_response(response):
+        text = str(response or "").lower()
+        return (
+            "ctx unavailable" in text or
+            "context unavailable" in text
+        )
+
+    def _display_context_unavailable(self, response):
+        message = _("Claude context is unavailable.")
+        details = self._context_limit_details(response)
+        if details:
+            message = f"{message}\n{details}"
+        else:
+            message = (
+                f"{message}\n"
+                f"{_('Session limit: not reported by the agent.')}"
+            )
+        message = (
+            f"{message}\n"
+            f"{_('Try compacting or clearing the agent context, or start a new session.')}"
+        )
+        self.messages_box.append(ErrorWidget(message))
+
+    @staticmethod
+    def _context_limit_details(response):
+        detail_lines = []
+        for line in str(response or "").splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            clean_lower = clean.lower()
+            if "ctx unavailable" in clean_lower or "context unavailable" in clean_lower:
+                continue
+            if re.search(r"\b(limit|remaining|reset|usage|token|session|quota)\b",
+                         clean_lower):
+                detail_lines.append(clean)
+            if len(detail_lines) >= 6:
+                break
+        return "\n".join(detail_lines)
 
     def _on_llm_response_correction(self, backend, body):
         """XEP-0308 correction: reemplaza el contenido de la burbuja actual
