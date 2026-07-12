@@ -20,10 +20,18 @@ class XmppCommandClient:
     def __init__(self, session, bare_jid: str):
         self.session = session
         self.bare_jid = bare_jid
+        self._pending_callbacks = []
 
     @property
     def target_jid(self):
         return self.session.get_agent_full_jid(self.bare_jid) or self.bare_jid
+
+    def _done_callback(self, on_success, on_error):
+        def cb(task):
+            self._pending_callbacks.remove(cb)
+            self._finish_task(task, on_success, on_error)
+        self._pending_callbacks.append(cb)
+        return cb
 
     def request_commands(self, on_success, on_error):
         if not self.session.is_connected:
@@ -31,7 +39,7 @@ class XmppCommandClient:
             return
         task = self.session._client.get_module('AdHoc').request_command_list(
             self.target_jid)
-        task.add_done_callback(lambda task: self._finish_task(task, on_success, on_error))
+        task.add_done_callback(self._done_callback(on_success, on_error))
 
     def execute(self, command, on_success, on_error, action=None, dataform=None):
         if not self.session.is_connected:
@@ -39,7 +47,7 @@ class XmppCommandClient:
             return
         task = self.session._client.get_module('AdHoc').execute_command(
             command, action=action, dataform=dataform)
-        task.add_done_callback(lambda task: self._finish_task(task, on_success, on_error))
+        task.add_done_callback(self._done_callback(on_success, on_error))
 
     def _finish_task(self, task, on_success, on_error):
         try:
