@@ -38,6 +38,7 @@ STATE_CONNECTED = 'connected'
 RESOURCE = 'gtk-llm-chat'
 NANOCLAW_CAPS_NODE = 'https://github.com/nanocoai/nanoclaw'
 QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
+MESSAGE_CORRECT_NS = 'urn:xmpp:message-correct:0'
 
 
 class XmppSession(GObject.Object):
@@ -472,8 +473,12 @@ class XmppSession(GObject.Object):
         debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
         quick_responses = self._parse_quick_responses(_stanza)
         commands = self._parse_inline_commands(_stanza)
+        stanza_id = _stanza.getAttr('id')
+        replace_id = self._parse_replace_id(_stanza)
+        correction = (replace_id, stanza_id) if replace_id else None
         if conversation is not None:
-            conversation.deliver(properties.body, quick_responses, commands)
+            conversation.deliver(properties.body, quick_responses, commands,
+                                 correction=correction)
         # Emitir siempre para que la app pueda notificar si la ventana de
         # esa conversación no tiene foco (o no existe) — spec 002 T5.
         self.emit('message-received', bare, properties.body)
@@ -500,6 +505,12 @@ class XmppSession(GObject.Object):
                 if jid and cmd_node and name:
                     commands.append({'jid': jid, 'node': cmd_node, 'name': name})
         return commands
+
+    @staticmethod
+    def _parse_replace_id(stanza) -> str | None:
+        for replace in stanza.getTags('replace', namespace=MESSAGE_CORRECT_NS):
+            return replace.getAttr('id')
+        return None
 
     def send_text(self, to_bare_jid: str, text: str):
         # XEP-0085: marcar 'active' junto con cada mensaje
@@ -568,6 +579,7 @@ class XmppConversation(ChatBackend):
         ChatBackend.__init__(self)
         self.session = session
         self.bare_jid = bare_jid
+        self.last_incoming_id: str | None = None
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
@@ -595,18 +607,37 @@ class XmppConversation(ChatBackend):
 
     # --- Entrantes (llamados por la sesión) ---
 
-    def deliver(self, body: str, quick_responses=None, commands=None):
-        """Un mensaje del contacto: response + finished, cached."""
+    def deliver(self, body: str, quick_responses=None, commands=None,
+                correction=None):
+        """Un mensaje del contacto: response + finished, cached.
+
+        Si correction es una tupla (replace_id, stanza_id) y replace_id
+        coincide con last_incoming_id, se corrige la burbuja actual en lugar
+        de crear una nueva (XEP-0308). Si no coincide, se trata como mensaje
+        normal (degradación elegante)."""
+        if correction is not None:
+            replace_id, stanza_id = correction
+            if replace_id == self.last_incoming_id and self.last_incoming_id is not None:
+                self._deliver_correction(body)
+                return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
         history = self.session.history
         if history is not None:
             history.record_message(self.bare_jid, body, 'in', ts)
+        self.last_incoming_id = correction[1] if correction else None
         self.emit('response', body)
         if quick_responses:
             self.emit('quick-responses', quick_responses)
         if commands:
             self.emit('commands', commands)
+        self.emit('finished', True)
+
+    def _deliver_correction(self, body: str):
+        history = self.session.history
+        if history is not None:
+            history.update_last_body(self.bare_jid, body)
+        self.emit('response-correction', body)
         self.emit('finished', True)
 
     def notify_chatstate(self, chatstate: str):
@@ -640,45 +671,11 @@ class XmppConversation(ChatBackend):
         self.session.send_text(self.bare_jid, value)
         self.emit('finished', True)
 
-    def send_command(self, jid: str, node: str, name: str):
-        if not self.session.is_connected:
-            self.emit('error', _("Not connected to the XMPP server"))
-            self.emit('finished', False)
-            return
-        from datetime import datetime, timezone
-        ts = datetime.now(timezone.utc).isoformat()
-        history = self.session.history
-        if history is not None:
-            history.record_message(self.bare_jid, name, 'out', ts)
-        iq = Iq(typ='set', to=jid)
-        cmd = Node('command', attrs={
-            'xmlns': Namespace.COMMANDS,
-            'node': node,
-            'action': 'execute',
-        })
-        iq.addChild(node=cmd)
-
-        def _on_command_result(response):
-            if response.getType() == 'error':
-                error = response.getTag('error')
-                text = ''
-                if error is not None:
-                    text_elem = error.getTag('text')
-                    text = text_elem.getData() if text_elem is not None else str(error)
-                GLib.idle_add(lambda: self.emit('error', text or _("Command failed")) and False)
-                return
-            cmd_elem = response.getTag('command', namespace=Namespace.COMMANDS)
-            if cmd_elem is None:
-                return
-            note = cmd_elem.getTag('note')
-            if note is not None:
-                result_text = note.getData()
-                if result_text:
-                    GLib.idle_add(lambda: (self.emit('response', result_text),
-                                            self.emit('finished', True), False)[2])
-
-        self.session._client.send_stanza(iq, callback=_on_command_result)
-        self.emit('finished', True)
+    # send_command (legacy: solo action='execute', leía un <note> e ignoraba
+    # los formularios XEP-0004) fue retirado. Los comandos ad-hoc, tanto los
+    # del menú del agente como los inline anunciados en un mensaje, se
+    # ejecutan ahora por XmppCommandClient / _execute_agent_command en
+    # chat_window.py, que sí renderiza formularios.
 
     def cancel(self):
         pass

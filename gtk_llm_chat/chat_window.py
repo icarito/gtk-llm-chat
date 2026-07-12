@@ -412,6 +412,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._backend_handler_ids = [
                     backend.connect('ready', self._on_backend_ready),
                     backend.connect('response', self._on_llm_response),
+                    backend.connect('response-correction',
+                                    self._on_llm_response_correction),
                     backend.connect('error', self._on_llm_error),
                     backend.connect('finished', self._on_llm_finished),
                     backend.connect('state-changed', self._on_backend_state_changed),
@@ -1072,6 +1074,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         client.request_commands(on_success, on_error)
 
     def _on_agent_command_clicked(self, _button, client, command):
+        self._execute_agent_command(client, command)
+
+    def _execute_agent_command(self, client, command):
+        """Ejecuta un comando ad-hoc (XEP-0050) y maneja la respuesta:
+        si el agente devuelve un formulario (XEP-0004), lo muestra; si el
+        comando ya terminó (o no lleva datos), muestra el resultado.
+
+        Punto único usado tanto por el menú de comandos del agente como por
+        los comandos inline anunciados en un mensaje — ambos pasan por el
+        flujo con formularios, no por el viejo send_command (que los
+        ignoraba)."""
         from .xmpp_commands import (
             XmppCommandFormDialog,
             is_completed,
@@ -1393,6 +1406,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
                       self.accumulated_response)
         GLib.idle_add(self._scroll_to_bottom, False)
 
+    def _on_llm_response_correction(self, backend, body):
+        """XEP-0308 correction: reemplaza el contenido de la burbuja actual
+        en lugar de crear una nueva. Mantiene intactos los botones de
+        quick-response y commands ya anexados."""
+        if self.current_message_widget is None:
+            return
+        GLib.idle_add(self.current_message_widget.update_content, body)
+        GLib.idle_add(self._scroll_to_bottom, False)
+
     def _on_quick_responses(self, backend, responses):
         if self.current_message_widget is None:
             return
@@ -1420,14 +1442,28 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         def on_selected(command):
             name = command.get('name', '')
-            if not name:
+            node = command.get('node', '')
+            jid = command.get('jid', '')
+            if not name or not node or not jid:
                 return
             self.display_message(name, sender="user")
-            if hasattr(backend, 'send_command'):
-                backend.send_command(
-                    command.get('jid', ''),
-                    command.get('node', ''),
-                    name)
+            # Los comandos inline también pasan por el flujo ad-hoc completo
+            # (con formularios XEP-0004), no por el viejo send_command. Se
+            # arma un AdHocCommand mínimo a partir del anuncio inline.
+            session = getattr(backend, 'session', None)
+            bare_jid = getattr(backend, 'bare_jid', None)
+            if session is None or bare_jid is None:
+                return
+            from .xmpp_commands import XmppCommandClient
+            from nbxmpp.structs import AdHocCommand
+            from nbxmpp.protocol import JID
+            client = XmppCommandClient(session, bare_jid)
+            # Mantener viva la referencia: XmppCommandClient guarda callbacks
+            # pendientes y no debe recolectarse antes de que llegue la
+            # respuesta (mismo cuidado que _agent_command_client).
+            self._agent_command_client = client
+            adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
+            self._execute_agent_command(client, adhoc)
 
         self.current_message_widget.add_quick_responses(commands, on_selected)
         GLib.idle_add(self._scroll_to_bottom, False)

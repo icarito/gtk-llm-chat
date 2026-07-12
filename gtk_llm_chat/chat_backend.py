@@ -11,6 +11,9 @@ Reglas del contrato (ver specs/001-xmpp-backend/design.md):
   async de GLib y vuelve con GLib.idle_add antes de emitir señales.
 - 'response' puede emitirse muchas veces (streaming) o una sola vez
   (mensaje completo); siempre va seguida de 'finished'.
+- 'response-correction' reemplaza el contenido de la última burbuja
+  recibida en lugar de crear una nueva (XEP-0308 Last Message Correction).
+  Backends que no corrigen simplemente no la emiten.
 - 'ready' indica que el backend puede enviar mensajes (modelo cargado /
   sesión conectada); su argumento es el nombre a mostrar.
 - 'state-changed' comunica estados de conexión propios del backend
@@ -30,6 +33,7 @@ class ChatBackend(GObject.Object):
 
     __gsignals__ = {
         'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        'response-correction': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'finished': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
@@ -71,9 +75,4 @@ class ChatBackend(GObject.Object):
     def load_more_history(self):
         """Request one more page of older history, if the backend has any
         concept of history. No-op by default."""
-        pass
-
-    def send_command(self, jid: str, node: str, name: str):
-        """Execute an ad-hoc command (XEP-0050) via IQ set. No-op for
-        backends that don't support inline disco#items commands."""
         pass

@@ -87,3 +87,18 @@ class XmppHistory:
             (bare_jid,),
         ).fetchone()
         return row["timestamp"] if row else None
+
+    def update_last_body(self, bare_jid: str, body: str):
+        conn = self.get_connection()
+        latest = conn.execute(
+            "SELECT id FROM messages WHERE bare_jid = ? AND direction = 'in' "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (bare_jid,),
+        ).fetchone()
+        if latest is None:
+            return
+        conn.execute(
+            "UPDATE messages SET body = ? WHERE id = ?",
+            (body, latest["id"]),
+        )
+        conn.commit()
