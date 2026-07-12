@@ -347,6 +347,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_batch = []
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
+        self._agent_command_client = None
+        self._agent_command_client = None
         for child in list(self.messages_box):
             self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
@@ -948,6 +950,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         from .xmpp_commands import XmppCommandClient
 
         client = XmppCommandClient(self.backend.session, self.backend.bare_jid)
+        self._agent_command_client = client
 
         def on_success(commands):
             box.remove(loading)
