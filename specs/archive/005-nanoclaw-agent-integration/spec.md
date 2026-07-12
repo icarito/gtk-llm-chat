@@ -35,19 +35,19 @@ should be available from the chat window.
 
 ## Acceptance Criteria
 
-- [ ] Incoming NanoClaw questions with `<response xmlns='urn:xmpp:tmp:quick-response'>`
+- [x] Incoming NanoClaw questions with `<response xmlns='urn:xmpp:tmp:quick-response'>`
       render one button per response under the agent bubble.
-- [ ] Clicking a response sends its `value` as a normal XMPP chat message,
+- [x] Clicking a response sends its `value` as a normal XMPP chat message,
       renders the human label locally, and disables that button row.
-- [ ] Contacts with NanoClaw caps show their presence status in the roster
+- [x] Contacts with NanoClaw caps show their presence status in the roster
       and the active chat header.
-- [ ] The Agent menu appears for NanoClaw chats and can send `/compact`
+- [x] The Agent menu appears for NanoClaw chats and can send `/compact`
       or `/clear` after confirmation.
-- [ ] The Agent menu can discover ad-hoc commands from the agent full JID
+- [x] The Agent menu can discover ad-hoc commands from the agent full JID
       and execute a command, submitting a displayed data form when one is
       returned.
-- [ ] Existing LLM chats and ordinary XMPP chats continue to work unchanged.
-- [ ] A transient XMPP disconnect moves the session to reconnecting and
+- [x] Existing LLM chats and ordinary XMPP chats continue to work unchanged.
+- [x] A transient XMPP disconnect moves the session to reconnecting and
       recovers without recreating chat windows or losing signal handlers.
-- [ ] The account dialog validation does not auto-reconnect after failed
+- [x] The account dialog validation does not auto-reconnect after failed
       credentials.

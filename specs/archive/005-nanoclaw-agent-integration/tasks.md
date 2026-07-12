@@ -10,4 +10,4 @@
 - [x] Add `xmpp_commands.py` for XEP-0050 execution and simple XEP-0004 form dialogs.
 - [x] Add automatic XMPP reconnect/backoff while keeping account-dialog probes one-shot.
 - [x] Add manual XMPP reconnect/disconnect account controls.
-- [ ] Run source-level verification and manual XMPP smoke test against NanoClaw.
+- [x] Run source-level verification and manual XMPP smoke test against NanoClaw.
