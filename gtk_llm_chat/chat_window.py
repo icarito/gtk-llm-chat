@@ -81,6 +81,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_session = None
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
+        self._sticky_response_cards = []
         self.roster_sidebar = None
         self.model_sidebar = None
         self.model_options = None
@@ -108,6 +109,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_entry.set_hexpand(True)
         self.title_entry.set_text(title)
         self.title_entry.connect('activate', self._on_save_title)
+        self._title_is_user_renamed = False
 
         focus_controller = Gtk.EventControllerKey()
         focus_controller.connect("key-pressed", self._cancel_set_title)
@@ -127,6 +129,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Crear header bar
         self.header = Adw.HeaderBar()
+        self.header.set_centering_policy(Adw.CenteringPolicy.LOOSE)
         self.title_widget = Adw.WindowTitle.new(title, "")
         self.title_presence_dot = Gtk.Image.new_from_icon_name("media-record-symbolic")
         self.title_presence_dot.add_css_class("success")
@@ -135,10 +138,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_presence_dot.set_visible(False)
 
         self.header_title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.header_title_box.set_hexpand(True)
+        self.header_title_box.set_halign(Gtk.Align.START)
         self.header_title_box.set_valign(Gtk.Align.CENTER)
         self.header_title_box.append(self.title_presence_dot)
+        self.title_widget.set_hexpand(True)
+        self.title_widget.set_halign(Gtk.Align.START)
         self.header_title_box.append(self.title_widget)
-        self.header.set_title_widget(self.header_title_box)
+        self.header_title_stack = Gtk.Stack()
+        self.header_title_stack.set_hexpand(True)
+        self.header_title_stack.set_halign(Gtk.Align.START)
+        self.header_title_stack.add_named(self.header_title_box, "title")
+        self.header_title_stack.add_named(self.title_entry, "edit")
+        self.header_title_stack.set_visible_child_name("title")
+        self.header.set_title_widget(Gtk.Box())
+        self.header.pack_start(self.header_title_stack)
         self.set_title(title)  # Set window title based on initial title
 
         # Workaround de controles nativos en macOS (centralizado, con delay para asegurar renderizado)
@@ -270,7 +284,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_can_focus(False)
         style_manager.apply_to_widget(self.messages_box, "messages-container")
         scroll.set_child(self.messages_box)
-        
+
+        self.sticky_response_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.sticky_response_box.set_margin_top(6)
+        self.sticky_response_box.set_margin_start(6)
+        self.sticky_response_box.set_margin_end(6)
+        self.sticky_response_box.set_visible(False)
+
         # Área de entrada
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         input_box.add_css_class('toolbar')
@@ -305,6 +325,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         input_box.append(self.input_text)
         input_box.append(self.send_button)
         chat_content_box.append(scroll)
+        chat_content_box.append(self.sticky_response_box)
         chat_content_box.append(input_box)
 
         # Establecer el contenido principal en el split_view
@@ -385,6 +406,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
         self._agent_command_client = None
+        self._clear_sticky_response_cards()
         for child in list(self.messages_box):
             self.messages_box.remove(child)
         # Deshacer el binding show-sidebar <-> botón toggle del bind anterior;
@@ -410,6 +432,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 la ventana muestra el roster y espera selección.
         """
         self._unbind_backend()
+        self._title_is_user_renamed = False
         self._xmpp_session = xmpp_session
         self._injected_backend = backend is not None or xmpp_session is not None
 
@@ -751,6 +774,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 color: @error_color;
                 margin-right: 8px;
             }
+
+            .sticky-response-card {
+                padding: 8px;
+                border: 1px solid alpha(@theme_fg_color, 0.14);
+                background-color: @theme_base_color;
+            }
         """
         
         # Agregar estilos específicos por plataforma si es necesario
@@ -793,10 +822,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.set_title(title)  # Actualizar también el título de la ventana
 
     def _restore_header_title_widget(self):
-        self.header.set_title_widget(self.header_title_box)
+        self.header_title_stack.set_visible_child_name("title")
+
+    def begin_title_edit(self):
+        self.title_entry.set_text(self.title_widget.get_title())
+        self.header_title_stack.set_visible_child_name("edit")
+        self.title_entry.grab_focus()
 
     def _on_save_title(self, widget):
         app = self.get_application()
+        if self._injected_backend:
+            self._title_is_user_renamed = True
+            self._restore_header_title_widget()
+            new_title = self.title_entry.get_text()
+            self.title_widget.set_title(new_title)
+            self.set_title(new_title)
+            return
+
         conversation_id = self.config.get('cid')
         if conversation_id:
             self.chat_history.set_conversation_title(
@@ -909,12 +951,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
-        if keyval == Gdk.KEY_Return:
+        if self._is_composition_key(keyval, state):
+            return False
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter):
             # Permitir Shift+Enter para nuevas líneas
             if not (state & Gdk.ModifierType.SHIFT_MASK):
                 self._on_send_clicked(None)
                 return True
         return False
+
+    @staticmethod
+    def _is_composition_key(keyval, state):
+        key_name = Gdk.keyval_name(keyval) or ""
+        return (
+            key_name.startswith("dead_") or
+            keyval in (Gdk.KEY_Multi_key, Gdk.KEY_ISO_Level3_Shift)
+        )
 
     def display_message(self, content, sender="user"):
         """
@@ -1032,9 +1084,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.contact_status_label.set_label(self.backend.get_display_name())
             return
         display_name = self.backend.get_display_name()
-        self.title_widget.set_title(display_name)
+        if not self._title_is_user_renamed:
+            self.title_widget.set_title(display_name)
+            self.title_entry.set_text(display_name)
+            self.set_title(display_name)
         self.title_widget.set_subtitle("")
-        self.set_title(display_name)
         status = session.get_contact_status(bare_jid)
         presence = session.get_presence(bare_jid)
         is_online = presence == 'online'
@@ -1250,7 +1304,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if is_backfill:
             self._xmpp_backfill_remaining -= 1
         self._xmpp_history_batch = []
-        GLib.idle_add(self._scroll_to_bottom)
+        if is_backfill:
+            self._scroll_to_bottom_after_history_load()
 
     def _display_history_bubble(self, body, direction, timestamp):
         sender = "user" if direction == 'out' else "assistant"
@@ -1308,7 +1363,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._display_conversation_history(history_entries)
             
             # Asegurarse de que se haga scroll al final
-            GLib.timeout_add(100, self._scroll_to_bottom)
+            self._scroll_to_bottom_after_history_load()
             
             return False  # Ejecutar solo una vez
         except Exception as e:
@@ -1470,6 +1525,63 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content, body)
         GLib.idle_add(self._scroll_to_bottom, False)
 
+    def _add_sticky_response_card(self, responses, on_selected):
+        if not responses:
+            return
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.add_css_class("card")
+        card.add_css_class("sticky-response-card")
+        card.set_margin_start(0)
+        card.set_margin_end(0)
+
+        flow = Gtk.FlowBox()
+        flow.set_max_children_per_line(99)
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_halign(Gtk.Align.FILL)
+        flow.set_valign(Gtk.Align.START)
+        flow.add_css_class("quick-responses")
+
+        buttons = []
+
+        def handle_click(_button, response):
+            for btn in buttons:
+                btn.set_sensitive(False)
+            self._remove_sticky_response_card(card)
+            on_selected(response)
+
+        for response in responses:
+            label = response.get('label') or response.get('name') or response.get('value', '')
+            if not label:
+                continue
+            button = Gtk.Button(label=label)
+            button.add_css_class("pill")
+            button.connect("clicked", handle_click, response)
+            flow.append(button)
+            buttons.append(button)
+
+        if not buttons:
+            return
+        card.append(flow)
+        self.sticky_response_box.append(card)
+        self._sticky_response_cards.append(card)
+        self.sticky_response_box.set_visible(True)
+
+    def _remove_sticky_response_card(self, card):
+        if card in self._sticky_response_cards:
+            self._sticky_response_cards.remove(card)
+        if card.get_parent() == self.sticky_response_box:
+            self.sticky_response_box.remove(card)
+        self.sticky_response_box.set_visible(bool(self._sticky_response_cards))
+
+    def _clear_sticky_response_cards(self):
+        for card in list(getattr(self, '_sticky_response_cards', [])):
+            if card.get_parent() == self.sticky_response_box:
+                self.sticky_response_box.remove(card)
+        self._sticky_response_cards = []
+        if hasattr(self, 'sticky_response_box'):
+            self.sticky_response_box.set_visible(False)
+
     def _on_quick_responses(self, backend, responses):
         if self.current_message_widget is None:
             return
@@ -1484,12 +1596,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             label = response.get('label') or value
             if not value:
                 return
-            self.display_message(label, sender="user")
             if hasattr(backend, 'send_quick_response'):
                 backend.send_quick_response(value, label)
 
-        self.current_message_widget.add_quick_responses(responses, on_selected)
-        GLib.idle_add(self._scroll_to_bottom, False)
+        self._add_sticky_response_card(responses, on_selected)
 
     def _on_commands(self, backend, commands):
         if self.current_message_widget is None:
@@ -1501,7 +1611,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             jid = command.get('jid', '')
             if not name or not node or not jid:
                 return
-            self.display_message(name, sender="user")
             # Los comandos inline también pasan por el flujo ad-hoc completo
             # (con formularios XEP-0004), no por el viejo send_command. Se
             # arma un AdHocCommand mínimo a partir del anuncio inline.
@@ -1520,8 +1629,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
             self._execute_agent_command(client, adhoc)
 
-        self.current_message_widget.add_quick_responses(commands, on_selected)
-        GLib.idle_add(self._scroll_to_bottom, False)
+        self._add_sticky_response_card(commands, on_selected)
 
     def _on_vadj_value_changed(self, adj):
         """El usuario (o el código) movió el scroll: recordar la distancia
@@ -1570,6 +1678,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 adj.set_value(upper - page_size)
                 return False
             GLib.timeout_add(50, scroll_after)
+
+    def _scroll_to_bottom_after_history_load(self):
+        def scroll_once():
+            self._scroll_to_bottom(True)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(scroll_once)
+        for delay in (50, 150, 300):
+            GLib.timeout_add(delay, scroll_once)
 
     def _on_close_request(self, window):
         # Soltar backend/sidebar/timeout pendiente (spec 003, T7: mismo
@@ -1701,7 +1818,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(f"Excepción completa:", exc_info=True)
         
         # Scroll hasta el final cuando todos los mensajes estén en pantalla
-        GLib.idle_add(self._scroll_to_bottom)
+        self._scroll_to_bottom_after_history_load()
 
     def _on_focus_enter(self, controller):
         """Set focus to the input text when the window gains focus."""

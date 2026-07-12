@@ -2,6 +2,7 @@ import sqlite3
 import os
 import threading
 from typing import Optional
+from datetime import datetime
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -53,12 +54,13 @@ class XmppHistory:
     def record_message(self, bare_jid: str, body: str, direction: str,
                        timestamp: str, mam_id: Optional[str] = None):
         conn = self.get_connection()
-        conn.execute(
+        cursor = conn.execute(
             "INSERT OR IGNORE INTO messages (bare_jid, body, direction, timestamp, mam_id) "
             "VALUES (?, ?, ?, ?, ?)",
             (bare_jid, body, direction, timestamp, mam_id),
         )
         conn.commit()
+        return cursor.rowcount > 0
 
     def get_recent(self, bare_jid: str, limit: int = 50):
         conn = self.get_connection()
@@ -106,3 +108,36 @@ class XmppHistory:
             (body, latest["id"]),
         )
         conn.commit()
+
+    def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
+                                      timestamp: str, mam_id: str,
+                                      window_seconds: int = 30) -> bool:
+        target = self._parse_timestamp(timestamp)
+        if target is None or not mam_id:
+            return False
+        conn = self.get_connection()
+        cursor = conn.execute(
+            "SELECT id, timestamp FROM messages "
+            "WHERE bare_jid = ? AND direction = 'out' AND body = ? AND mam_id IS NULL "
+            "ORDER BY timestamp DESC LIMIT 10",
+            (bare_jid, body),
+        )
+        for row in cursor.fetchall():
+            candidate = self._parse_timestamp(row["timestamp"])
+            if candidate is None:
+                continue
+            if abs((target - candidate).total_seconds()) <= window_seconds:
+                conn.execute(
+                    "UPDATE messages SET timestamp = ?, mam_id = ? WHERE id = ?",
+                    (timestamp, mam_id, row["id"]),
+                )
+                conn.commit()
+                return True
+        return False
+
+    @staticmethod
+    def _parse_timestamp(value):
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None

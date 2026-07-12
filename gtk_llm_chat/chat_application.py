@@ -288,13 +288,40 @@ class LLMChatApplication(Adw.Application):
         backend = getattr(window, 'backend', None)
         bare_jid = getattr(backend, 'bare_jid', None)
         session = getattr(backend, 'session', None)
+        geometry = self._window_geometry(window)
         if bare_jid and session is not None:
-            return {'type': 'xmpp', 'bare_jid': bare_jid}
+            descriptor = {'type': 'xmpp', 'bare_jid': bare_jid}
+            if geometry:
+                descriptor['geometry'] = geometry
+            return descriptor
         cid = getattr(window, 'cid', None) or (window.config.get('cid')
                                                if hasattr(window, 'config') else None)
         if cid:
-            return {'type': 'llm', 'cid': cid}
+            descriptor = {'type': 'llm', 'cid': cid}
+            if geometry:
+                descriptor['geometry'] = geometry
+            return descriptor
         return None
+
+    def _window_geometry(self, window):
+        width = window.get_width() if hasattr(window, 'get_width') else 0
+        height = window.get_height() if hasattr(window, 'get_height') else 0
+        if width <= 0 or height <= 0:
+            try:
+                width, height = window.get_default_size()
+            except Exception:
+                width, height = 0, 0
+        if width <= 0 or height <= 0:
+            return None
+        return {'width': width, 'height': height}
+
+    def _window_descriptor_key(self, descriptor):
+        dtype = descriptor.get('type')
+        if dtype == 'xmpp':
+            return dtype, descriptor.get('bare_jid')
+        if dtype == 'llm':
+            return dtype, descriptor.get('cid')
+        return tuple(sorted(descriptor.items()))
 
     def _save_session_state(self):
         """Escribe los descriptores de las ventanas abiertas a disco."""
@@ -311,7 +338,7 @@ class LLMChatApplication(Adw.Application):
                 continue
             if descriptor is None:
                 continue
-            key = tuple(sorted(descriptor.items()))
+            key = self._window_descriptor_key(descriptor)
             if key in seen:
                 continue
             seen.add(key)
@@ -353,7 +380,10 @@ class LLMChatApplication(Adw.Application):
                 if dtype == 'llm':
                     cid = descriptor.get('cid')
                     if cid:
-                        self.open_conversation_window({'cid': cid})
+                        self.open_conversation_window({
+                            'cid': cid,
+                            '_window_geometry': descriptor.get('geometry'),
+                        })
                         restored += 1
                 elif dtype == 'xmpp':
                     bare_jid = descriptor.get('bare_jid')
@@ -366,7 +396,9 @@ class LLMChatApplication(Adw.Application):
                             "No hay cuenta XMPP: no se restaura la conversación "
                             f"con {bare_jid}")
                         continue
-                    self.open_xmpp_conversation(xmpp_session, bare_jid)
+                    self.open_xmpp_conversation(
+                        xmpp_session, bare_jid,
+                        window_geometry=descriptor.get('geometry'))
                     restored += 1
             except Exception as e:
                 debug_print(f"Error restaurando ventana {descriptor}: {e}")
@@ -549,6 +581,7 @@ class LLMChatApplication(Adw.Application):
         # Crear la nueva ventana con la configuración
         window = LLMChatWindow(application=self, config=config, chat_history=chat_history,
                                 backend=backend, xmpp_session=xmpp_session)
+        self._apply_window_geometry(window, config.get('_window_geometry'))
         resource_manager.set_widget_icon_name(window, "org.fuentelibre.gtk_llm_Chat")
 
         # Configurar el manejador de eventos de teclado
@@ -570,6 +603,17 @@ class LLMChatApplication(Adw.Application):
         except Exception as e:
             debug_print(f"[ERROR] Fallo al presentar la ventana: {e}")
         return window
+
+    def _apply_window_geometry(self, window, geometry):
+        if not isinstance(geometry, dict):
+            return
+        width = geometry.get('width')
+        height = geometry.get('height')
+        if not isinstance(width, int) or not isinstance(height, int):
+            return
+        if width < 320 or height < 240:
+            return
+        window.set_default_size(width, height)
 
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Maneja eventos de teclado a nivel de aplicación."""
@@ -602,8 +646,11 @@ class LLMChatApplication(Adw.Application):
     def on_rename_activate(self, action, param):
         """Renames the current conversation"""
         window = self.get_active_window()
-        window.header.set_title_widget(window.title_entry)
-        window.title_entry.grab_focus()
+        if hasattr(window, 'begin_title_edit'):
+            window.begin_title_edit()
+        else:
+            window.header.set_title_widget(window.title_entry)
+            window.title_entry.grab_focus()
 
     def on_delete_activate(self, action, param):
         """Elimina la conversación actual solo si tiene historial, si no cierra la ventana directamente."""
@@ -814,7 +861,7 @@ class LLMChatApplication(Adw.Application):
         jid, password = account
         return self._ensure_xmpp_session(jid, password)
 
-    def open_xmpp_conversation(self, session, bare_jid):
+    def open_xmpp_conversation(self, session, bare_jid, window_geometry=None):
         """Abre (o enfoca, si ya existe) la ventana de conversación con un
         contacto XMPP. Spec 002: usado tanto por el picker modal como por
         el roster sidebar."""
@@ -830,7 +877,8 @@ class LLMChatApplication(Adw.Application):
             existing.present()
             return existing
         conversation = session.get_conversation(bare_jid)
-        window = self._create_new_window_with_config({}, backend=conversation)
+        window = self._create_new_window_with_config(
+            {'_window_geometry': window_geometry}, backend=conversation)
         self._window_by_cid[key] = window
         return window
 

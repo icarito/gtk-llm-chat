@@ -1,6 +1,7 @@
 import gi
 import os
 import sys
+import re
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk
@@ -15,9 +16,16 @@ class Message:
     """
 
     def __init__(self, content, sender="user", timestamp=None):
-        self.content = content
+        self.content = self.compact_blank_lines(content)
         self.sender = sender
         self.timestamp = timestamp or datetime.now()
+
+    @staticmethod
+    def compact_blank_lines(content):
+        text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r'\n[ \t]+\n', '\n\n', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
 
 
 class ErrorWidget(Gtk.Box):
@@ -114,7 +122,7 @@ class MessageWidget(Gtk.Box):
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
-        self.content_view.set_markdown(new_content)
+        self.content_view.set_markdown(Message.compact_blank_lines(new_content))
 
     def add_quick_responses(self, responses, on_selected):
         """Adjunta botones de respuesta rápida a esta burbuja."""

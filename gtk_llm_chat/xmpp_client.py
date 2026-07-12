@@ -71,7 +71,7 @@ class XmppSession(GObject.Object):
         GObject.Object.__init__(self)
         self._jid = JID.from_string(jid)
         self._password = password
-        self._resource = resource
+        self._resource = f"{resource}-{uuid.uuid4().hex[:8]}"
         self._auto_reconnect = auto_reconnect
         self._client = None
         self._state = STATE_DISCONNECTED
@@ -453,7 +453,9 @@ class XmppSession(GObject.Object):
             mam = properties.mam
             pending = self._pending_mam_queries.get(mam.query_id)
             if pending is not None and properties.body:
-                direction = 'out' if properties.jid.bare == self._jid.bare else 'in'
+                direction = (
+                    'out' if properties.from_ is not None
+                    and properties.from_.bare == self._jid.bare else 'in')
                 # nbxmpp entrega mam.timestamp como epoch (float); lo
                 # normalizamos a ISO UTC para que en la caché conviva y
                 # ordene junto a los mensajes en vivo (que ya se guardan
@@ -762,9 +764,16 @@ class XmppConversation(ChatBackend):
         """Persiste en caché y emite a la UI cada mensaje de una página MAM."""
         history = self.session.history
         for body, direction, timestamp, mam_id in messages:
+            if (history is not None and direction == 'out' and
+                    history.attach_mam_to_recent_outgoing(
+                        self.bare_jid, body, timestamp, mam_id)):
+                continue
+            inserted = True
             if history is not None:
-                history.record_message(self.bare_jid, body, direction, timestamp, mam_id)
-            self.emit('history-message', body, direction, timestamp)
+                inserted = history.record_message(
+                    self.bare_jid, body, direction, timestamp, mam_id)
+            if inserted:
+                self.emit('history-message', body, direction, timestamp)
 
     def _on_mam_catchup_page(self, messages, complete, rsm_last):
         """Página del catch-up hacia adelante (start=). Emite lo recibido y,

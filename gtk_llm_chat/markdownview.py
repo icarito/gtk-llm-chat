@@ -140,8 +140,13 @@ class MarkdownView(Gtk.TextView):
                 self.render_markdown_fragment(fragment_text)
 
     def render_markdown_fragment(self, text):
+        text = self.normalize_compact_lists(text)
         tokens = self.md.parse(text)
         self.apply_pango_format(tokens)
+
+    def normalize_compact_lists(self, text):
+        text = re.sub(r'(?<!^)(?<!\n)(•\s+)', r'\n\1', text)
+        return re.sub(r'(?m)^(\s*)•\s+', r'\1- ', text)
 
     def apply_pango_format(self, tokens):
         for token in tokens:
@@ -235,6 +240,7 @@ class MarkdownView(Gtk.TextView):
                         self.insert_text("▪ ")
             elif token.type == 'list_item_close':
                 self.in_list_item = False
+                self.insert_line_break_if_needed()
             elif token.type == 'hr':
                 self.insert_text("\n")
                 self.apply_tag(self.hr_tag)
@@ -261,6 +267,14 @@ class MarkdownView(Gtk.TextView):
         for tag in self.current_tags:
             buf.apply_tag(tag, start, end)
         buf.delete_mark(buf.get_mark("insert_start"))
+
+    def insert_line_break_if_needed(self):
+        buf = self.buffer
+        start = buf.get_start_iter()
+        end = buf.get_end_iter()
+        if buf.get_text(start, end, True).endswith("\n"):
+            return
+        self.insert_text("\n")
 
     def insert_thinking(self, text):
         buf = self.buffer
