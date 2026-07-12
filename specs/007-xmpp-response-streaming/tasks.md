@@ -22,12 +22,12 @@
 
 ## Backend (nanoclaw repo — prerequisite, tracked here)
 
-- [ ] Surface partial agent deltas from the agent-runner (currently one
+- [x] Surface partial agent deltas from the agent-runner (currently one
       completed `messages_out` row).
-- [ ] Forward deltas host → adapter (extend the `ChannelAdapter` contract
+- [x] Forward deltas host → adapter (extend the `ChannelAdapter` contract
       with an optional streaming/correction hook, keeping `deliver`
       one-shot for non-streaming channels).
-- [ ] In the XMPP adapter, send the initial `<message>`, remember its id,
+- [x] In the XMPP adapter, send the initial `<message>`, remember its id,
       then throttle `buildCorrectionStanza(...)` with the running body;
       archive only the final body in MAM.
 
