@@ -361,6 +361,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.add_controller(focus_controller_window)
 
         self._xmpp_history_batch = None
+        self._xmpp_history_actions_batch = None
 
 
     def _unbind_backend(self):
@@ -403,6 +404,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.current_message_widget = None
         self.accumulated_response = ""
         self._xmpp_history_batch = []
+        self._xmpp_history_actions_batch = []
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
         self._agent_command_client = None
@@ -779,6 +781,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 padding: 8px;
                 border: 1px solid alpha(@theme_fg_color, 0.14);
                 background-color: @theme_base_color;
+            }
+
+            .sticky-response-detail {
+                font-size: 0.88em;
+                opacity: 0.78;
+            }
+
+            .command-result-message .message-content {
+                border-left: 3px solid alpha(@accent_color, 0.75);
             }
         """
         
@@ -1197,7 +1208,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             XmppCommandFormDialog,
             is_completed,
             next_action_for,
-            show_command_result,
         )
 
         def on_error(message):
@@ -1205,10 +1215,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         def handle_result(result):
             if is_completed(result):
-                show_command_result(self, result)
+                self._display_command_result(result)
                 return
             if result.data is None:
-                show_command_result(self, result)
+                self._display_command_result(result)
                 return
 
             def on_submit(dataform):
@@ -1219,6 +1229,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
             XmppCommandFormDialog(self, result, on_submit).present()
 
         client.execute(command, handle_result, on_error)
+
+    def _display_command_result(self, command):
+        from .xmpp_commands import command_result_body
+        title = command.name or _("Agent Command")
+        body = command_result_body(command)
+        message = Message(f"**{title}**\n\n{body}", "assistant")
+        widget = MessageWidget(message)
+        widget.add_css_class("command-result-message")
+        self.messages_box.append(widget)
+        GLib.idle_add(self._scroll_to_bottom, False)
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
@@ -1280,18 +1300,27 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._history_displayed = False
             self._xmpp_backfill_remaining = 2
             self._xmpp_history_batch = []
+            self._xmpp_history_actions_batch = []
             hid1 = backend.connect('history-message', self._on_xmpp_history_message)
             hid2 = backend.connect('history-complete', self._on_xmpp_history_complete)
+            hid3 = backend.connect('history-actions', self._on_xmpp_history_actions)
             self._backend_handler_ids.append(hid1)
             self._backend_handler_ids.append(hid2)
+            self._backend_handler_ids.append(hid3)
             GLib.idle_add(lambda: (backend.load_history_from_cache(),
                                     backend.load_history_from_mam(), GLib.SOURCE_REMOVE)[2])
 
     def _on_xmpp_history_message(self, backend, body, direction, timestamp):
         self._xmpp_history_batch.append((body, direction, timestamp))
 
+    def _on_xmpp_history_actions(self, backend, body, timestamp,
+                                 quick_responses, commands):
+        self._xmpp_history_actions_batch.append(
+            (body, timestamp, quick_responses, commands))
+
     def _on_xmpp_history_complete(self, backend, has_more):
         batch = self._xmpp_history_batch
+        action_batch = self._xmpp_history_actions_batch
         is_backfill = self._xmpp_backfill_remaining > 0
         if batch:
             if is_backfill:
@@ -1301,11 +1330,49 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 for body, direction, timestamp in reversed(batch):
                     self._prepend_history_bubble(body, direction, timestamp)
             self._history_displayed = True
+        for body, timestamp, quick_responses, commands in action_batch:
+            self._restore_history_actions(body, timestamp, quick_responses, commands)
         if is_backfill:
             self._xmpp_backfill_remaining -= 1
         self._xmpp_history_batch = []
+        self._xmpp_history_actions_batch = []
         if is_backfill:
             self._scroll_to_bottom_after_history_load()
+
+    def _restore_history_actions(self, body, timestamp, quick_responses, _commands):
+        if quick_responses and not self._history_quick_response_was_answered(
+                timestamp, quick_responses):
+            self._add_sticky_response_card(
+                quick_responses,
+                lambda response: self._send_restored_quick_response(response),
+                detail_text=Message.compact_blank_lines(body))
+
+    def _history_quick_response_was_answered(self, timestamp, quick_responses):
+        request_dt = self._parse_history_ts(timestamp)
+        if request_dt is None:
+            return False
+        values = {
+            response.get('value', '')
+            for response in quick_responses
+            if response.get('value')
+        }
+        if not values:
+            return False
+        if hasattr(self.backend, 'quick_response_was_answered'):
+            return self.backend.quick_response_was_answered(timestamp, values)
+        for body, direction, msg_timestamp in self._xmpp_history_batch:
+            if direction != 'out' or body not in values:
+                continue
+            msg_dt = self._parse_history_ts(msg_timestamp)
+            if msg_dt is not None and msg_dt > request_dt:
+                return True
+        return False
+
+    def _send_restored_quick_response(self, response):
+        value = response.get('value', '')
+        label = response.get('label') or value
+        if value and hasattr(self.backend, 'send_quick_response'):
+            self.backend.send_quick_response(value, label)
 
     def _display_history_bubble(self, body, direction, timestamp):
         sender = "user" if direction == 'out' else "assistant"
@@ -1570,7 +1637,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content, body)
         GLib.idle_add(self._scroll_to_bottom, False)
 
-    def _add_sticky_response_card(self, responses, on_selected):
+    def _add_sticky_response_card(self, responses, on_selected, detail_text=None):
         if not responses:
             return
 
@@ -1579,6 +1646,43 @@ class LLMChatWindow(Adw.ApplicationWindow):
         card.add_css_class("sticky-response-card")
         card.set_margin_start(0)
         card.set_margin_end(0)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.set_halign(Gtk.Align.FILL)
+        title = Gtk.Label(label=_("Response needed"))
+        title.add_css_class("caption-heading")
+        title.set_xalign(0)
+        title.set_hexpand(True)
+        header.append(title)
+        if detail_text:
+            info_button = Gtk.MenuButton()
+            info_button.add_css_class("flat")
+            info_button.set_tooltip_text(_("Show question context"))
+            info_button.set_child(
+                resource_manager.create_icon_widget("dialog-information-symbolic"))
+            popover = Gtk.Popover()
+            detail = Gtk.Label(label=detail_text)
+            detail.set_wrap(True)
+            detail.set_xalign(0)
+            detail.set_selectable(True)
+            detail.set_max_width_chars(72)
+            detail.set_margin_top(10)
+            detail.set_margin_bottom(10)
+            detail.set_margin_start(10)
+            detail.set_margin_end(10)
+            popover.set_child(detail)
+            info_button.set_popover(popover)
+            header.append(info_button)
+        card.append(header)
+        if detail_text:
+            preview = Gtk.Label(label=self._sticky_detail_preview(detail_text))
+            preview.add_css_class("sticky-response-detail")
+            preview.set_xalign(0)
+            preview.set_wrap(True)
+            preview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            preview.set_lines(2)
+            preview.set_ellipsize(Pango.EllipsizeMode.END)
+            card.append(preview)
 
         flow = Gtk.FlowBox()
         flow.set_max_children_per_line(99)
@@ -1612,6 +1716,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._sticky_response_cards.append(card)
         self.sticky_response_box.set_visible(True)
 
+    @staticmethod
+    def _sticky_detail_preview(detail_text, max_chars=160):
+        text = Message.compact_blank_lines(detail_text).replace("\n", " ")
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars].rstrip()}..."
+
     def _remove_sticky_response_card(self, card):
         if card in self._sticky_response_cards:
             self._sticky_response_cards.remove(card)
@@ -1626,6 +1737,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._sticky_response_cards = []
         if hasattr(self, 'sticky_response_box'):
             self.sticky_response_box.set_visible(False)
+
+    def _current_agent_message_text(self):
+        message = getattr(self.current_message_widget, 'message', None)
+        if message is None:
+            return ""
+        return Message.compact_blank_lines(message.content)
 
     def _on_quick_responses(self, backend, responses):
         if self.current_message_widget is None:
@@ -1644,7 +1761,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if hasattr(backend, 'send_quick_response'):
                 backend.send_quick_response(value, label)
 
-        self._add_sticky_response_card(responses, on_selected)
+        self._add_sticky_response_card(
+            responses, on_selected,
+            detail_text=self._current_agent_message_text())
 
     def _on_commands(self, backend, commands):
         if self.current_message_widget is None:
@@ -1674,7 +1793,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
             self._execute_agent_command(client, adhoc)
 
-        self._add_sticky_response_card(commands, on_selected)
+        self._add_sticky_response_card(
+            commands, on_selected,
+            detail_text=self._current_agent_message_text())
 
     def _on_vadj_value_changed(self, adj):
         """El usuario (o el código) movió el scroll: recordar la distancia

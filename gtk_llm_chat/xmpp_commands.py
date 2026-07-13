@@ -201,7 +201,7 @@ class XmppCommandFormDialog(Adw.Window):
         self.close()
 
 
-def show_command_result(parent, command):
+def command_result_body(command):
     parts = []
     for note in command.notes or []:
         if note.text:
@@ -215,7 +215,11 @@ def show_command_result(parent, command):
                     parts.append(f"{field.label}: {value}")
         except Exception as err:
             debug_print(f"show_command_result: {err}")
-    body = "\n".join(parts) or _("Command completed.")
+    return "\n".join(parts) or _("Command completed.")
+
+
+def show_command_result(parent, command):
+    body = command_result_body(command)
     dialog = Adw.MessageDialog(
         transient_for=parent,
         modal=True,

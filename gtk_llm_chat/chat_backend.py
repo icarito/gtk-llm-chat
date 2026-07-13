@@ -43,6 +43,8 @@ class ChatBackend(GObject.Object):
         'commands': (GObject.SignalFlags.RUN_LAST, None, (object,)),
         'history-message': (GObject.SignalFlags.RUN_LAST, None,
                             (str, str, str)),
+        'history-actions': (GObject.SignalFlags.RUN_LAST, None,
+                            (str, str, object, object)),
         'history-complete': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
 

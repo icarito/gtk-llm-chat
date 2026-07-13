@@ -464,8 +464,10 @@ class XmppSession(GObject.Object):
                 from datetime import datetime, timezone
                 ts = datetime.fromtimestamp(
                     mam.timestamp, timezone.utc).isoformat()
+                quick_responses = self._parse_quick_responses(_stanza)
+                commands = self._parse_inline_commands(_stanza)
                 pending['buffer'].append(
-                    (properties.body, direction, ts, mam.id))
+                    (properties.body, direction, ts, mam.id, quick_responses, commands))
             return
 
         if properties.has_chatstate and conversation is not None:
@@ -626,7 +628,9 @@ class XmppConversation(ChatBackend):
         ts = datetime.now(timezone.utc).isoformat()
         history = self.session.history
         if history is not None:
-            history.record_message(self.bare_jid, body, 'in', ts)
+            history.record_message(
+                self.bare_jid, body, 'in', ts,
+                quick_responses=quick_responses, commands=commands)
         self.last_incoming_id = correction[1] if correction else None
         self.emit('response', body)
         if quick_responses:
@@ -692,6 +696,12 @@ class XmppConversation(ChatBackend):
         state = 'composing' if is_composing else 'active'
         self.session.send_chatstate(self.bare_jid, state)
 
+    def quick_response_was_answered(self, timestamp: str, values) -> bool:
+        history = self.session.history
+        if history is None:
+            return False
+        return history.has_outgoing_after(self.bare_jid, timestamp, values)
+
     # --- History (spec 004) ---
 
     def load_history_from_cache(self):
@@ -705,6 +715,10 @@ class XmppConversation(ChatBackend):
             return
         for msg in messages:
             self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+            if msg.get('quick_responses') or msg.get('commands'):
+                self.emit(
+                    'history-actions', msg['body'], msg['timestamp'],
+                    msg.get('quick_responses', []), msg.get('commands', []))
         self._history_shown_from = messages[0]['timestamp']
         self.emit('history-complete', True)
 
@@ -726,24 +740,22 @@ class XmppConversation(ChatBackend):
             return False
         history = self.session.history
         latest = history.get_latest_timestamp(self.bare_jid) if history else None
-        # start= es inclusivo en XEP-0313; arrancar 1µs después del último
-        # mensaje cacheado para no volver a traer ese mismo mensaje (que
-        # además pudo entrar en vivo con mam_id NULL, sin deduplicar).
-        start_ts = self._next_timestamp(latest)
+        # Solapamos unas horas hacia atrás para recuperar metadata no
+        # guardada antes (quick responses / comandos) en mensajes que ya
+        # estaban cacheados. La deduplicación evita repintar burbujas.
+        start_ts = self._overlap_timestamp(latest)
         self._mam_catchup_start = start_ts
         self._pending_mam_queryid = self.session.query_mam(
             self.bare_jid, start=start_ts, callback=self._on_mam_catchup_page)
         return self._pending_mam_queryid is not None
 
     @staticmethod
-    def _next_timestamp(iso_value):
-        """ISO justo después del dado (para un start= exclusivo). None si no
-        hay valor."""
+    def _overlap_timestamp(iso_value, hours=6):
         dt = XmppSession._parse_iso(iso_value)
         if dt is None:
             return None
         from datetime import timedelta
-        return (dt + timedelta(microseconds=1)).isoformat()
+        return (dt - timedelta(hours=hours)).isoformat()
 
     def load_more_history(self):
         history = self.session.history
@@ -753,6 +765,10 @@ class XmppConversation(ChatBackend):
         if older:
             for msg in older:
                 self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+                if msg.get('quick_responses') or msg.get('commands'):
+                    self.emit(
+                        'history-actions', msg['body'], msg['timestamp'],
+                        msg.get('quick_responses', []), msg.get('commands', []))
             self._history_shown_from = older[0]['timestamp']
             self.emit('history-complete', True)
             return
@@ -763,17 +779,28 @@ class XmppConversation(ChatBackend):
     def _record_and_emit(self, messages):
         """Persiste en caché y emite a la UI cada mensaje de una página MAM."""
         history = self.session.history
-        for body, direction, timestamp, mam_id in messages:
-            if (history is not None and direction == 'out' and
-                    history.attach_mam_to_recent_outgoing(
-                        self.bare_jid, body, timestamp, mam_id)):
+        for item in messages:
+            body, direction, timestamp, mam_id = item[:4]
+            quick_responses = item[4] if len(item) > 4 else []
+            commands = item[5] if len(item) > 5 else []
+            if (history is not None and
+                    history.attach_mam_to_recent_message(
+                        self.bare_jid, body, direction, timestamp, mam_id,
+                        quick_responses=quick_responses, commands=commands)):
                 continue
             inserted = True
             if history is not None:
                 inserted = history.record_message(
-                    self.bare_jid, body, direction, timestamp, mam_id)
+                    self.bare_jid, body, direction, timestamp, mam_id,
+                    quick_responses=quick_responses, commands=commands)
             if inserted:
                 self.emit('history-message', body, direction, timestamp)
+                if quick_responses or commands:
+                    self.emit(
+                        'history-actions', body, timestamp, quick_responses, commands)
+            elif quick_responses or commands:
+                self.emit(
+                    'history-actions', body, timestamp, quick_responses, commands)
 
     def _on_mam_catchup_page(self, messages, complete, rsm_last):
         """Página del catch-up hacia adelante (start=). Emite lo recibido y,

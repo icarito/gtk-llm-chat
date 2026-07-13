@@ -63,6 +63,7 @@ class MessageWidget(Gtk.Box):
 
     def __init__(self, message):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        self.message = message
 
         # Import MarkdownView here
         from .markdownview import MarkdownView
@@ -122,7 +123,8 @@ class MessageWidget(Gtk.Box):
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
-        self.content_view.set_markdown(Message.compact_blank_lines(new_content))
+        self.message.content = Message.compact_blank_lines(new_content)
+        self.content_view.set_markdown(self.message.content)
 
     def add_quick_responses(self, responses, on_selected):
         """Adjunta botones de respuesta rápida a esta burbuja."""
