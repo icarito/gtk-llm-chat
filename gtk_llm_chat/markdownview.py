@@ -187,6 +187,8 @@ class MarkdownView(Gtk.TextView):
                 for child in token.children:
                     if child.type == 'text':
                         self.insert_text(child.content)
+                    elif child.type in ('softbreak', 'hardbreak'):
+                        self.insert_text("\n")
                     elif child.type == 'em_open':
                         self.apply_tag(self.italic_tag)
                     elif child.type == 'em_close':

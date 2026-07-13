@@ -37,7 +37,8 @@ STATE_CONNECTED = 'connected'
 
 RESOURCE = 'gtk-llm-chat'
 NANOCLAW_CAPS_NODE = 'https://github.com/nanocoai/nanoclaw'
-QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
+QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
+LEGACY_QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
 MESSAGE_CORRECT_NS = 'urn:xmpp:message-correct:0'
 
 
@@ -489,11 +490,19 @@ class XmppSession(GObject.Object):
 
     def _parse_quick_responses(self, stanza) -> list[dict[str, str]]:
         responses = []
-        for child in stanza.getTags('response', namespace=QUICK_RESPONSE_NS):
-            value = child.getAttr('value')
-            label = child.getAttr('label') or value
-            if value and label:
-                responses.append({'value': value, 'label': label})
+        for namespace in (QUICK_RESPONSE_NS, LEGACY_QUICK_RESPONSE_NS):
+            for child in stanza.getTags('response', namespace=namespace):
+                value = child.getAttr('value')
+                label = child.getAttr('label') or value
+                if value and label:
+                    responses.append({'value': value, 'label': label})
+            for reference in stanza.getTags('reference', namespace=namespace):
+                if reference.getAttr('type') != 'action':
+                    continue
+                for body in reference.getTags('body'):
+                    value = body.getData()
+                    if value:
+                        responses.append({'value': value, 'label': value})
         return responses
 
     def _parse_inline_commands(self, stanza) -> list[dict[str, str]]:
@@ -705,11 +714,14 @@ class XmppConversation(ChatBackend):
     # --- History (spec 004) ---
 
     def load_history_from_cache(self):
+        self._emit_history_from_cache(verified_only=False)
+
+    def _emit_history_from_cache(self, verified_only: bool):
         history = self.session.history
         if history is None:
             self.emit('history-complete', False)
             return
-        messages = history.get_recent(self.bare_jid)
+        messages = history.get_recent(self.bare_jid, verified_only=verified_only)
         if not messages:
             self.emit('history-complete', False)
             return
@@ -750,7 +762,7 @@ class XmppConversation(ChatBackend):
         return self._pending_mam_queryid is not None
 
     @staticmethod
-    def _overlap_timestamp(iso_value, hours=6):
+    def _overlap_timestamp(iso_value, hours=24 * 7):
         dt = XmppSession._parse_iso(iso_value)
         if dt is None:
             return None

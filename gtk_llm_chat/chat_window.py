@@ -82,6 +82,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
         self._sticky_response_cards = []
+        self._sticky_response_items = []
+        self._sticky_response_next_id = 0
+        self._approval_bypass_updating = False
         self.roster_sidebar = None
         self.model_sidebar = None
         self.model_options = None
@@ -164,6 +167,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             GLib.idle_add(_apply_native_controls)
 
         # --- Barra de estado XMPP: mantiene el headerbar solo para título y acciones. ---
+        self.xmpp_toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.xmpp_toolbar.set_visible(self._injected_backend)
+
         self.xmpp_status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.xmpp_status_bar.add_css_class("toolbar")
         self.xmpp_status_bar.add_css_class("flat")
@@ -188,6 +194,53 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self.xmpp_status_bar.append(self.connection_status_label)
         self.xmpp_status_bar.append(self.contact_status_label)
+
+        self.xmpp_controls_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.xmpp_controls_bar.add_css_class("toolbar")
+        self.xmpp_controls_bar.add_css_class("flat")
+        self.xmpp_controls_bar.set_margin_start(12)
+        self.xmpp_controls_bar.set_margin_end(12)
+        self.xmpp_controls_bar.set_margin_bottom(4)
+
+        self.agent_options_button = Gtk.MenuButton()
+        self.agent_options_button.add_css_class("flat")
+        self.agent_options_button.set_tooltip_text(_("Agent controls"))
+        self.agent_options_button.set_child(
+            resource_manager.create_icon_widget("emblem-system-symbolic"))
+        self.agent_options_popover = Gtk.Popover()
+        agent_options_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        agent_options_box.set_margin_top(10)
+        agent_options_box.set_margin_bottom(10)
+        agent_options_box.set_margin_start(10)
+        agent_options_box.set_margin_end(10)
+        self.approval_bypass_toggle = Gtk.ToggleButton(label=_("Approval bypass"))
+        self.approval_bypass_toggle.add_css_class("flat")
+        self.approval_bypass_toggle.set_tooltip_text(
+            _("Temporarily auto-approve agent approval requests"))
+        self.approval_bypass_toggle.connect("toggled", self._on_approval_bypass_toggled)
+        self.approval_bypass_toggle.set_sensitive(False)
+        agent_options_box.append(self.approval_bypass_toggle)
+        self.agent_options_popover.set_child(agent_options_box)
+        self.agent_options_button.set_popover(self.agent_options_popover)
+        self.agent_options_button.set_sensitive(False)
+        self.xmpp_controls_bar.append(self.agent_options_button)
+
+        self.agent_activity_label = Gtk.Label()
+        self.agent_activity_label.add_css_class("caption")
+        self.agent_activity_label.set_xalign(0)
+        self.agent_activity_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.agent_activity_label.set_hexpand(True)
+        self.xmpp_controls_bar.append(self.agent_activity_label)
+
+        self.agent_context_label = Gtk.Label()
+        self.agent_context_label.add_css_class("caption")
+        self.agent_context_label.add_css_class("dim-label")
+        self.agent_context_label.set_xalign(1)
+        self.agent_context_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.xmpp_controls_bar.append(self.agent_context_label)
+
+        self.xmpp_toolbar.append(self.xmpp_status_bar)
+        self.xmpp_toolbar.append(self.xmpp_controls_bar)
 
         # --- Botones de la Header Bar ---
         # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
@@ -342,7 +395,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # El contenedor principal ahora incluye la HeaderBar y el SplitView
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root_box.append(self.header)
-        root_box.append(self.xmpp_status_bar)
+        root_box.append(self.xmpp_toolbar)
         root_box.append(self.split_view) # Añadir el split_view aquí
 
         # Establecer el contenido de la ventana
@@ -442,6 +495,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # backend; se actualiza aquí porque puede cambiar entre llamadas
         # (p.ej. una ventana XMPP vacía nunca pasa a modo LLM en la práctica,
         # pero el flag sí puede alternar entre "sin contacto" y "con contacto").
+        self.xmpp_toolbar.set_visible(self._injected_backend)
         self.xmpp_status_bar.set_visible(self._injected_backend)
         self.sidebar_button.set_visible(False)
         self.roster_button.set_visible(True)
@@ -783,6 +837,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 background-color: @theme_base_color;
             }
 
+            .sticky-response-count {
+                font-weight: bold;
+            }
+
+            .sticky-response-popover-row {
+                padding: 8px;
+                border-bottom: 1px solid alpha(@theme_fg_color, 0.08);
+            }
+
             .sticky-response-detail {
                 font-size: 0.88em;
                 opacity: 0.78;
@@ -1093,6 +1156,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.title_widget.set_subtitle("")
             self.title_presence_dot.set_visible(False)
             self.contact_status_label.set_label(self.backend.get_display_name())
+            self._update_agent_controls(False)
+            self._update_agent_state_chips("")
             return
         display_name = self.backend.get_display_name()
         if not self._title_is_user_renamed:
@@ -1105,7 +1170,51 @@ class LLMChatWindow(Adw.ApplicationWindow):
         is_online = presence == 'online'
         self.title_presence_dot.set_visible(is_online)
         presence_label = _("Online") if is_online else _("Offline")
-        self.contact_status_label.set_label(f"{bare_jid} - {status or presence_label}")
+        display_status = status or presence_label
+        self.contact_status_label.set_label(bare_jid)
+        self.contact_status_label.set_tooltip_text(display_status)
+        self._update_agent_state_chips(display_status)
+        self._update_agent_controls(session.is_agent_contact(bare_jid))
+
+    def _update_agent_controls(self, is_agent):
+        if not hasattr(self, 'approval_bypass_toggle'):
+            return
+        self.approval_bypass_toggle.set_sensitive(bool(is_agent))
+        self.agent_options_button.set_sensitive(bool(is_agent))
+
+    def _update_agent_state_chips(self, status):
+        if not hasattr(self, 'agent_activity_label'):
+            return
+        parts = [part.strip() for part in str(status or "").split("|") if part.strip()]
+        activity = self._friendly_agent_activity(parts[0] if parts else "")
+        details = " | ".join(parts[1:])
+        self.agent_activity_label.set_label(activity)
+        self.agent_activity_label.set_tooltip_text(str(status or ""))
+        self.agent_context_label.set_label(details)
+        self.agent_context_label.set_tooltip_text(details)
+        lower = str(status or "").lower()
+        if "bypass de aprobaciones: activo" in lower or "approval bypass: active" in lower:
+            self._approval_bypass_updating = True
+            self.approval_bypass_toggle.set_active(True)
+            self._approval_bypass_updating = False
+        elif "bypass de aprobaciones: apagado" in lower or "approval bypass: off" in lower:
+            self._approval_bypass_updating = True
+            self.approval_bypass_toggle.set_active(False)
+            self._approval_bypass_updating = False
+
+    @staticmethod
+    def _friendly_agent_activity(activity):
+        text = str(activity or "").strip()
+        lower = text.lower()
+        if lower == "processing":
+            return _("Trabajando")
+        if lower == "available":
+            return _("Disponible")
+        if lower == "waiting":
+            return _("En espera")
+        if lower.startswith("tool:"):
+            return _("Usando herramienta: ") + text.split(":", 1)[1].strip()
+        return text
 
     def _refresh_agent_menu(self):
         if self.backend is None:
@@ -1145,6 +1254,61 @@ class LLMChatWindow(Adw.ApplicationWindow):
         popover.set_child(box)
         self.agent_menu_button.set_popover(popover)
         self._load_agent_commands(box, loading)
+
+    def _on_approval_bypass_toggled(self, button):
+        if self._approval_bypass_updating:
+            return
+        mode = 'activar' if button.get_active() else 'apagar'
+        self._run_approval_bypass_command(mode)
+
+    def _run_approval_bypass_command(self, mode):
+        if self.backend is None:
+            return
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            return
+
+        from .xmpp_commands import XmppCommandClient, next_action_for
+        from nbxmpp.modules.dataforms import SimpleDataForm, create_field
+
+        client = XmppCommandClient(session, bare_jid)
+        self._agent_command_client = client
+
+        def revert_toggle():
+            self._approval_bypass_updating = True
+            self.approval_bypass_toggle.set_active(not self.approval_bypass_toggle.get_active())
+            self._approval_bypass_updating = False
+
+        def on_error(message):
+            revert_toggle()
+            self._on_llm_error(self.backend, message)
+
+        def submit_bypass_form(result):
+            fields = [
+                create_field('list-single', var='mode', value='on' if mode == 'activar' else 'off'),
+                create_field('text-single', var='minutes', value='15'),
+            ]
+            dataform = SimpleDataForm(type_='submit', fields=fields)
+
+            def on_done(done):
+                self.connection_status_label.set_label(_("Approval bypass updated"))
+                GLib.timeout_add_seconds(3, self._restore_connection_status)
+
+            client.execute(
+                result, on_done, on_error,
+                action=next_action_for(result), dataform=dataform)
+
+        def on_commands(commands):
+            command = next((cmd for cmd in commands
+                            if getattr(cmd, 'node', '') == 'approval-bypass'), None)
+            if command is None:
+                revert_toggle()
+                self._on_llm_error(self.backend, _("Agent does not expose approval-bypass."))
+                return
+            client.execute(command, submit_bypass_form, on_error)
+
+        client.request_commands(on_commands, on_error)
 
     def _confirm_agent_text_command(self, heading, body, command, destructive=False):
         dialog = Adw.MessageDialog(
@@ -1307,8 +1471,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._backend_handler_ids.append(hid1)
             self._backend_handler_ids.append(hid2)
             self._backend_handler_ids.append(hid3)
-            GLib.idle_add(lambda: (backend.load_history_from_cache(),
-                                    backend.load_history_from_mam(), GLib.SOURCE_REMOVE)[2])
+            def load_initial_history():
+                backend.load_history_from_cache()
+                if not backend.load_history_from_mam():
+                    self._xmpp_backfill_remaining -= 1
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(load_initial_history)
 
     def _on_xmpp_history_message(self, backend, body, direction, timestamp):
         self._xmpp_history_batch.append((body, direction, timestamp))
@@ -1641,6 +1810,28 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not responses:
             return
 
+        item = {
+            'id': self._sticky_response_next_id,
+            'responses': list(responses),
+            'on_selected': on_selected,
+            'detail_text': detail_text or "",
+        }
+        self._sticky_response_next_id += 1
+        self._sticky_response_items.insert(0, item)
+        self._rebuild_sticky_response_box()
+
+    def _rebuild_sticky_response_box(self):
+        for child in list(self.sticky_response_box):
+            self.sticky_response_box.remove(child)
+        if not self._sticky_response_items:
+            self.sticky_response_box.set_visible(False)
+            return
+
+        item = self._sticky_response_items[0]
+        responses = item['responses']
+        detail_text = item.get('detail_text') or ""
+        count = len(self._sticky_response_items)
+
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
         card.add_css_class("sticky-response-card")
@@ -1649,11 +1840,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header.set_halign(Gtk.Align.FILL)
-        title = Gtk.Label(label=_("Response needed"))
+        title_text = _("Response needed")
+        if count > 1:
+            title_text = _("Response needed") + f" ({count})"
+        title = Gtk.Label(label=title_text)
         title.add_css_class("caption-heading")
         title.set_xalign(0)
         title.set_hexpand(True)
         header.append(title)
+        if count > 1:
+            counter = Gtk.MenuButton()
+            counter.add_css_class("flat")
+            counter.set_tooltip_text(_("Show pending responses"))
+            counter_child = Gtk.Label(label=str(count))
+            counter_child.add_css_class("sticky-response-count")
+            counter.set_child(counter_child)
+            popover = Gtk.Popover()
+            popover.set_child(self._build_sticky_response_popover())
+            counter.set_popover(popover)
+            header.append(counter)
         if detail_text:
             info_button = Gtk.MenuButton()
             info_button.add_css_class("flat")
@@ -1696,8 +1901,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         def handle_click(_button, response):
             for btn in buttons:
                 btn.set_sensitive(False)
-            self._remove_sticky_response_card(card)
-            on_selected(response)
+            self._remove_sticky_response_item(item['id'])
+            item['on_selected'](response)
 
         for response in responses:
             label = response.get('label') or response.get('name') or response.get('value', '')
@@ -1713,8 +1918,55 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         card.append(flow)
         self.sticky_response_box.append(card)
-        self._sticky_response_cards.append(card)
         self.sticky_response_box.set_visible(True)
+
+    def _build_sticky_response_popover(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        for index, item in enumerate(self._sticky_response_items, start=1):
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            row.add_css_class("sticky-response-popover-row")
+            title = Gtk.Label(label=_("Pending response") + f" {index}")
+            title.add_css_class("caption-heading")
+            title.set_xalign(0)
+            row.append(title)
+            detail_text = item.get('detail_text') or ""
+            if detail_text:
+                preview = Gtk.Label(label=self._sticky_detail_preview(detail_text, max_chars=220))
+                preview.set_xalign(0)
+                preview.set_wrap(True)
+                preview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                preview.add_css_class("sticky-response-detail")
+                row.append(preview)
+            flow = Gtk.FlowBox()
+            flow.set_max_children_per_line(99)
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_halign(Gtk.Align.FILL)
+            flow.add_css_class("quick-responses")
+            buttons = []
+
+            def handle_click(_button, response, current_item=item, current_buttons=buttons):
+                for btn in current_buttons:
+                    btn.set_sensitive(False)
+                self._remove_sticky_response_item(current_item['id'])
+                current_item['on_selected'](response)
+
+            for response in item['responses']:
+                label = response.get('label') or response.get('name') or response.get('value', '')
+                if not label:
+                    continue
+                button = Gtk.Button(label=label)
+                button.add_css_class("pill")
+                button.connect("clicked", handle_click, response)
+                flow.append(button)
+                buttons.append(button)
+            if buttons:
+                row.append(flow)
+            box.append(row)
+        return box
 
     @staticmethod
     def _sticky_detail_preview(detail_text, max_chars=160):
@@ -1723,18 +1975,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return text
         return f"{text[:max_chars].rstrip()}..."
 
-    def _remove_sticky_response_card(self, card):
-        if card in self._sticky_response_cards:
-            self._sticky_response_cards.remove(card)
-        if card.get_parent() == self.sticky_response_box:
-            self.sticky_response_box.remove(card)
-        self.sticky_response_box.set_visible(bool(self._sticky_response_cards))
+    def _remove_sticky_response_item(self, item_id):
+        self._sticky_response_items = [
+            item for item in self._sticky_response_items
+            if item.get('id') != item_id
+        ]
+        self._rebuild_sticky_response_box()
 
     def _clear_sticky_response_cards(self):
-        for card in list(getattr(self, '_sticky_response_cards', [])):
-            if card.get_parent() == self.sticky_response_box:
-                self.sticky_response_box.remove(card)
+        for child in list(self.sticky_response_box):
+            self.sticky_response_box.remove(child)
         self._sticky_response_cards = []
+        self._sticky_response_items = []
         if hasattr(self, 'sticky_response_box'):
             self.sticky_response_box.set_visible(False)
 

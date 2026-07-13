@@ -98,12 +98,13 @@ class XmppHistory:
         conn.commit()
         return cursor.rowcount > 0
 
-    def get_recent(self, bare_jid: str, limit: int = 50):
+    def get_recent(self, bare_jid: str, limit: int = 50, verified_only: bool = False):
         conn = self.get_connection()
+        verified_clause = "AND mam_id IS NOT NULL " if verified_only else ""
         cursor = conn.execute(
             "SELECT body, direction, timestamp, quick_responses, commands FROM ("
             "SELECT body, direction, timestamp, quick_responses, commands FROM messages "
-            "WHERE bare_jid = ? ORDER BY timestamp DESC LIMIT ?"
+            f"WHERE bare_jid = ? {verified_clause}ORDER BY timestamp DESC LIMIT ?"
             ") ORDER BY timestamp ASC",
             (bare_jid, limit),
         )
