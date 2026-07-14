@@ -1185,9 +1185,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _update_agent_state_chips(self, status):
         if not hasattr(self, 'agent_activity_label'):
             return
-        parts = [part.strip() for part in str(status or "").split("|") if part.strip()]
-        activity = self._friendly_agent_activity(parts[0] if parts else "")
-        details = " | ".join(parts[1:])
+        parsed = self._parse_agent_status(status)
+        activity = self._friendly_agent_activity(parsed.get('activity', ''))
+        details = self._format_agent_status_details(parsed)
         self.agent_activity_label.set_label(activity)
         self.agent_activity_label.set_tooltip_text(str(status or ""))
         self.agent_context_label.set_label(details)
@@ -1201,6 +1201,136 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._approval_bypass_updating = True
             self.approval_bypass_toggle.set_active(False)
             self._approval_bypass_updating = False
+
+    @classmethod
+    def _parse_agent_status(cls, status):
+        text = str(status or "").strip()
+        parsed = {'activity': text}
+        if not text:
+            return parsed
+        json_text = text
+        if json_text.startswith("nanoclaw:"):
+            json_text = json_text.split(":", 1)[1].strip()
+        if json_text.startswith("{"):
+            try:
+                data = json.loads(json_text)
+                if isinstance(data, dict):
+                    return cls._normalize_agent_status_dict(data, fallback=text)
+            except (TypeError, ValueError):
+                pass
+        parts = [part.strip() for part in re.split(r"\s*\|\s*", text) if part.strip()]
+        if parts:
+            parsed['activity'] = parts[0]
+        for part in parts[1:]:
+            cls._parse_agent_status_part(part, parsed)
+        return parsed
+
+    @classmethod
+    def _normalize_agent_status_dict(cls, data, fallback=""):
+        parsed = {'activity': data.get('activity') or data.get('state') or fallback}
+        aliases = {
+            'request': ('request', 'requests', 'requests_total', 'request_count'),
+            'tokens': ('tokens', 'total_tokens', 'tokens_total'),
+            'input_tokens': ('input_tokens', 'prompt_tokens', 'tokens_in'),
+            'output_tokens': ('output_tokens', 'completion_tokens', 'tokens_out'),
+            'cost': ('cost', 'usd', 'cost_usd'),
+            'model': ('model', 'model_id'),
+            'tool': ('tool', 'current_tool'),
+            'bypass': ('bypass', 'approval_bypass'),
+        }
+        for key, names in aliases.items():
+            for name in names:
+                if data.get(name) is not None:
+                    parsed[key] = data.get(name)
+                    break
+        return parsed
+
+    @staticmethod
+    def _parse_agent_status_part(part, parsed):
+        match = re.match(r"^([A-Za-z _-]+)\s*[:=]\s*(.+)$", part)
+        if not match:
+            parsed.setdefault('notes', []).append(part)
+            return
+        key = match.group(1).strip().lower().replace(" ", "_").replace("-", "_")
+        value = match.group(2).strip()
+        aliases = {
+            'req': 'request',
+            'requests': 'request',
+            'request': 'request',
+            'tok': 'tokens',
+            'tokens': 'tokens',
+            'total_tokens': 'tokens',
+            'in': 'input_tokens',
+            'input': 'input_tokens',
+            'input_tokens': 'input_tokens',
+            'prompt_tokens': 'input_tokens',
+            'out': 'output_tokens',
+            'output': 'output_tokens',
+            'output_tokens': 'output_tokens',
+            'completion_tokens': 'output_tokens',
+            'cost': 'cost',
+            'usd': 'cost',
+            'model': 'model',
+            'tool': 'tool',
+            'current_tool': 'tool',
+            'approval_bypass': 'bypass',
+            'bypass': 'bypass',
+        }
+        parsed[aliases.get(key, key)] = value
+
+    @classmethod
+    def _format_agent_status_details(cls, parsed):
+        details = []
+        if parsed.get('tool'):
+            details.append(_("Tool: ") + str(parsed['tool']))
+        token_detail = cls._format_token_detail(parsed)
+        if token_detail:
+            details.append(token_detail)
+        if parsed.get('request') not in (None, ""):
+            details.append(_("Req: ") + str(parsed['request']))
+        if parsed.get('cost') not in (None, ""):
+            details.append(_("Cost: ") + cls._format_cost(parsed['cost']))
+        if parsed.get('model'):
+            details.append(str(parsed['model']))
+        for note in parsed.get('notes', [])[:2]:
+            details.append(str(note))
+        return " | ".join(details)
+
+    @classmethod
+    def _format_token_detail(cls, parsed):
+        total = parsed.get('tokens')
+        input_tokens = parsed.get('input_tokens')
+        output_tokens = parsed.get('output_tokens')
+        if total in (None, "") and input_tokens in (None, "") and output_tokens in (None, ""):
+            return ""
+        pieces = []
+        if total not in (None, ""):
+            pieces.append(_("tok ") + cls._format_count(total))
+        if input_tokens not in (None, ""):
+            pieces.append(_("in ") + cls._format_count(input_tokens))
+        if output_tokens not in (None, ""):
+            pieces.append(_("out ") + cls._format_count(output_tokens))
+        return " ".join(pieces)
+
+    @staticmethod
+    def _format_count(value):
+        try:
+            number = int(float(str(value).replace(",", "")))
+        except (TypeError, ValueError):
+            return str(value)
+        if abs(number) >= 1_000_000:
+            return f"{number / 1_000_000:.1f}M"
+        if abs(number) >= 1_000:
+            return f"{number / 1_000:.1f}k"
+        return str(number)
+
+    @staticmethod
+    def _format_cost(value):
+        try:
+            number = float(str(value).replace("$", "").replace(",", ""))
+        except (TypeError, ValueError):
+            return str(value)
+        return f"${number:.4f}" if number < 1 else f"${number:.2f}"
 
     @staticmethod
     def _friendly_agent_activity(activity):
