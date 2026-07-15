@@ -66,7 +66,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._post_layout_scroll_force = False
         self._post_layout_scroll_settle_id = None
         self._post_layout_scroll_watch_id = None
+        self._post_layout_scroll_tick_id = None
         self._suppress_text_changed = False
+        self._pending_messaging_send_text = None
+        self._pending_messaging_send_tick_id = None
+        self._pending_messaging_send_timeout_id = None
+        self._pending_messaging_send_ticks_left = 0
 
         # Asegurar que config no sea None
         self.config = config or {}
@@ -310,6 +315,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # El scroll cinético/overlay introduce interpolaciones de `value` que
+        # pueden desanclar temporalmente el follow-bottom y retrasar la
+        # percepción de "mensaje enviado" hasta la próxima interacción.
+        if hasattr(scroll, 'set_kinetic_scrolling'):
+            scroll.set_kinetic_scrolling(False)
+        if hasattr(scroll, 'set_overlay_scrolling'):
+            scroll.set_overlay_scrolling(False)
         scroll.connect("edge-reached", self._on_edge_reached)
         self.message_scroll = scroll
         # Al redimensionar la ventana, mantener anclado el último mensaje
@@ -565,9 +577,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Otra conversación arranca sin nadie leyendo hacia atrás.
         self._loading_older_history = False
         self._agent_command_client = None
+        self._cancel_pending_messaging_send()
         if self._post_layout_scroll_watch_id is not None:
             GLib.source_remove(self._post_layout_scroll_watch_id)
             self._post_layout_scroll_watch_id = None
+        if self._post_layout_scroll_tick_id is not None:
+            self.remove_tick_callback(self._post_layout_scroll_tick_id)
+            self._post_layout_scroll_tick_id = None
         if self._post_layout_scroll_settle_id is not None:
             GLib.source_remove(self._post_layout_scroll_settle_id)
             self._post_layout_scroll_settle_id = None
@@ -628,6 +644,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.connect('response', self._on_llm_response),
                 backend.connect('response-correction',
                                 self._on_llm_response_correction),
+                backend.connect('own-carbon-resolved',
+                                self._on_own_carbon_resolved),
                 backend.connect('error', self._on_llm_error),
                 backend.connect('finished', self._on_llm_finished),
                 backend.connect('state-changed', self._on_backend_state_changed),
@@ -1174,8 +1192,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if sender == "user":
             self.last_message = message
 
-        # Create the message widget
-        use_markdown = not self.is_messaging_backend
+        # Create the message widget. Markdown también para XMPP: los agentes
+        # responden en markdown, y las burbujas del historial ya se pintaban
+        # con MarkdownView (default de MessageWidget) — texto plano en vivo
+        # dejaba el render inconsistente entre sesión y recarga.
+        use_markdown = True
         message_widget = MessageWidget(message, use_markdown=use_markdown)
         if DEBUG:
             debug_print(f"[send] display_message sender={sender} len={len(str(content or ''))}")
@@ -1200,15 +1221,42 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # LLM/historial: mantener inserción cronológica.
             self._insert_bubble_by_timestamp(message_widget)
 
-        # Propagar relayout también al ScrolledWindow: en GTK4 puede quedar el
-        # rango del adjustment viejo hasta el próximo ciclo de interacción.
+        # En GTK4 el append puede actualizar el adjustment antes de que el
+        # widget nuevo quede medido/pintado. Si no se invalida explícitamente,
+        # XMPP queda visualmente una burbuja atrás hasta la próxima interacción.
+        message_widget.queue_resize()
         self.messages_box.queue_resize()
+        self.messages_box.queue_draw()
         self.message_scroll.queue_resize()
-        self._scroll_to_bottom_after_layout(force=force)
+        self.message_scroll.queue_draw()
+        self._queue_native_render()
+        if self.is_messaging_backend:
+            self._scroll_to_bottom_messaging(force=force)
+        else:
+            self._scroll_to_bottom_after_layout(force=force)
         if DEBUG:
             debug_print(f"[send] display_message done sender={sender}")
+            self._log_last_message_geometry("display_message")
 
         return message_widget
+
+    def _scroll_to_bottom_messaging(self, force=True):
+        """Scroll para XMPP (mensajes discretos, sin streaming).
+
+        Fija la intención y usa el mismo ciclo post-layout que el historial:
+        el adjustment puede estar al fondo mientras el último widget todavía
+        no fue medido/pintado, lo que se ve como "una burbuja atrás".
+        """
+        adj = self.message_scroll.get_vadjustment()
+        if force:
+            self._stick_to_bottom = True
+        if not self._stick_to_bottom:
+            return
+
+        # Bajar ya con lo que se conoce y mantener un watcher breve hasta que
+        # el layout se estabilice con la altura real del bubble nuevo.
+        self._set_value_silently(adj, adj.get_upper() - adj.get_page_size())
+        self._scroll_to_bottom_after_layout(force=force)
 
     def _clear_input_buffer_silently(self):
         """Limpia el TextBuffer sin disparar efectos colaterales de
@@ -1888,11 +1936,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_batch.append((body, direction, timestamp))
 
     def _on_xmpp_history_actions(self, backend, body, timestamp,
-                                 quick_responses, commands):
+                                 quick_responses, commands, request_id=None):
         if self._xmpp_history_actions_batch is None:
             return
         self._xmpp_history_actions_batch.append(
-            (body, timestamp, quick_responses, commands))
+            (body, timestamp, quick_responses, commands, request_id))
 
     def _on_xmpp_history_complete(self, backend, has_more):
         batch = self._xmpp_history_batch or []
@@ -1905,8 +1953,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             for body, direction, timestamp in batch:
                 self._add_history_bubble(body, direction, timestamp)
             self._history_displayed = True
-        for body, timestamp, quick_responses, commands in action_batch:
-            self._restore_history_actions(body, timestamp, quick_responses, commands)
+        for body, timestamp, quick_responses, commands, request_id in action_batch:
+            self._restore_history_actions(
+                body, timestamp, quick_responses, commands, request_id)
         if is_backfill:
             self._xmpp_backfill_remaining -= 1
         self._xmpp_history_batch = []
@@ -1923,13 +1972,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # tampoco bajaría y el chat volvería a "no seguir el fondo".
         self._loading_older_history = False
 
-    def _restore_history_actions(self, body, timestamp, quick_responses, _commands):
+    def _restore_history_actions(self, body, timestamp, quick_responses,
+                                 _commands, request_id=None):
         if quick_responses and not self._history_quick_response_was_answered(
                 timestamp, quick_responses):
             self._add_sticky_response_card(
                 quick_responses,
                 lambda response: self._send_restored_quick_response(response),
-                detail_text=Message.compact_blank_lines(body))
+                detail_text=Message.compact_blank_lines(body),
+                request_id=request_id)
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)
@@ -2090,11 +2141,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return dt
 
     def _on_edge_reached(self, scroll, pos):
-        if pos == Gtk.PositionType.TOP and self.backend is not None:
-            # El usuario subió a leer hacia atrás: el lote que llegue NO debe
-            # saltar al fondo (ver _on_xmpp_history_complete).
-            self._loading_older_history = True
-            self.backend.load_more_history()
+        if pos != Gtk.PositionType.TOP or self.backend is None:
+            return
+        # Ignorar el edge-reached de la carga inicial / backfill: el scroll
+        # nace arriba (value=0) antes del salto al fondo, y eso disparaba un
+        # load_more_history — con su eventual query MAM hacia atrás — en cada
+        # apertura de ventana, sin que el usuario hubiera scrolleado nada.
+        if (getattr(self, '_xmpp_backfill_remaining', 0) > 0
+                or not self._history_displayed):
+            return
+        # El usuario subió a leer hacia atrás: el lote que llegue NO debe
+        # saltar al fondo (ver _on_xmpp_history_complete).
+        self._loading_older_history = True
+        self.backend.load_more_history()
 
     def _load_and_display_history(self, history_entries):
         """Método auxiliar para cargar y mostrar el historial después de que la UI esté lista."""
@@ -2146,6 +2205,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 # rellenar; los mensajes entrantes crean su propia burbuja
                 # cuando llegan (_on_llm_response). No dejar un placeholder.
                 self.current_message_widget = None
+                # Enviar tras el próximo frame pintado (sin latencia fija):
+                # prioriza que el bubble local se vea instantáneo.
+                self._schedule_messaging_send_after_frame(text)
             else:
                 # LLM: mantener estado busy durante generación.
                 self.set_enabled(False)
@@ -2153,14 +2215,74 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 # rellenando vía 'response'.
                 self.current_message_widget = self.display_message("", sender="assistant")
                 self._on_llm_response(self.backend, "")
-            # Sin latencia fija: enviar en idle de baja prioridad para que el
-            # bubble local se pinte primero, pero sin esperar milisegundos
-            # artificiales.
-            GLib.idle_add(
-                self._start_llm_task,
-                text,
-                priority=GLib.PRIORITY_LOW,
-            )
+                # LLM: enviar en idle de baja prioridad.
+                GLib.idle_add(
+                    self._start_llm_task,
+                    text,
+                    priority=GLib.PRIORITY_LOW,
+                )
+
+    def _cancel_pending_messaging_send(self):
+        if self._pending_messaging_send_timeout_id is not None:
+            GLib.source_remove(self._pending_messaging_send_timeout_id)
+            self._pending_messaging_send_timeout_id = None
+        if self._pending_messaging_send_tick_id is not None:
+            self.remove_tick_callback(self._pending_messaging_send_tick_id)
+            self._pending_messaging_send_tick_id = None
+        self._pending_messaging_send_text = None
+        self._pending_messaging_send_ticks_left = 0
+
+    def _schedule_messaging_send_after_frame(self, text):
+        self._pending_messaging_send_text = text
+        # Dos ticks: el primero deja que se componga y pinte la burbuja local,
+        # el segundo dispara el envío sin depender de un delay fijo en ms.
+        self._pending_messaging_send_ticks_left = 2
+
+        if self._pending_messaging_send_tick_id is None:
+            self._pending_messaging_send_tick_id = self.add_tick_callback(
+                self._on_pending_messaging_send_tick)
+
+        # Fallback: si no hay frame próximo (ventana oculta), no bloquear envío.
+        if self._pending_messaging_send_timeout_id is not None:
+            GLib.source_remove(self._pending_messaging_send_timeout_id)
+        self._pending_messaging_send_timeout_id = GLib.timeout_add(
+            60, self._flush_pending_messaging_send)
+
+    def _on_pending_messaging_send_tick(self, _widget, _frame_clock):
+        if not self._pending_messaging_send_text:
+            self._pending_messaging_send_tick_id = None
+            return GLib.SOURCE_REMOVE
+
+        if self._pending_messaging_send_ticks_left > 0:
+            self._pending_messaging_send_ticks_left -= 1
+            if DEBUG:
+                debug_print(
+                    f"[send] pending send tick, remaining={self._pending_messaging_send_ticks_left}")
+            return GLib.SOURCE_CONTINUE
+
+        self._flush_pending_messaging_send()
+        return GLib.SOURCE_REMOVE
+
+    def _flush_pending_messaging_send(self):
+        text = self._pending_messaging_send_text
+        if self._pending_messaging_send_tick_id is not None:
+            self.remove_tick_callback(self._pending_messaging_send_tick_id)
+            self._pending_messaging_send_tick_id = None
+        if self._pending_messaging_send_timeout_id is not None:
+            GLib.source_remove(self._pending_messaging_send_timeout_id)
+            self._pending_messaging_send_timeout_id = None
+        self._pending_messaging_send_text = None
+        self._pending_messaging_send_ticks_left = 0
+
+        if not text:
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(
+            self._start_llm_task,
+            text,
+            priority=GLib.PRIORITY_LOW,
+        )
+        return GLib.SOURCE_REMOVE
 
     def _start_llm_task(self, prompt_text):
         """Inicia la tarea del backend con el prompt dado."""
@@ -2262,10 +2384,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 else:
                     self.current_message_widget = self.display_message(
                         response, sender="assistant")
-                # display_message ya dispara el autoscroll post-layout.
                 return GLib.SOURCE_REMOVE
 
-            GLib.idle_add(apply_response_on_ui_thread)
+            GLib.idle_add(
+                apply_response_on_ui_thread,
+                priority=GLib.PRIORITY_HIGH_IDLE,
+            )
             return
 
         if not self.current_message_widget:
@@ -2357,6 +2481,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             debug_print(
                 f"chat_window: corrección sin card correlacionada "
                 f"(request_id={request_id!r}) — sólo se actualizó la burbuja")
+
+    def _on_own_carbon_resolved(self, backend, request_id):
+        """Carbon de la propia respuesta enviada desde otro dispositivo:
+        atenúa la card ya (sin tocar el texto de la burbuja — a diferencia
+        de _on_llm_response_correction, aquí no hay texto de corrección
+        del servidor todavía, sólo la señal de que ya se respondió)."""
+        self._mark_sticky_response_resolved(request_id)
 
     def _add_sticky_response_card(self, responses, on_selected, detail_text=None,
                                    request_id=None):
@@ -2528,8 +2659,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         box.set_margin_start(6)
         box.set_margin_end(6)
         for index, item in enumerate(self._sticky_response_items, start=1):
+            resolved = bool(item.get('resolved'))
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             row.add_css_class("sticky-response-popover-row")
+            if resolved:
+                row.set_opacity(0.5)
             title = Gtk.Label(label=_("Pending response") + f" {index}")
             title.add_css_class("caption-heading")
             title.set_xalign(0)
@@ -2561,6 +2695,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     continue
                 button = Gtk.Button(label=label)
                 button.add_css_class("pill")
+                button.set_sensitive(not resolved)
                 button.connect("clicked", handle_click, response)
                 flow.append(button)
                 buttons.append(button)
@@ -2690,10 +2825,56 @@ class LLMChatWindow(Adw.ApplicationWindow):
             f"stick={getattr(self, '_stick_to_bottom', None)} "
             f"pending={getattr(self, '_post_layout_scroll_pending', None)} "
             f"force={getattr(self, '_post_layout_scroll_force', None)} "
+            f"tick={getattr(self, '_post_layout_scroll_tick_id', None)} "
             f"added_pending={getattr(self, '_content_added_pending', None)} "
             f"restoring={getattr(self, '_restoring_scroll', None)} "
             f"{extra}"
         )
+
+    def _log_last_message_geometry(self, where):
+        if not DEBUG or not hasattr(self, 'messages_box'):
+            return
+        children = list(self.messages_box)
+        if not children:
+            debug_print(f"[geom] {where} | no children")
+            return
+        child = children[-1]
+        message = getattr(child, 'message', None)
+        content = getattr(message, 'content', '')
+        sender = getattr(message, 'sender', '<none>')
+        try:
+            _, rect = child.compute_bounds(self.message_scroll)
+            bounds = (
+                f"x={rect.get_x():.1f} y={rect.get_y():.1f} "
+                f"w={rect.get_width():.1f} h={rect.get_height():.1f}"
+            )
+        except Exception as exc:
+            bounds = f"bounds_error={exc!r}"
+        try:
+            _, box_rect = self.messages_box.compute_bounds(self.message_scroll)
+            box_bounds = (
+                f"box_y={box_rect.get_y():.1f} box_h={box_rect.get_height():.1f}"
+            )
+        except Exception as exc:
+            box_bounds = f"box_bounds_error={exc!r}"
+        debug_print(
+            f"[geom] {where} | sender={sender} len={len(str(content or ''))} "
+            f"child_h={child.get_height()} allocated={child.get_allocated_height()} "
+            f"scroll_h={self.message_scroll.get_height()} "
+            f"{bounds} {box_bounds}"
+        )
+
+    def _queue_native_render(self):
+        native = self.get_native()
+        if native is None:
+            return
+        surface = native.get_surface()
+        if surface is None:
+            return
+        if hasattr(surface, 'request_layout'):
+            surface.request_layout()
+        if hasattr(surface, 'queue_render'):
+            surface.queue_render()
 
     def _at_bottom(self, adj):
         return (adj.get_upper() - (adj.get_value() + adj.get_page_size())
@@ -2781,9 +2962,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _set_value_silently(self, adj, value):
         """Mover el scroll sin que _on_vadj_value_changed lo lea como que el
         usuario cambió de intención."""
+        target = max(0.0, value)
         self._restoring_scroll = True
-        adj.set_value(max(0.0, value))
-        self._restoring_scroll = False
+        try:
+            # GTK puede aceptar el nuevo value durante notify::upper/changed,
+            # pero dejar el transform visual del viewport en el value anterior
+            # hasta una interacción real. Si ya estamos numéricamente en el
+            # target, emitir un cambio mínimo fuerza al ScrolledWindow a
+            # reaplicar su desplazamiento interno.
+            if abs(adj.get_value() - target) < 0.5 and target > 0.5:
+                adj.set_value(target - 0.5)
+            adj.set_value(target)
+        finally:
+            self._restoring_scroll = False
         self._log_scroll_state(
             "set_value_silently", adj, extra=f"requested={value:.1f}")
 
@@ -2825,6 +3016,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._post_layout_scroll_watch_id is not None:
             GLib.source_remove(self._post_layout_scroll_watch_id)
             self._post_layout_scroll_watch_id = None
+        if self._post_layout_scroll_tick_id is not None:
+            self.remove_tick_callback(self._post_layout_scroll_tick_id)
+            self._post_layout_scroll_tick_id = None
         self._post_layout_scroll_settle_id = None
         self._post_layout_scroll_pending = False
         self._post_layout_scroll_force = False
@@ -2872,6 +3066,32 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._post_layout_scroll_watch_id = GLib.timeout_add(
                 33, self._watch_post_layout_scroll)
             self._log_scroll_state("watch(start)", extra="interval_ms=33")
+        if self._post_layout_scroll_tick_id is None:
+            self._post_layout_scroll_tick_id = self.add_tick_callback(
+                self._tick_post_layout_scroll)
+            self._log_scroll_state("tick(start)")
+
+    def _tick_post_layout_scroll(self, _widget, _frame_clock):
+        if not self._post_layout_scroll_pending:
+            self._post_layout_scroll_tick_id = None
+            self._log_scroll_state("tick(stop no pending)")
+            return GLib.SOURCE_REMOVE
+
+        should_follow = self._post_layout_scroll_force or self._stick_to_bottom
+        if not should_follow:
+            self._finish_post_layout_scroll()
+            self._log_scroll_state("tick(stop no follow)")
+            return GLib.SOURCE_REMOVE
+
+        self.queue_allocate()
+        self.messages_box.queue_allocate()
+        self.message_scroll.queue_allocate()
+        self._scroll_to_bottom(force=self._post_layout_scroll_force)
+        self.queue_draw()
+        self._queue_native_render()
+        self._log_last_message_geometry("tick")
+        self._log_scroll_state("tick(apply)")
+        return GLib.SOURCE_CONTINUE
 
     def _scroll_to_bottom_after_layout(self, force=True):
         """Baja del todo cuando el alto aún no es definitivo (carga de

@@ -616,11 +616,18 @@ class XmppSession(GObject.Object):
     def _on_message(self, _client, _stanza, properties):
         if properties.jid is None:
             return
-        if getattr(properties, 'is_carbon_message', False) \
-                and properties.carbon.is_sent:
-            return
         bare = str(properties.jid.bare)
         conversation = self._conversations.get(bare)
+        if getattr(properties, 'is_carbon_message', False) \
+                and properties.carbon.is_sent:
+            # Copia de una respuesta que YO envié desde otro recurso
+            # (Cheogram, Gajim, el propio Android) — no es un mensaje nuevo
+            # que mostrar, pero si coincide con una quick_response
+            # pendiente sirve como señal de sync más rápida que esperar la
+            # corrección XEP-0308 del servidor (ver notify_own_carbon).
+            if conversation is not None and properties.body:
+                conversation.notify_own_carbon(properties.body)
+            return
 
         if getattr(properties, 'is_mam_message', False):
             mam = properties.mam
@@ -772,10 +779,14 @@ class XmppConversation(ChatBackend):
         ChatBackend.__init__(self)
         self.session = session
         self.bare_jid = bare_jid
-        # Ids (stanza id propio) de preguntas recientes con quick_responses/
-        # commands aún sin resolver, para que una corrección XEP-0308
-        # entrante pueda reconocerse sin importar si es la más reciente.
-        self._pending_request_ids: set[str] = set()
+        # request_id (stanza id propio) -> {values de sus quick_responses}
+        # para preguntas recientes aún sin resolver. Permite que (a) una
+        # corrección XEP-0308 entrante se reconozca sin importar si es la
+        # más reciente, y (b) un carbon de la propia respuesta enviada
+        # desde OTRO recurso se correlacione con la pregunta que resuelve
+        # por texto, como señal de sync más rápida que esperar la
+        # corrección del servidor.
+        self._pending_request_ids: dict[str, set[str]] = {}
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
@@ -834,7 +845,7 @@ class XmppConversation(ChatBackend):
                 quick_responses=quick_responses, commands=commands,
                 request_id=request_id if has_pending else None)
         if has_pending and request_id:
-            self._track_pending_request(request_id)
+            self._track_pending_request(request_id, quick_responses)
         self.emit('response', body)
         if quick_responses:
             self.emit('quick-responses', quick_responses, request_id)
@@ -842,27 +853,52 @@ class XmppConversation(ChatBackend):
             self.emit('commands', commands, request_id)
         self.emit('finished', True)
 
-    def _track_pending_request(self, request_id: str, max_tracked: int = 50):
+    def _track_pending_request(self, request_id: str, quick_responses=None,
+                               max_tracked: int = 50):
         """Recuerda ids de preguntas recientes con quick_responses/commands
         pendientes, para que deliver() pueda reconocer una corrección que
-        llegue para cualquiera de ellas (no sólo la última). Cota simple de
-        tamaño en vez de expirar por tiempo — alcanza para el uso real
-        (pocas preguntas concurrentes por conversación)."""
-        self._pending_request_ids.add(request_id)
+        llegue para cualquiera de ellas (no sólo la última), y para que un
+        carbon de la propia respuesta pueda correlacionarse por texto (ver
+        notify_own_carbon). Cota simple de tamaño en vez de expirar por
+        tiempo — alcanza para el uso real (pocas preguntas concurrentes por
+        conversación)."""
+        values = {
+            r.get('value', '') for r in (quick_responses or []) if r.get('value')
+        }
+        self._pending_request_ids[request_id] = values
         if len(self._pending_request_ids) > max_tracked:
-            # Orden de inserción no se trackea con un set; en la práctica
-            # esto sólo dispara con un backlog anómalo, así que un vaciado
-            # simple es aceptable en vez de mantener estructura ordenada.
+            # Orden de inserción no se trackea con un dict-de-inserción
+            # simple aquí; en la práctica esto sólo dispara con un backlog
+            # anómalo, así que un vaciado simple es aceptable en vez de
+            # mantener estructura ordenada.
             self._pending_request_ids.clear()
-            self._pending_request_ids.add(request_id)
+            self._pending_request_ids[request_id] = values
 
     def _deliver_correction(self, request_id: str, body: str):
         history = self.session.history
         if history is not None:
             history.update_by_request_id(self.bare_jid, request_id, body)
-        self._pending_request_ids.discard(request_id)
+        self._pending_request_ids.pop(request_id, None)
         self.emit('response-correction', request_id, body)
         self.emit('finished', True)
+
+    def notify_own_carbon(self, body: str):
+        """Carbon (XEP-0280) de una respuesta que YO envié desde otro
+        recurso/dispositivo. Señal secundaria y más rápida que la
+        corrección XEP-0308 del servidor (que llega después, cuando el
+        agente procesa la respuesta): si el texto coincide con el value de
+        alguna quick_response pendiente, atenuamos su card ya mismo. No
+        toca el body de la pregunta original — sólo limpia las acciones,
+        la corrección real (si llega) sigue su propio camino en deliver()."""
+        for request_id, values in list(self._pending_request_ids.items()):
+            if body not in values:
+                continue
+            history = self.session.history
+            if history is not None:
+                history.mark_resolved_by_request_id(self.bare_jid, request_id)
+            self._pending_request_ids.pop(request_id, None)
+            self.emit('own-carbon-resolved', request_id)
+            return
 
     def notify_chatstate(self, chatstate: str):
         self.emit('typing', chatstate.endswith('COMPOSING'))
@@ -942,7 +978,8 @@ class XmppConversation(ChatBackend):
                     msg.get('quick_responses', []), msg.get('commands', []),
                     msg.get('request_id'))
                 if msg.get('request_id'):
-                    self._track_pending_request(msg['request_id'])
+                    self._track_pending_request(
+                        msg['request_id'], msg.get('quick_responses'))
         self._history_shown_from = messages[0]['timestamp']
         self.emit('history-complete', True)
 
@@ -963,10 +1000,20 @@ class XmppConversation(ChatBackend):
         if not self.session.is_connected or self._pending_mam_queryid is not None:
             return False
         history = self.session.history
+        latest_mam_id = history.get_latest_mam_id(self.bare_jid) if history else None
+        if latest_mam_id:
+            # Cursor-first: ya tenemos un punto verificado del archivo, así
+            # que pedimos sólo lo posterior (RSM after=) en vez de repetir
+            # una ventana de tiempo fija cada vez que se abre la
+            # conversación — evita re-consultar días de archivo ya cubierto.
+            self._mam_catchup_start = None
+            self._pending_mam_queryid = self.session.query_mam(
+                self.bare_jid, after=latest_mam_id,
+                callback=self._on_mam_catchup_page)
+            return self._pending_mam_queryid is not None
+        # Sin mam_id cacheado (conversación nueva, o historial previo sin
+        # verificar contra el archivo): fallback al overlap por tiempo.
         latest = history.get_latest_timestamp(self.bare_jid) if history else None
-        # Solapamos unas horas hacia atrás para recuperar metadata no
-        # guardada antes (quick responses / comandos) en mensajes que ya
-        # estaban cacheados. La deduplicación evita repintar burbujas.
         start_ts = self._overlap_timestamp(latest)
         self._mam_catchup_start = start_ts
         self._pending_mam_queryid = self.session.query_mam(
@@ -995,7 +1042,8 @@ class XmppConversation(ChatBackend):
                         msg.get('quick_responses', []), msg.get('commands', []),
                         msg.get('request_id'))
                     if msg.get('request_id'):
-                        self._track_pending_request(msg['request_id'])
+                        self._track_pending_request(
+                            msg['request_id'], msg.get('quick_responses'))
             self._history_shown_from = older[0]['timestamp']
             self.emit('history-complete', True)
             return
@@ -1029,7 +1077,7 @@ class XmppConversation(ChatBackend):
                     quick_responses=quick_responses, commands=commands,
                     request_id=request_id if has_pending else None)
             if has_pending and request_id and direction == 'in':
-                self._track_pending_request(request_id)
+                self._track_pending_request(request_id, quick_responses)
             if inserted:
                 self.emit('history-message', body, direction, timestamp)
                 if quick_responses or commands:

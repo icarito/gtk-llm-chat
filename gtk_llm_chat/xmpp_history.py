@@ -151,6 +151,18 @@ class XmppHistory:
         ).fetchone()
         return row["timestamp"] if row else None
 
+    def get_latest_mam_id(self, bare_jid: str) -> Optional[str]:
+        """Ancla RSM (`after=`) para el catch-up de MAM: pedir sólo lo
+        posterior al último mensaje ya verificado por el archivo, en vez
+        del overlap fijo por tiempo (ver XmppConversation.load_history_from_mam)."""
+        conn = self.get_connection()
+        row = conn.execute(
+            "SELECT mam_id FROM messages WHERE bare_jid = ? AND mam_id IS NOT NULL "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (bare_jid,),
+        ).fetchone()
+        return row["mam_id"] if row else None
+
     def has_outgoing_after(self, bare_jid: str, timestamp: str, bodies) -> bool:
         target = self._parse_timestamp(timestamp)
         values = [str(body) for body in bodies if body]
@@ -169,18 +181,6 @@ class XmppHistory:
                 return True
         return False
 
-    def find_by_request_id(self, bare_jid: str, request_id: str) -> Optional[dict]:
-        """Busca la fila cuyo request_id coincide — usado para correlacionar
-        una corrección XEP-0308 con la pregunta original que resuelve, sin
-        depender de que sea el último mensaje entrante (ver update_by_request_id)."""
-        conn = self.get_connection()
-        row = conn.execute(
-            "SELECT id, body, quick_responses, commands FROM messages "
-            "WHERE bare_jid = ? AND request_id = ? LIMIT 1",
-            (bare_jid, request_id),
-        ).fetchone()
-        return dict(row) if row is not None else None
-
     def update_by_request_id(self, bare_jid: str, request_id: str, body: str) -> bool:
         """Corrige el body de la pregunta original identificada por
         request_id y limpia quick_responses/commands (ya resuelta — que
@@ -194,20 +194,20 @@ class XmppHistory:
         conn.commit()
         return cursor.rowcount > 0
 
-    def update_last_body(self, bare_jid: str, body: str):
+    def mark_resolved_by_request_id(self, bare_jid: str, request_id: str) -> bool:
+        """Limpia quick_responses/commands sin tocar el body — usado cuando
+        una señal secundaria (carbon de la propia respuesta) resuelve la
+        pregunta antes de que llegue la corrección XEP-0308 con el texto
+        final; a diferencia de update_by_request_id, aquí no hay texto de
+        corrección que escribir."""
         conn = self.get_connection()
-        latest = conn.execute(
-            "SELECT id FROM messages WHERE bare_jid = ? AND direction = 'in' "
-            "ORDER BY timestamp DESC LIMIT 1",
-            (bare_jid,),
-        ).fetchone()
-        if latest is None:
-            return
-        conn.execute(
-            "UPDATE messages SET body = ? WHERE id = ?",
-            (body, latest["id"]),
+        cursor = conn.execute(
+            "UPDATE messages SET quick_responses = NULL, commands = NULL "
+            "WHERE bare_jid = ? AND request_id = ?",
+            (bare_jid, request_id),
         )
         conn.commit()
+        return cursor.rowcount > 0
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,

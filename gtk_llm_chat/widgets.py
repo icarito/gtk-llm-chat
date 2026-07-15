@@ -4,7 +4,7 @@ import sys
 import re
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Pango
+from gi.repository import GLib, Gtk, Pango
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -73,9 +73,6 @@ class MessageWidget(Gtk.Box):
         self.message = message
         self.use_markdown = use_markdown
 
-        # Import MarkdownView here
-        from .markdownview import MarkdownView
-
         # Configurar el estilo según el remitente
         is_user = message.sender == "user"
         self.add_css_class('message')
@@ -109,26 +106,24 @@ class MessageWidget(Gtk.Box):
         if is_user and content.startswith("user:"):
             content = content[5:].strip()
 
+        # Un único Gtk.Label para markdown (vía Pango markup) y texto plano.
+        # Un Label mide su alto real de forma síncrona; el GtkTextView del
+        # viejo MarkdownView reportaba una altura basura hasta validar su
+        # layout en un idle posterior (a veces 0 -> burbuja colapsada que
+        # sólo aparecía con el próximo relayout; a veces varias veces la
+        # real -> burbujón de espacio vacío que dejaba el mensaje fuera del
+        # viewport). Toda la "tormenta" de queue_draw/queue_resize y el
+        # scroll que se quedaba corto venían de ahí.
         self.content_view = None
-        self.content_label = None
-        if self.use_markdown:
-            # Usar MarkdownView para el contenido
-            self.content_view = MarkdownView()
-            self.content_view.set_hexpand(True)
-            self.content_view.set_size_request(167, -1)  # El warning pedía al menos 167
-            self.content_view.set_markdown(content)
-            message_box.append(self.content_view)
-        else:
-            # En XMPP las burbujas son mayormente texto plano; Label evita
-            # costes de relayout de TextView y mejora la aparición inmediata.
-            self.content_label = Gtk.Label()
-            self.content_label.set_wrap(True)
-            self.content_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            self.content_label.set_xalign(0.0)
-            self.content_label.set_selectable(True)
-            self.content_label.set_hexpand(True)
-            self.content_label.set_label(content)
-            message_box.append(self.content_label)
+        self.content_plain_view = None
+        self.content_label = Gtk.Label()
+        self.content_label.set_wrap(True)
+        self.content_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.content_label.set_xalign(0.0)
+        self.content_label.set_selectable(True)
+        self.content_label.set_hexpand(True)
+        self._set_label_content(content)
+        message_box.append(self.content_label)
 
         # Agregar timestamp
         time_label = Gtk.Label(
@@ -143,35 +138,31 @@ class MessageWidget(Gtk.Box):
 
         self.append(margin_box)
 
+    def _set_label_content(self, content):
+        """Pinta `content` en el label — markdown como Pango markup, o texto
+        plano. El markup generado es balanceado por construcción, pero ante
+        cualquier sorpresa se degrada a texto plano en vez de a un label
+        vacío (set_markup inválido no pinta nada)."""
+        if self.use_markdown:
+            from .pango_markdown import markdown_to_pango
+            markup = markdown_to_pango(content)
+            try:
+                Pango.parse_markup(markup, -1, '\x00')
+                self.content_label.set_markup(markup)
+                return
+            except GLib.Error:
+                debug_print("[widget] markup inválido; fallback a texto plano")
+        self.content_label.set_text(content)
+
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.message.content = Message.compact_blank_lines(new_content)
         debug_print(
             f"[widget] update_content sender={self.message.sender} "
             f"len={len(self.message.content)}")
-        if self.content_view is not None:
-            self.content_view.set_markdown(self.message.content)
-        elif self.content_label is not None:
-            self.content_label.set_label(self.message.content)
-        # El TextView puede crecer en varios pasos (wrap + markdown). Sin pedir
-        # relayout explícito, el ScrolledWindow a veces deja `upper` viejo hasta
-        # la próxima interacción del usuario.
-        if self.content_view is not None:
-            self.content_view.queue_resize()
-        if self.content_label is not None:
-            self.content_label.queue_resize()
-        self.message_box.queue_resize()
-        self.queue_resize()
-        parent = self.get_parent()
-        if parent is not None:
-            parent.queue_resize()
-            debug_print("[widget] queued parent resize")
-            # Subir hasta la raíz para asegurar que el ScrolledWindow
-            # recalcule el rango aunque no haya interacción del usuario.
-            ancestor = parent
-            while ancestor is not None:
-                ancestor.queue_resize()
-                ancestor = ancestor.get_parent()
+        self._set_label_content(self.message.content)
+        # Cambiar el label ya invalida el layout del widget; no hace falta
+        # propagar queue_resize a mano (GTK4 lo hace hacia arriba).
 
     def add_quick_responses(self, responses, on_selected):
         """Adjunta botones de respuesta rápida a esta burbuja."""

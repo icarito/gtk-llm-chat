@@ -40,6 +40,11 @@ class ChatBackend(GObject.Object):
         # None si el backend no pudo correlacionarla (degradación: se trata
         # como mensaje nuevo, ver XmppConversation.deliver()).
         'response-correction': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        # request_id de una pregunta resuelta por un carbon (XEP-0280) de la
+        # propia respuesta enviada desde otro recurso — señal secundaria,
+        # más rápida que 'response-correction' pero sin texto de corrección
+        # (no cambia el body de la pregunta original, sólo la atenúa).
+        'own-carbon-resolved': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'finished': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
