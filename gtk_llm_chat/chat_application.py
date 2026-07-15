@@ -225,28 +225,12 @@ class LLMChatApplication(Adw.Application):
         self.add_action(deny_sub_action)
 
     def OpenConversation(self, cid):
-        """Abrir una nueva conversación dado un CID"""
-        debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
-        if not cid:
-            debug_print("D-Bus: CID vacío, creando nueva conversación")
-            # Siempre crear una nueva ventana cuando el CID está vacío
-            self.open_conversation_window({})
-            return
+        """Abrir (o enfocar) una conversación dado un CID.
 
-        window = self._window_by_cid.get(cid)
-        if window is None:
-            # Crear y registrar una nueva ventana
-            debug_print(f"D-Bus: Creando nueva ventana para CID: {cid}")
-            self.open_conversation_window({'cid': cid})
-        else:
-            # Verificamos si la ventana es válida antes de llamar a present()
-            if hasattr(window, 'present') and callable(window.present):
-                debug_print(f"D-Bus: Enfocando ventana existente para CID: {cid}")
-                window.present()
-            else:
-                debug_print(f"D-Bus: Error - ventana para CID {cid} no es válida, creando nueva")
-                del self._window_by_cid[cid]
-                self.open_conversation_window({'cid': cid})
+        El focus-or-open lo hace open_conversation (spec 009); aquí ya no se
+        toca el registro a mano."""
+        debug_print(f"D-Bus: OpenConversation recibido con CID: {cid}")
+        self.open_conversation({'kind': 'llm', 'cid': cid or None})
 
     def create_chat_window(self, cid):
         """Crear una nueva ventana de chat"""
@@ -563,7 +547,94 @@ class LLMChatApplication(Adw.Application):
             # Si hay error con el asistente, proceder con la ventana normal
             self.open_conversation_window()
 
-    def _create_new_window_with_config(self, config, backend=None, xmpp_session=None):
+    # --- Apertura de conversaciones (spec 009) ---
+    #
+    # Una conversación se identifica por un descriptor, y un descriptor da
+    # exactamente una clave de registro y un backend. LLM y XMPP siguen el mismo
+    # camino: antes una conversación LLM transformaba la ventana actual en vez de
+    # abrir la suya, lo que obligaba a reescribir claves del registro a mano cada
+    # vez que una ventana cambiaba de identidad.
+
+    @staticmethod
+    def conversation_key(descriptor):
+        """Clave de registro (focus-or-open) para un descriptor."""
+        if descriptor.get('kind') == 'xmpp':
+            return f"xmpp:{descriptor['account']}:{descriptor['jid']}"
+        cid = descriptor.get('cid')
+        # Una conversación LLM nueva aún no tiene cid: no se registra hasta que
+        # el backend le dé uno (ver _register_llm_window).
+        return f"llm:{cid}" if cid else None
+
+    def build_backend(self, descriptor, chat_history):
+        """Construye el ChatBackend de un descriptor. La ventana ya no construye
+        ninguno: sólo habla con el contrato ChatBackend."""
+        if descriptor.get('kind') == 'xmpp':
+            session = descriptor['session']
+            return session.get_conversation(descriptor['jid'])
+
+        from .llm_client import LLMClient
+        from llm import get_default_model
+        config = dict(self.config or {})
+        config.update(descriptor.get('config') or {})
+        cid = descriptor.get('cid')
+        if cid:
+            config['cid'] = cid
+        else:
+            # Conversación nueva: sin cid del que deducir el modelo, se usa el
+            # predeterminado. (Con cid, el LLMClient resuelve el de esa
+            # conversación al cargarlo.)
+            default_model_id = get_default_model()
+            if default_model_id:
+                config['model'] = default_model_id
+        return LLMClient(config, chat_history)
+
+    def open_conversation(self, descriptor):
+        """Abre —o enfoca, si ya está abierta— la ventana de una conversación.
+
+        Único punto de entrada: lo usan el roster, D-Bus y la restauración de
+        sesión, tanto para LLM como para XMPP."""
+        key = self.conversation_key(descriptor)
+        if key is not None:
+            existing = self._window_by_cid.get(key)
+            if existing is not None:
+                existing.present()
+                return existing
+
+        chat_history = ChatHistory()
+        try:
+            backend = self.build_backend(descriptor, chat_history)
+        except Exception as err:
+            debug_print(f"open_conversation: no se pudo crear el backend: {err}")
+            return None
+
+        config = dict(descriptor.get('config') or {})
+        if descriptor.get('cid'):
+            config['cid'] = descriptor['cid']
+
+        window = self._create_new_window_with_config(
+            config, backend=backend,
+            xmpp_session=descriptor.get('session'),
+            chat_history=chat_history)
+
+        if key is not None:
+            self._window_by_cid[key] = window
+        elif descriptor.get('kind') != 'xmpp':
+            # LLM nueva: se registra cuando el backend anuncie su cid.
+            self._register_llm_window_when_ready(window, backend)
+        return window
+
+    def _register_llm_window_when_ready(self, window, backend):
+        """Una conversación LLM nueva no tiene cid hasta que el backend lo crea;
+        en ese momento se registra, para que un segundo clic la enfoque en vez de
+        abrir otra ventana."""
+        def on_ready(_backend, _display_name):
+            cid = backend.get_conversation_id()
+            if cid:
+                self._window_by_cid[f"llm:{cid}"] = window
+        backend.connect('ready', on_ready)
+
+    def _create_new_window_with_config(self, config, backend=None,
+                                       xmpp_session=None, chat_history=None):
         """Crea una nueva ventana con la configuración dada.
 
         Args:
@@ -576,7 +647,8 @@ class LLMChatApplication(Adw.Application):
 
         from .chat_window import LLMChatWindow
         from .resource_manager import resource_manager
-        chat_history = ChatHistory()
+        if chat_history is None:
+            chat_history = ChatHistory()
 
         # Crear la nueva ventana con la configuración
         window = LLMChatWindow(application=self, config=config, chat_history=chat_history,
@@ -868,26 +940,30 @@ class LLMChatApplication(Adw.Application):
         # La conversación se está abriendo/enfocando: retirar cualquier
         # notificación de mensaje pendiente de ese contacto (fix review #1).
         self.withdraw_notification(f"xmpp-msg:{bare_jid}")
-        key = f"xmpp:{session.bare_jid}:{bare_jid}"
-        # El registro solo contiene ventanas vivas (la limpieza al cerrar es
-        # por valor), así que una entrada presente se enfoca aunque no esté
-        # visible en este instante — no crear una duplicada (fix review #3).
-        existing = self._window_by_cid.get(key)
-        if existing is not None:
-            existing.present()
-            return existing
-        conversation = session.get_conversation(bare_jid)
-        window = self._create_new_window_with_config(
-            {'_window_geometry': window_geometry}, backend=conversation)
-        self._window_by_cid[key] = window
-        return window
+        # Envoltorio del camino único (spec 009); el focus-or-open ya lo hace él.
+        return self.open_conversation({
+            'kind': 'xmpp',
+            'session': session,
+            'account': session.bare_jid,
+            'jid': bare_jid,
+            'config': {'_window_geometry': window_geometry},
+        })
 
     def _on_open_xmpp_action(self, action, param):
         """Notificación XMPP clicada: abre/enfoca la conversación con el JID."""
         bare_jid = param.get_string()
         session = getattr(self, '_xmpp_session', None)
-        if session is not None:
-            self.open_xmpp_conversation(session, bare_jid)
+        if session is None:
+            return
+        # Buscar ventana existente para este JID en cualquier sesión.
+        # La notificación puede llegar cuando la sesión se reconectó
+        # (cambiando resource y, si se usara, account en la key).
+        for key, window in list(self._window_by_cid.items()):
+            if key.endswith(f":{bare_jid}") and key.startswith("xmpp:"):
+                window.present()
+                self.withdraw_notification(f"xmpp-msg:{bare_jid}")
+                return
+        self.open_xmpp_conversation(session, bare_jid)
 
     def _on_accept_xmpp_sub(self, action, param):
         """Botón 'Aceptar' de una notificación de solicitud de suscripción."""
@@ -914,32 +990,8 @@ class LLMChatApplication(Adw.Application):
         Returns:
             LLMChatWindow: La ventana creada o enfocada
         """
-        # Asegurar que tenemos una configuración
-        config = config or {}
-        conversation_config = dict(config)
-
-        # Si hay un CID específico en la configuración
-        if 'cid' in conversation_config:
-            cid = conversation_config['cid']
-            debug_print(f"Abriendo ventana con CID específico: {cid}")
-
-            # Verificar si ya existe una ventana registrada para este CID
-            if cid in self._window_by_cid:
-                window = self._window_by_cid[cid]
-                if window.is_visible():
-                    debug_print(f"Se encontró ventana registrada para CID {cid}, activándola")
-                    window.present()
-                    return window
-                else:
-                    # Si la ventana existe pero no es visible, eliminarla del registro
-                    debug_print(f"La ventana para CID {cid} no es visible, eliminando del registro")
-                    del self._window_by_cid[cid]
-
-            # Si no existe una ventana para este CID o no es visible, crear una nueva
-            debug_print(f"Creando nueva ventana para CID: {cid}")
-            return self._create_new_window_with_config(conversation_config)
-
-        else:
-            # Si no hay CID específico, crear siempre una nueva ventana de conversación
-            debug_print("Creando nueva ventana sin CID específico")
-            return self._create_new_window_with_config(conversation_config)
+        # Envoltorio del camino único (spec 009): una conversación LLM es un
+        # descriptor más, y se abre/enfoca como cualquier otra.
+        config = dict(config or {})
+        cid = config.pop('cid', None)
+        return self.open_conversation({'kind': 'llm', 'cid': cid, 'config': config})

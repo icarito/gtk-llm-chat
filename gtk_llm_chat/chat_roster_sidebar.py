@@ -40,11 +40,14 @@ class ChatRosterSidebar(Gtk.Box):
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.stack.add_named(self._build_list_page(), "list")
 
+        # Los parámetros del modelo ya no viven aquí dentro. Compartían stack con
+        # la lista de contactos, así que abrir los ajustes tapaba el roster;
+        # ahora son el sidebar derecho de la ventana (spec 009), y el roster se
+        # queda con lo suyo: la lista.
         self.options_sidebar = None
         if self.llm_client is not None:
             self.options_sidebar = ChatSidebar(
                 config=self.config, llm_client=self.llm_client)
-            self.stack.add_named(self.options_sidebar, "options")
 
         self.append(self.stack)
         self._populate()
@@ -246,10 +249,6 @@ class ChatRosterSidebar(Gtk.Box):
 
     def refresh(self):
         self._populate()
-
-    def show_options(self):
-        if self.options_sidebar is not None:
-            self.stack.set_visible_child_name("options")
 
     def show_list(self):
         self.stack.set_visible_child_name("list")

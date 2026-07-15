@@ -17,13 +17,14 @@ Hallazgos del spike (specs/001-xmpp-backend/design.md) aplicados aquí:
 from gi.repository import GLib, GObject
 
 import os
+import re
 import uuid
 
 from nbxmpp.client import Client as NbxmppClient
 from nbxmpp.namespaces import Namespace
 from nbxmpp.protocol import Iq, JID, Message, Presence
 from nbxmpp.simplexml import Node
-from nbxmpp.structs import StanzaHandler
+from nbxmpp.structs import DiscoIdentity, StanzaHandler
 
 from .chat_backend import ChatBackend
 from .chat_application import _
@@ -36,8 +37,60 @@ STATE_RECONNECTING = 'reconnecting'
 STATE_CONNECTED = 'connected'
 
 RESOURCE = 'gtk-llm-chat'
-NANOCLAW_CAPS_NODE = 'https://github.com/nanocoai/nanoclaw'
+AGENT_CAPS_NODE = 'https://github.com/openclaw/openclaw'
 QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
+
+# Telemetría del agente (contexto, tokens, coste, modelo). Va por PEP y no en el
+# <status> de la presencia: el status es texto para humanos —cualquier cliente lo
+# pinta tal cual junto al contacto— y estos números cambian a cada token.
+TELEMETRY_NODE = 'urn:openclaw:telemetry:0'
+
+
+def parse_telemetry(item):
+    """Extrae la telemetría del <telemetry/> publicado en el nodo PEP.
+
+    Devuelve un dict con las claves presentes (nunca inventa ceros: 'sin dato' y
+    'cero' son cosas distintas para una barra de progreso), o None si el ítem no
+    trae nada aprovechable.
+    """
+    payload = item.getTag('telemetry', namespace=TELEMETRY_NODE)
+    if payload is None:
+        return None
+
+    def _int(node, attr):
+        try:
+            return int(node.getAttr(attr))
+        except (TypeError, ValueError):
+            return None
+
+    out = {}
+    context = payload.getTag('context')
+    if context is not None:
+        used, total = _int(context, 'used'), _int(context, 'max')
+        if used is not None and total:
+            out['context_used'] = used
+            out['context_max'] = total
+
+    tokens = payload.getTag('tokens')
+    if tokens is not None:
+        for key in ('total', 'input', 'output', 'requests'):
+            value = _int(tokens, key)
+            if value is not None:
+                out[f'tokens_{key}'] = value
+
+    cost = payload.getTag('cost')
+    if cost is not None:
+        try:
+            out['cost'] = float(cost.getAttr('usd'))
+        except (TypeError, ValueError):
+            pass
+
+    for tag in ('model', 'tool'):
+        node = payload.getTag(tag)
+        if node is not None and node.getData():
+            out[tag] = node.getData()
+
+    return out or None
 LEGACY_QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
 MESSAGE_CORRECT_NS = 'urn:xmpp:message-correct:0'
 
@@ -62,6 +115,8 @@ class XmppSession(GObject.Object):
         'contact-status-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # bare_jid — alguien pide suscribirse a nuestra presencia (spec 002 T6)
         'subscription-request': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # bare_jid — llegó telemetría nueva del agente por PEP
+        'agent-telemetry-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
     }
 
     PRESENCE_ONLINE = 'online'
@@ -82,6 +137,9 @@ class XmppSession(GObject.Object):
         self._reconnect_attempt = 0
         # bare jid (str) -> dict(name=..., subscription=..., presence=...)
         self.roster_items = {}
+        # bare jid (str) -> dict con lo último publicado en su nodo PEP de
+        # telemetría. Sobrevive a una recarga de roster: sigue siendo válido.
+        self.agent_telemetry = {}
         self._roster_loaded = False
         self._online_resources = {}
         self._conversations = {}
@@ -132,9 +190,40 @@ class XmppSession(GObject.Object):
             StanzaHandler(name='message', callback=self._on_message))
         client.register_handler(
             StanzaHandler(name='presence', callback=self._on_presence))
+
+        # Telemetría del agente: llega por PEP (XEP-0163), no en el <status>.
+        # El servidor sólo nos la entrega si nuestras caps piden el nodo con
+        # "+notify" — de ahí que se declare aquí y no baste con responder al
+        # disco. Un contacto que no publique el nodo simplemente no emite nada.
+        client.get_module('EntityCaps').set_caps(
+            [DiscoIdentity(category='client', type='pc', name='gtk-llm-chat')],
+            [Namespace.DISCO_INFO, f'{TELEMETRY_NODE}+notify'],
+            'https://github.com/icarito/gtk-llm-chat')
+        client.register_handler(
+            StanzaHandler(name='message', callback=self._on_pep_event,
+                          ns=Namespace.PUBSUB_EVENT, priority=15))
+
         self._client = client
         self._set_state(STATE_CONNECTING)
         client.connect()
+
+    def _on_pep_event(self, _client, stanza, properties):
+        """Un evento PEP del agente: telemetría (contexto, tokens, modelo).
+
+        nbxmpp sólo rellena `data` para los namespaces que conoce (avatar, tune,
+        …); el nuestro es propio, así que el payload viene crudo en `item` y lo
+        parseamos nosotros."""
+        if not properties.is_pubsub_event:
+            return
+        event = properties.pubsub_event
+        if event.node != TELEMETRY_NODE or event.item is None:
+            return
+        telemetry = parse_telemetry(event.item)
+        if telemetry is None:
+            return
+        bare_jid = str(stanza.getFrom().bare)
+        self.agent_telemetry[bare_jid] = telemetry
+        self.emit('agent-telemetry-changed', bare_jid)
 
     def disconnect_from_server(self):
         self._disconnect_requested = True
@@ -264,11 +353,94 @@ class XmppSession(GObject.Object):
         if roster is not None:
             self.emit('roster-updated')
 
+    def get_agent_telemetry(self, bare_jid: str) -> dict:
+        """Lo último que el agente publicó por PEP, o {} si nunca publicó."""
+        return self.agent_telemetry.get(bare_jid, {})
+
+    def fetch_agent_telemetry(self, bare_jid: str):
+        """Pide el valor actual del nodo de telemetría del agente.
+
+        Los eventos PEP sólo llegan cuando el agente *publica* algo nuevo, así
+        que un agente que lleva rato quieto no emitiría nada y la barra de
+        contexto se quedaría vacía para siempre. Al abrir la conversación
+        preguntamos por el último valor publicado."""
+        if not self.is_connected:
+            return
+        task = self._client.get_module('PubSub').request_items(
+            TELEMETRY_NODE, max_items=1, jid=JID.from_string(bare_jid))
+
+        def _done(t):
+            try:
+                items = t.finish()
+            except Exception as err:
+                # Lo normal si el contacto no es un agente NanoClaw: no tiene
+                # el nodo. No es un error que merezca molestar al usuario.
+                debug_print(f"XmppSession: sin telemetría de {bare_jid}: {err}")
+                return
+            for item in items or []:
+                telemetry = parse_telemetry(item)
+                if telemetry:
+                    self.agent_telemetry[bare_jid] = telemetry
+                    self.emit('agent-telemetry-changed', bare_jid)
+                    return
+
+        # weak=False es obligatorio: add_done_callback guarda por defecto una
+        # referencia DÉBIL, así que una función local como ésta muere en cuanto
+        # fetch_agent_telemetry retorna y el callback no se llama nunca — el IQ
+        # va, el servidor responde, y no pasa nada.
+        task.add_done_callback(_done, weak=False)
+
     def get_contact_name(self, bare_jid: str) -> str:
         item = self.roster_items.get(bare_jid)
         if item and item.get('name'):
             return item['name']
-        return bare_jid
+        return self.friendly_jid_name(bare_jid)
+
+    def set_contact_name(self, bare_jid: str, name: str, on_done=None):
+        """Renombra un contacto en el roster (XEP: IQ roster set).
+
+        El nombre se guarda en el servidor, así que lo ven todos los clientes de
+        la cuenta, no sólo este. Un nombre vacío borra el name y el contacto
+        vuelve a mostrarse por su JID (o por el fallback de friendly_jid_name).
+        """
+        if not self.is_connected:
+            return
+        clean = (name or "").strip() or None
+        task = self._client.get_module('Roster').set_item(
+            JID.from_string(bare_jid), clean)
+
+        def _done(t):
+            try:
+                t.finish()
+            except Exception as err:
+                debug_print(f"XmppSession: renombrar contacto falló: {err}")
+                if on_done:
+                    on_done(False, str(err))
+                return
+            # El servidor confirma con un roster push, pero no esperamos a él
+            # para que la UI refleje el cambio al instante.
+            item = self.roster_items.setdefault(bare_jid, {})
+            item['name'] = clean or ''
+            self.emit('roster-updated')
+            if on_done:
+                on_done(True, None)
+
+        task.add_done_callback(_done)
+
+    @staticmethod
+    def friendly_jid_name(bare_jid: str) -> str:
+        """Nombre presentable para un contacto sin `name` en el roster.
+
+        El JID entero es ruido en un título ("clawdio@hablar.fuentelibre.org"):
+        el localpart ya identifica al contacto, así que se usa ese, capitalizado.
+        Se respeta cualquier mayúscula que el usuario haya puesto (McFly, no
+        Mcfly) y las palabras separadas por . _ - se capitalizan por separado.
+        """
+        local = str(bare_jid or "").split('@')[0]
+        if not local:
+            return str(bare_jid or "")
+        parts = re.split(r'[._-]+', local)
+        return " ".join(p[:1].upper() + p[1:] for p in parts if p) or local
 
     def get_presence(self, bare_jid: str) -> str:
         item = self.roster_items.get(bare_jid)
@@ -316,7 +488,7 @@ class XmppSession(GObject.Object):
         status = getattr(properties, 'status', None) or ''
         entity_caps = getattr(properties, 'entity_caps', None)
         caps_node = getattr(entity_caps, 'node', None)
-        if caps_node == NANOCLAW_CAPS_NODE:
+        if caps_node == AGENT_CAPS_NODE:
             self.roster_items[bare]['is_agent'] = True
             self.roster_items[bare]['agent_full_jid'] = str(properties.jid)
         if status != old_status:
@@ -467,8 +639,15 @@ class XmppSession(GObject.Object):
                     mam.timestamp, timezone.utc).isoformat()
                 quick_responses = self._parse_quick_responses(_stanza)
                 commands = self._parse_inline_commands(_stanza)
+                # Igual que en el camino en vivo: el stanza id propio del
+                # mensaje archivado (no el del envoltorio <result>) es el
+                # request_id que una corrección futura usará en su
+                # <replace id=...> — sin esto, preguntas descubiertas sólo
+                # vía MAM (p.ej. tras reconectar) no podrían correlacionarse.
+                stanza_id = _stanza.getAttr('id')
                 pending['buffer'].append(
-                    (properties.body, direction, ts, mam.id, quick_responses, commands))
+                    (properties.body, direction, ts, mam.id, quick_responses,
+                     commands, stanza_id))
             return
 
         if properties.has_chatstate and conversation is not None:
@@ -528,8 +707,9 @@ class XmppSession(GObject.Object):
     def send_text(self, to_bare_jid: str, text: str):
         # XEP-0085: marcar 'active' junto con cada mensaje
         chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
-        self._client.send_stanza(
-            Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate]))
+        msg = Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate])
+        debug_print(f"XmppSession: enviando mensaje a {to_bare_jid}: {text[:60]!r}")
+        self._client.send_stanza(msg)
 
     def send_chatstate(self, to_bare_jid: str, chatstate: str):
         """Envía solo un chat state (XEP-0085), sin cuerpo de mensaje."""
@@ -592,7 +772,10 @@ class XmppConversation(ChatBackend):
         ChatBackend.__init__(self)
         self.session = session
         self.bare_jid = bare_jid
-        self.last_incoming_id: str | None = None
+        # Ids (stanza id propio) de preguntas recientes con quick_responses/
+        # commands aún sin resolver, para que una corrección XEP-0308
+        # entrante pueda reconocerse sin importar si es la más reciente.
+        self._pending_request_ids: set[str] = set()
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
@@ -624,35 +807,61 @@ class XmppConversation(ChatBackend):
                 correction=None):
         """Un mensaje del contacto: response + finished, cached.
 
-        Si correction es una tupla (replace_id, stanza_id) y replace_id
-        coincide con last_incoming_id, se corrige la burbuja actual en lugar
-        de crear una nueva (XEP-0308). Si no coincide, se trata como mensaje
-        normal (degradación elegante)."""
+        Si correction es una tupla (replace_id, stanza_id) se busca
+        replace_id entre CUALQUIER pregunta pendiente reciente (no sólo la
+        última — con varias preguntas abiertas a la vez, una corrección
+        para cualquiera de ellas debe reconocerse, no sólo la más nueva;
+        antes esto sólo comparaba contra self.last_incoming_id, un único
+        valor). Si no coincide con ninguna, se trata como mensaje normal
+        (degradación elegante)."""
         if correction is not None:
-            replace_id, stanza_id = correction
-            if replace_id == self.last_incoming_id and self.last_incoming_id is not None:
-                self._deliver_correction(body)
+            replace_id, _stanza_id = correction
+            if replace_id and replace_id in self._pending_request_ids:
+                self._deliver_correction(replace_id, body)
                 return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
         history = self.session.history
+        # El propio stanza_id de este mensaje es el request_id que una
+        # futura corrección usará en su <replace id=...> para apuntar aquí
+        # — sólo tiene sentido guardarlo si trae algo que luego pueda
+        # resolverse (quick_responses/commands).
+        request_id = correction[1] if correction else None
+        has_pending = bool(quick_responses) or bool(commands)
         if history is not None:
             history.record_message(
                 self.bare_jid, body, 'in', ts,
-                quick_responses=quick_responses, commands=commands)
-        self.last_incoming_id = correction[1] if correction else None
+                quick_responses=quick_responses, commands=commands,
+                request_id=request_id if has_pending else None)
+        if has_pending and request_id:
+            self._track_pending_request(request_id)
         self.emit('response', body)
         if quick_responses:
-            self.emit('quick-responses', quick_responses)
+            self.emit('quick-responses', quick_responses, request_id)
         if commands:
-            self.emit('commands', commands)
+            self.emit('commands', commands, request_id)
         self.emit('finished', True)
 
-    def _deliver_correction(self, body: str):
+    def _track_pending_request(self, request_id: str, max_tracked: int = 50):
+        """Recuerda ids de preguntas recientes con quick_responses/commands
+        pendientes, para que deliver() pueda reconocer una corrección que
+        llegue para cualquiera de ellas (no sólo la última). Cota simple de
+        tamaño en vez de expirar por tiempo — alcanza para el uso real
+        (pocas preguntas concurrentes por conversación)."""
+        self._pending_request_ids.add(request_id)
+        if len(self._pending_request_ids) > max_tracked:
+            # Orden de inserción no se trackea con un set; en la práctica
+            # esto sólo dispara con un backlog anómalo, así que un vaciado
+            # simple es aceptable en vez de mantener estructura ordenada.
+            self._pending_request_ids.clear()
+            self._pending_request_ids.add(request_id)
+
+    def _deliver_correction(self, request_id: str, body: str):
         history = self.session.history
         if history is not None:
-            history.update_last_body(self.bare_jid, body)
-        self.emit('response-correction', body)
+            history.update_by_request_id(self.bare_jid, request_id, body)
+        self._pending_request_ids.discard(request_id)
+        self.emit('response-correction', request_id, body)
         self.emit('finished', True)
 
     def notify_chatstate(self, chatstate: str):
@@ -730,7 +939,10 @@ class XmppConversation(ChatBackend):
             if msg.get('quick_responses') or msg.get('commands'):
                 self.emit(
                     'history-actions', msg['body'], msg['timestamp'],
-                    msg.get('quick_responses', []), msg.get('commands', []))
+                    msg.get('quick_responses', []), msg.get('commands', []),
+                    msg.get('request_id'))
+                if msg.get('request_id'):
+                    self._track_pending_request(msg['request_id'])
         self._history_shown_from = messages[0]['timestamp']
         self.emit('history-complete', True)
 
@@ -780,7 +992,10 @@ class XmppConversation(ChatBackend):
                 if msg.get('quick_responses') or msg.get('commands'):
                     self.emit(
                         'history-actions', msg['body'], msg['timestamp'],
-                        msg.get('quick_responses', []), msg.get('commands', []))
+                        msg.get('quick_responses', []), msg.get('commands', []),
+                        msg.get('request_id'))
+                    if msg.get('request_id'):
+                        self._track_pending_request(msg['request_id'])
             self._history_shown_from = older[0]['timestamp']
             self.emit('history-complete', True)
             return
@@ -795,24 +1010,36 @@ class XmppConversation(ChatBackend):
             body, direction, timestamp, mam_id = item[:4]
             quick_responses = item[4] if len(item) > 4 else []
             commands = item[5] if len(item) > 5 else []
+            # El id de stanza propio de este mensaje (si trae quick_responses/
+            # commands) es su request_id — igual que en deliver() para
+            # mensajes en vivo, así una corrección que llegue después (vía
+            # MAM o en vivo) puede encontrarlo sin depender de ser el último.
+            request_id = item[6] if len(item) > 6 else None
+            has_pending = bool(quick_responses) or bool(commands)
             if (history is not None and
                     history.attach_mam_to_recent_message(
                         self.bare_jid, body, direction, timestamp, mam_id,
-                        quick_responses=quick_responses, commands=commands)):
+                        quick_responses=quick_responses, commands=commands,
+                        request_id=request_id if has_pending else None)):
                 continue
             inserted = True
             if history is not None:
                 inserted = history.record_message(
                     self.bare_jid, body, direction, timestamp, mam_id,
-                    quick_responses=quick_responses, commands=commands)
+                    quick_responses=quick_responses, commands=commands,
+                    request_id=request_id if has_pending else None)
+            if has_pending and request_id and direction == 'in':
+                self._track_pending_request(request_id)
             if inserted:
                 self.emit('history-message', body, direction, timestamp)
                 if quick_responses or commands:
                     self.emit(
-                        'history-actions', body, timestamp, quick_responses, commands)
+                        'history-actions', body, timestamp, quick_responses,
+                        commands, request_id)
             elif quick_responses or commands:
                 self.emit(
-                    'history-actions', body, timestamp, quick_responses, commands)
+                    'history-actions', body, timestamp, quick_responses,
+                    commands, request_id)
 
     def _on_mam_catchup_page(self, messages, complete, rsm_last):
         """Página del catch-up hacia adelante (start=). Emite lo recibido y,

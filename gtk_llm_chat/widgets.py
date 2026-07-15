@@ -4,11 +4,18 @@ import sys
 import re
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk
+from gi.repository import Gtk, Pango
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from .resource_manager import resource_manager
+
+DEBUG = os.environ.get('DEBUG') or False
+
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 class Message:
     """
@@ -61,9 +68,10 @@ class ErrorWidget(Gtk.Box):
 class MessageWidget(Gtk.Box):
     """Widget para mostrar un mensaje individual"""
 
-    def __init__(self, message):
+    def __init__(self, message, use_markdown=True):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.message = message
+        self.use_markdown = use_markdown
 
         # Import MarkdownView here
         from .markdownview import MarkdownView
@@ -101,12 +109,26 @@ class MessageWidget(Gtk.Box):
         if is_user and content.startswith("user:"):
             content = content[5:].strip()
 
-        # Usar MarkdownView para el contenido
-        self.content_view = MarkdownView()
-        self.content_view.set_hexpand(True)
-        self.content_view.set_size_request(167, -1)  # El warning pedía al menos 167
-        self.content_view.set_markdown(content)
-        message_box.append(self.content_view)
+        self.content_view = None
+        self.content_label = None
+        if self.use_markdown:
+            # Usar MarkdownView para el contenido
+            self.content_view = MarkdownView()
+            self.content_view.set_hexpand(True)
+            self.content_view.set_size_request(167, -1)  # El warning pedía al menos 167
+            self.content_view.set_markdown(content)
+            message_box.append(self.content_view)
+        else:
+            # En XMPP las burbujas son mayormente texto plano; Label evita
+            # costes de relayout de TextView y mejora la aparición inmediata.
+            self.content_label = Gtk.Label()
+            self.content_label.set_wrap(True)
+            self.content_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            self.content_label.set_xalign(0.0)
+            self.content_label.set_selectable(True)
+            self.content_label.set_hexpand(True)
+            self.content_label.set_label(content)
+            message_box.append(self.content_label)
 
         # Agregar timestamp
         time_label = Gtk.Label(
@@ -124,7 +146,32 @@ class MessageWidget(Gtk.Box):
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
         self.message.content = Message.compact_blank_lines(new_content)
-        self.content_view.set_markdown(self.message.content)
+        debug_print(
+            f"[widget] update_content sender={self.message.sender} "
+            f"len={len(self.message.content)}")
+        if self.content_view is not None:
+            self.content_view.set_markdown(self.message.content)
+        elif self.content_label is not None:
+            self.content_label.set_label(self.message.content)
+        # El TextView puede crecer en varios pasos (wrap + markdown). Sin pedir
+        # relayout explícito, el ScrolledWindow a veces deja `upper` viejo hasta
+        # la próxima interacción del usuario.
+        if self.content_view is not None:
+            self.content_view.queue_resize()
+        if self.content_label is not None:
+            self.content_label.queue_resize()
+        self.message_box.queue_resize()
+        self.queue_resize()
+        parent = self.get_parent()
+        if parent is not None:
+            parent.queue_resize()
+            debug_print("[widget] queued parent resize")
+            # Subir hasta la raíz para asegurar que el ScrolledWindow
+            # recalcule el rango aunque no haya interacción del usuario.
+            ancestor = parent
+            while ancestor is not None:
+                ancestor.queue_resize()
+                ancestor = ancestor.get_parent()
 
     def add_quick_responses(self, responses, on_selected):
         """Adjunta botones de respuesta rápida a esta burbuja."""

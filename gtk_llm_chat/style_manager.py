@@ -297,7 +297,54 @@ class StyleManager:
             border-color: @theme_selected_bg_color;
             box-shadow: 0 0 0 2px alpha(@theme_selected_bg_color, 0.2);
         }
-        
+
+        /* Telemetría del área de entrada: uso de contexto y modelo activo. */
+
+        /* La barra de contexto es una guía, no un elemento protagonista: fina y
+           discreta hasta que el contexto se llena, que es cuando importa. */
+        .context-level {
+            min-height: 3px;
+        }
+
+        .context-level trough {
+            min-height: 3px;
+            border-radius: 2px;
+            background-color: alpha(@theme_fg_color, 0.1);
+        }
+
+        .context-level block.filled {
+            min-height: 3px;
+            border-radius: 2px;
+            background-color: alpha(@theme_selected_bg_color, 0.7);
+        }
+
+        /* Contexto casi agotado: el color hace el aviso, sin ocupar más sitio.
+           Las clases las nombran los offsets del LevelBar (chat_window):
+           ctx-ok hasta el 75%, ctx-warn hasta el 90%, ctx-danger el resto. */
+        .context-level block.ctx-warn {
+            background-color: @warning_color;
+        }
+
+        .context-level block.ctx-danger {
+            background-color: @error_color;
+        }
+
+        /* Badge del modelo: una píldora discreta, legible pero que no compita
+           con el texto que el usuario está escribiendo. */
+        .pill {
+            border-radius: 999px;
+            padding: 2px 10px;
+            min-height: 0;
+            font-size: 0.85em;
+            color: alpha(@theme_fg_color, 0.7);
+            background-color: alpha(@theme_fg_color, 0.07);
+        }
+
+        .pill:hover {
+            color: @theme_fg_color;
+            background-color: alpha(@theme_fg_color, 0.12);
+        }
+
         /* Botón de envío */
         .send-button {
             background: @theme_selected_bg_color;

@@ -33,6 +33,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
     A chat window
     """
 
+    # Alto del campo de entrada, en px: arranca en ~3 líneas y deja de crecer
+    # a ~6, a partir de donde hace scroll interno.
+    _INPUT_MIN_HEIGHT = 60
+    _INPUT_MAX_HEIGHT = 120
+
     def __init__(self, config=None, chat_history=None, backend=None,
                  xmpp_session=None, **kwargs):
         super().__init__(**kwargs)
@@ -48,6 +53,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Inicializar flags para carga de historial
         self._history_loaded = False
         self._history_displayed = False
+        # Burbujas ya pintadas (ver _history_bubble_key): el catch-up de MAM
+        # solapa hacia atrás y reenvía mensajes que ya están en pantalla.
+        self._history_keys = set()
+        # Contacto para el que está construido el sidebar de ajustes (ver
+        # _update_settings_panel): sin esto se reconstruía en cada latido.
+        self._settings_panel_for = None
+        # El usuario está cargando historial VIEJO (subió al borde de arriba):
+        # ese lote no debe hacer saltar la vista al fondo.
+        self._loading_older_history = False
+        self._post_layout_scroll_pending = False
+        self._post_layout_scroll_force = False
+        self._post_layout_scroll_settle_id = None
+        self._post_layout_scroll_watch_id = None
+        self._suppress_text_changed = False
 
         # Asegurar que config no sea None
         self.config = config or {}
@@ -69,22 +88,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.chat_history = ChatHistory()
 
         # Estado del backend (contrato ChatBackend) y su sidebar — inicializado
-        # aquí y poblado de verdad por _bind_backend() más abajo en este
-        # __init__ (y, potencialmente, de nuevo más tarde para transformar
-        # la ventana in-place; spec 003 T7). _injected_backend se calcula ya
-        # (solo depende de los parámetros de entrada, no del backend en sí)
-        # porque el chrome del header construido más abajo decide su propio
-        # aspecto (qué botón mostrar, a qué lado) según este flag.
+        # aquí y poblado por _bind_backend() más abajo en este __init__. El
+        # backend siempre llega construido desde la aplicación (spec 009): la
+        # ventana no sabe fabricar ninguno, sólo hablar con el contrato.
         self.backend = None
         self._backend_handler_ids = []
         self._session_handler_ids = []
         self._xmpp_session = None
-        self._injected_backend = backend is not None or xmpp_session is not None
         self._composing_timeout_id = None
         self._sticky_response_cards = []
         self._sticky_response_items = []
         self._sticky_response_next_id = 0
-        self._approval_bypass_updating = False
+        self._is_agent_contact = False
         self.roster_sidebar = None
         self.model_sidebar = None
         self.model_options = None
@@ -144,6 +159,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header_title_box.set_hexpand(True)
         self.header_title_box.set_halign(Gtk.Align.START)
         self.header_title_box.set_valign(Gtk.Align.CENTER)
+        # El punto de presencia queda centrado en vertical (15 px arriba y
+        # abajo), pero el pack_start del header sólo deja 7 px por la izquierda:
+        # se le añaden los que faltan para que respire igual por los dos lados.
+        self.header_title_box.set_margin_start(8)
         self.header_title_box.append(self.title_presence_dot)
         self.title_widget.set_hexpand(True)
         self.title_widget.set_halign(Gtk.Align.START)
@@ -168,7 +187,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # --- Barra de estado XMPP: mantiene el headerbar solo para título y acciones. ---
         self.xmpp_toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.xmpp_toolbar.set_visible(self._injected_backend)
+        self.xmpp_toolbar.set_visible(xmpp_session is not None or backend is not None)
 
         self.xmpp_status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.xmpp_status_bar.add_css_class("toolbar")
@@ -177,7 +196,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.xmpp_status_bar.set_margin_end(12)
         self.xmpp_status_bar.set_margin_top(0)
         self.xmpp_status_bar.set_margin_bottom(0)
-        self.xmpp_status_bar.set_visible(self._injected_backend)
+        self.xmpp_status_bar.set_visible(xmpp_session is not None or backend is not None)
         self.title_presence_dot.set_visible(False)
 
         self.connection_status_label = Gtk.Label()
@@ -195,61 +214,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.xmpp_status_bar.append(self.connection_status_label)
         self.xmpp_status_bar.append(self.contact_status_label)
 
-        self.xmpp_controls_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.xmpp_controls_bar.add_css_class("toolbar")
-        self.xmpp_controls_bar.add_css_class("flat")
-        self.xmpp_controls_bar.set_margin_start(12)
-        self.xmpp_controls_bar.set_margin_end(12)
-        self.xmpp_controls_bar.set_margin_bottom(4)
-
-        self.agent_options_button = Gtk.MenuButton()
-        self.agent_options_button.add_css_class("flat")
-        self.agent_options_button.set_tooltip_text(_("Agent controls"))
-        self.agent_options_button.set_child(
-            resource_manager.create_icon_widget("emblem-system-symbolic"))
-        self.agent_options_popover = Gtk.Popover()
-        agent_options_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        agent_options_box.set_margin_top(10)
-        agent_options_box.set_margin_bottom(10)
-        agent_options_box.set_margin_start(10)
-        agent_options_box.set_margin_end(10)
-        self.approval_bypass_toggle = Gtk.ToggleButton(label=_("Approval bypass"))
-        self.approval_bypass_toggle.add_css_class("flat")
-        self.approval_bypass_toggle.set_tooltip_text(
-            _("Temporarily auto-approve agent approval requests"))
-        self.approval_bypass_toggle.connect("toggled", self._on_approval_bypass_toggled)
-        self.approval_bypass_toggle.set_sensitive(False)
-        agent_options_box.append(self.approval_bypass_toggle)
-        self.agent_options_popover.set_child(agent_options_box)
-        self.agent_options_button.set_popover(self.agent_options_popover)
-        self.agent_options_button.set_sensitive(False)
-        self.xmpp_controls_bar.append(self.agent_options_button)
-
-        self.agent_activity_label = Gtk.Label()
-        self.agent_activity_label.add_css_class("caption")
-        self.agent_activity_label.set_xalign(0)
-        self.agent_activity_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.agent_activity_label.set_hexpand(True)
-        self.xmpp_controls_bar.append(self.agent_activity_label)
-
-        self.agent_context_label = Gtk.Label()
-        self.agent_context_label.add_css_class("caption")
-        self.agent_context_label.add_css_class("dim-label")
-        self.agent_context_label.set_xalign(1)
-        self.agent_context_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.xmpp_controls_bar.append(self.agent_context_label)
-
+        # La telemetría del agente (actividad, contexto, modelo) y el bypass de
+        # aprobaciones vivían aquí, en una barra propia bajo el header. Ahora la
+        # telemetría está en el área de entrada (junto al texto que el usuario
+        # mira) y el bypass es un comando del menú de agente, así que esta barra
+        # se quedó sólo con el estado de conexión.
         self.xmpp_toolbar.append(self.xmpp_status_bar)
-        self.xmpp_toolbar.append(self.xmpp_controls_bar)
 
         # --- Botones de la Header Bar ---
-        # --- Botón para mostrar/ocultar el panel lateral (sidebar) ---
-        self.sidebar_button = Gtk.ToggleButton()
-        resource_manager.set_widget_icon_name(self.sidebar_button, "brain-symbolic")
-        self.sidebar_button.set_tooltip_text(_("Roster"))
-        # No conectar 'toggled' aquí si usamos bind_property
-        # Backends no-LLM no tienen sidebar de modelo en el MVP (spec 001)
-        self.sidebar_button.set_visible(False)
+        # (El viejo toggle "brain" del sidebar de modelo ya no existe: ese panel
+        # vive ahora en el sidebar derecho, tras settings_button.)
 
         # Botón de roster: misma superficie para LLM y XMPP.
         self.roster_button = Gtk.ToggleButton()
@@ -278,21 +252,29 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.primary_menu_button.set_tooltip_text(_("Main Menu"))
         self.primary_menu_button.set_menu_model(primary_menu)
 
-        self.agent_menu_button = Gtk.MenuButton()
+        # Ajustes del backend (sidebar derecho): los comandos del agente, o los
+        # parámetros del modelo. Sustituye al viejo popover de comandos, que no
+        # daba espacio para descripciones ni formularios.
+        self.settings_button = Gtk.ToggleButton()
         resource_manager.set_widget_icon_name(
-            self.agent_menu_button, "applications-system-symbolic")
-        self.agent_menu_button.set_tooltip_text(_("Agent"))
-        self.agent_menu_button.set_visible(False)
+            self.settings_button, "applications-system-symbolic")
+        self.settings_button.set_tooltip_text(_("Settings"))
+        self.settings_button.set_visible(False)
+        # El binding con settings_split se hace más abajo: el split todavía no
+        # existe en este punto.
 
         self.header.pack_end(self.primary_menu_button)
-        self.header.pack_end(self.agent_menu_button)
-        self.header.pack_end(self.sidebar_button)
+        self.header.pack_end(self.settings_button)
         self.header.pack_end(rename_button)
         self.header.pack_end(self.roster_button)
 
         # --- Fin Botones Header Bar ---
 
-        # --- Contenedor principal (OverlaySplitView) ---
+        # --- Contenedores (dos OverlaySplitView anidados) ---
+        # Antes había uno solo que se movía de lado según el backend, así que
+        # roster y ajustes no podían verse a la vez y competían por el mismo
+        # hueco. Ahora son dos: roster a la izquierda, ajustes del backend a la
+        # derecha, independientes.
         self.split_view = Adw.OverlaySplitView()
         self.split_view.set_vexpand(True)
         self.split_view.set_collapsed(True) # Empezar colapsado
@@ -300,6 +282,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.split_view.set_min_sidebar_width(280)
         self.split_view.set_max_sidebar_width(400)
         self.split_view.set_sidebar_position(Gtk.PackType.END)
+
+        # Sidebar derecho: lo que el backend tenga que ofrecer — parámetros del
+        # modelo (LLM) o los comandos del agente (XMPP). Ver _update_settings_panel.
+        self.settings_split = Adw.OverlaySplitView()
+        self.settings_split.set_vexpand(True)
+        self.settings_split.set_collapsed(True)
+        self.settings_split.set_show_sidebar(False)
+        self.settings_split.set_min_sidebar_width(300)
+        self.settings_split.set_max_sidebar_width(420)
+        self.settings_split.set_sidebar_position(Gtk.PackType.END)
+        self.settings_split.bind_property(
+            "show-sidebar", self.settings_button, "active",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
 
         # El binding 'show-sidebar' <-> botón toggle se crea en _bind_backend
         # (spec 003, T7), ya que depende de qué botón corresponde al tipo de
@@ -323,9 +318,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._scroll_bottom_distance = 0.0
         self._scroll_last_page_size = 0.0
         self._restoring_scroll = False
+        # Último `upper` visto. Sirve para distinguir "el usuario movió el
+        # scroll" de "el contenido creció bajo sus pies" — ver
+        # _on_vadj_value_changed: confundirlos dejaba el scroll a media burbuja.
+        self._scroll_last_upper = 0.0
+        # Seguir el fondo mientras el usuario no se haya ido hacia arriba. Es
+        # una *intención*, no una posición: se decide cuando el usuario mueve
+        # el scroll y se aplica después de cada layout, ya con el `upper` real.
+        # Calcularlo en el momento de añadir contenido no funciona — GTK aún no
+        # ha reasignado la altura, así que `upper` está desactualizado y el
+        # scroll se queda corto (visible como retraso durante el streaming).
+        self._stick_to_bottom = True
         vadj = scroll.get_vadjustment()
         vadj.connect("value-changed", self._on_vadj_value_changed)
         vadj.connect("changed", self._on_vadj_changed)
+        vadj.connect("notify::upper", self._on_vadj_range_notify)
+        vadj.connect("notify::page-size", self._on_vadj_range_notify)
         
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
@@ -336,6 +344,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.set_margin_end(12)
         self.messages_box.set_can_focus(False)
         style_manager.apply_to_widget(self.messages_box, "messages-container")
+        self._messages_box_last_height = 0
         scroll.set_child(self.messages_box)
 
         self.sticky_response_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -344,8 +353,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.sticky_response_box.set_margin_end(6)
         self.sticky_response_box.set_visible(False)
 
-        # Área de entrada
-        input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Área de entrada: una columna con la telemetría alrededor del texto —
+        # uso de contexto arriba, y abajo el modelo activo junto a la acción
+        # (enviar / cancelar). Toda la información de estado vive aquí, en el
+        # sitio donde el usuario ya está mirando, en vez de en una barra aparte.
+        input_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         input_box.add_css_class('toolbar')
         input_box.add_css_class('card')
         style_manager.apply_to_widget(input_box, "input-container")
@@ -353,7 +365,28 @@ class LLMChatWindow(Adw.ApplicationWindow):
         input_box.set_margin_bottom(6)
         input_box.set_margin_start(6)
         input_box.set_margin_end(6)
-        
+
+        # Uso de contexto. Arranca oculto: sólo hay dato cuando el agente lo
+        # publica en su presencia (ctx_used/ctx_max), y una barra vacía sin
+        # significado es peor que ninguna barra.
+        self.context_level = Gtk.LevelBar()
+        self.context_level.set_min_value(0.0)
+        self.context_level.set_max_value(1.0)
+        self.context_level.set_mode(Gtk.LevelBarMode.CONTINUOUS)
+        # Un offset da nombre (= clase CSS) al tramo que llega HASTA su valor, y
+        # GTK aplica el primero cuyo valor supere al actual. De ahí que haga
+        # falta uno que cubra hasta el tope: sin él, un contexto lleno se
+        # quedaría sin clase y perdería el color de aviso. Los nombres son
+        # propios porque los de GTK (low/high/full) nombran el tramo *inferior*,
+        # justo al revés de lo que se lee.
+        self.context_level.add_offset_value('ctx-ok', 0.75)
+        self.context_level.add_offset_value('ctx-warn', 0.90)
+        self.context_level.add_offset_value('ctx-danger', 1.0)
+        self.context_level.add_css_class('context-level')
+        self.context_level.set_visible(False)
+        style_manager.apply_to_widget(self.context_level, "context-level")
+        input_box.append(self.context_level)
+
         # TextView para entrada
         self.input_text = Gtk.TextView()
         self.input_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -367,22 +400,84 @@ class LLMChatWindow(Adw.ApplicationWindow):
         key_controller_input = Gtk.EventControllerKey()
         key_controller_input.connect('key-pressed', self._on_key_pressed)
         self.input_text.add_controller(key_controller_input)
-        
+
+        # El TextView crece con el texto envuelto y no se recorta solo: el tope
+        # lo pone el ScrolledWindow, que a partir de max_content_height empieza
+        # a hacer scroll en vez de seguir empujando el resto de la ventana.
+        self.input_scroll = Gtk.ScrolledWindow()
+        self.input_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.input_scroll.set_min_content_height(self._INPUT_MIN_HEIGHT)
+        self.input_scroll.set_max_content_height(self._INPUT_MAX_HEIGHT)
+        self.input_scroll.set_propagate_natural_height(True)
+        self.input_scroll.set_hexpand(True)
+        self.input_scroll.set_child(self.input_text)
+
+        input_box.append(self.input_scroll)
+
+        # Fila inferior: modelo activo (izquierda) · actividad · acción (derecha)
+        input_actions = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Badge del modelo activo, y a la vez el acceso a sus ajustes: en LLM
+        # abre el panel de parámetros que ya existe; con un agente, su comando
+        # `model` (ver _on_model_badge_clicked). Es un Button y no un MenuButton
+        # porque no despliega un menú fijo — enruta a dos sitios distintos.
+        self.model_badge = Gtk.Button()
+        self.model_badge.add_css_class('pill')
+        self.model_badge.add_css_class('flat')
+        self.model_badge.set_tooltip_text(_("Model settings"))
+        self.model_badge.set_visible(False)
+        self.model_badge.connect('clicked', self._on_model_badge_clicked)
+        style_manager.apply_to_widget(self.model_badge, "model-badge")
+        input_actions.append(self.model_badge)
+
+        # Qué está haciendo el agente ahora mismo (Trabajando, Usando
+        # herramienta: X…). Vacío cuando no hay nada que contar.
+        self.activity_label = Gtk.Label()
+        self.activity_label.add_css_class('caption')
+        self.activity_label.add_css_class('dim-label')
+        self.activity_label.set_xalign(0)
+        self.activity_label.set_hexpand(True)
+        self.activity_label.set_ellipsize(Pango.EllipsizeMode.END)
+        input_actions.append(self.activity_label)
+
         # Botón enviar
         self.send_button = Gtk.Button(label=_("Send"))
         self.send_button.connect('clicked', self._on_send_clicked)
         self.send_button.add_css_class('suggested-action')
         style_manager.apply_to_widget(self.send_button, "primary-button")
-        
+
+        # Mientras genera, Enviar cede su sitio a un spinner + Cancelar: el
+        # mismo hueco, así que la fila no salta de ancho al cambiar de estado.
+        self.busy_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.busy_spinner = Gtk.Spinner()
+        self.stop_button = Gtk.Button(label=_("Stop"))
+        self.stop_button.add_css_class('destructive-action')
+        self.stop_button.connect('clicked', self._on_stop_clicked)
+        self.busy_box.append(self.busy_spinner)
+        self.busy_box.append(self.stop_button)
+
+        self.action_stack = Gtk.Stack()
+        self.action_stack.set_transition_type(
+            Gtk.StackTransitionType.CROSSFADE)
+        self.action_stack.add_named(self.send_button, 'send')
+        self.action_stack.add_named(self.busy_box, 'busy')
+        self.action_stack.set_visible_child_name('send')
+        input_actions.append(self.action_stack)
+
+        input_box.append(input_actions)
+
         # Ensamblar la interfaz de chat
-        input_box.append(self.input_text)
-        input_box.append(self.send_button)
         chat_content_box.append(scroll)
         chat_content_box.append(self.sticky_response_box)
         chat_content_box.append(input_box)
 
-        # Establecer el contenido principal en el split_view
-        self.split_view.set_content(chat_content_box)
+        # El chat vive dentro del split de ajustes, y ése dentro del del roster:
+        # roster | chat | ajustes, cada panel con su propio toggle.
+        self.settings_split.set_content(chat_content_box)
+        self.split_view.set_content(self.settings_split)
 
         # --- Panel Lateral (Sidebar) y backend ---
         # Extraído a _bind_backend (spec 003, T7): el chrome de arriba (header,
@@ -460,7 +555,24 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_actions_batch = []
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
+        # Identidad de cada burbuja ya pintada, para que el solape del catch-up
+        # no la repinte. Se vacía con las burbujas: si no, al reabrir la
+        # conversación el historial se descartaría entero por "ya visto".
+        self._history_keys = set()
+        # Para qué contacto se construyó el sidebar de ajustes. Se invalida aquí
+        # (la ventana pasa a otra conversación) y NO en cada cambio de presencia.
+        self._settings_panel_for = None
+        # Otra conversación arranca sin nadie leyendo hacia atrás.
+        self._loading_older_history = False
         self._agent_command_client = None
+        if self._post_layout_scroll_watch_id is not None:
+            GLib.source_remove(self._post_layout_scroll_watch_id)
+            self._post_layout_scroll_watch_id = None
+        if self._post_layout_scroll_settle_id is not None:
+            GLib.source_remove(self._post_layout_scroll_settle_id)
+            self._post_layout_scroll_settle_id = None
+        self._post_layout_scroll_pending = False
+        self._post_layout_scroll_force = False
         self._clear_sticky_response_cards()
         for child in list(self.messages_box):
             self.messages_box.remove(child)
@@ -488,193 +600,211 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """
         self._unbind_backend()
         self._title_is_user_renamed = False
-        self._xmpp_session = xmpp_session
-        self._injected_backend = backend is not None or xmpp_session is not None
+        self.backend = backend
+        # La sesión XMPP puede venir del propio backend (una conversación con un
+        # contacto) o suelta (ventana que aún no eligió con quién hablar).
+        session = getattr(backend, 'session', None) or xmpp_session
+        self._xmpp_session = session
 
-        # El chrome (botones, posición del split_view) refleja el tipo de
-        # backend; se actualiza aquí porque puede cambiar entre llamadas
-        # (p.ej. una ventana XMPP vacía nunca pasa a modo LLM en la práctica,
-        # pero el flag sí puede alternar entre "sin contacto" y "con contacto").
-        self.xmpp_toolbar.set_visible(self._injected_backend)
-        self.xmpp_status_bar.set_visible(self._injected_backend)
-        self.sidebar_button.set_visible(False)
+        has_conversation = backend is not None
+        is_xmpp = session is not None
+        self.xmpp_toolbar.set_visible(is_xmpp)
+        self.xmpp_status_bar.set_visible(is_xmpp)
         self.roster_button.set_visible(True)
-        self.agent_menu_button.set_visible(False)
-        toggle_button = self.roster_button
         self._sidebar_toggle_binding = self.split_view.bind_property(
-            "show-sidebar", toggle_button, "active",
+            "show-sidebar", self.roster_button, "active",
             GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
         )
         self.set_enabled(True)
         self.split_view.set_collapsed(True)
         self.split_view.set_show_sidebar(False)
 
-        if self._injected_backend:
-            # Backend no-LLM (p.ej. XmppConversation): ya viene construido
-            # y conectado a su sesión propia. Solo cablear las señales del
-            # contrato ChatBackend; nada de modelo/proveedor/sidebar LLM.
-            self.backend = backend
-            session = getattr(backend, 'session', None) or xmpp_session
-            self._xmpp_session = session
-            if backend is not None:
-                self._backend_handler_ids = [
-                    backend.connect('ready', self._on_backend_ready),
-                    backend.connect('response', self._on_llm_response),
-                    backend.connect('response-correction',
-                                    self._on_llm_response_correction),
-                    backend.connect('error', self._on_llm_error),
-                    backend.connect('finished', self._on_llm_finished),
-                    backend.connect('state-changed', self._on_backend_state_changed),
-                    backend.connect('typing', self._on_backend_typing),
-                    backend.connect('quick-responses', self._on_quick_responses),
-                    backend.connect('commands', self._on_commands),
-                ]
-                self._update_xmpp_title_status()
-                self._refresh_agent_menu()
-            else:
-                # Sin contacto elegido aún: mostrar el roster, deshabilitar
-                # el chat hasta que el usuario elija una fila (spec 003).
-                self.title_widget.set_subtitle("")
-                self.title_presence_dot.set_visible(False)
-                self.contact_status_label.set_label(_("Choose a contact"))
-                self.set_enabled(False)
-            # Estado inicial: la sesión puede ya estar 'connected' antes de
-            # que esta ventana exista (el roster picker implica sesión viva).
-            self._last_connection_state = session.state if session else 'connected'
+        # Las señales del contrato ChatBackend, sin mirar de qué tipo es: un
+        # backend que no emita alguna (LLMClient no emite 'typing') simplemente
+        # nunca dispara ese handler.
+        if backend is not None:
+            self._backend_handler_ids = [
+                backend.connect('ready', self._on_backend_ready),
+                backend.connect('response', self._on_llm_response),
+                backend.connect('response-correction',
+                                self._on_llm_response_correction),
+                backend.connect('error', self._on_llm_error),
+                backend.connect('finished', self._on_llm_finished),
+                backend.connect('state-changed', self._on_backend_state_changed),
+                backend.connect('typing', self._on_backend_typing),
+                backend.connect('quick-responses', self._on_quick_responses),
+                backend.connect('commands', self._on_commands),
+            ]
+            # El cid sale de la config, no del backend: LLMClient.get_conversation_id()
+            # fuerza la carga del modelo y, si aún no hay conversación, se INVENTA
+            # una nueva — con lo que la ventana acababa apuntando a una conversación
+            # vacía en vez de a la que se pidió abrir. El backend publica su cid
+            # definitivo en 'ready' (ver _on_backend_ready), que es cuando ya lo sabe.
+            self.cid = self.config.get('cid')
+
+        if session is not None:
+            self._session_handler_ids = [
+                session.connect('contact-status-changed',
+                                self._on_contact_status_changed),
+                session.connect('presence-changed',
+                                self._on_contact_presence_changed),
+                session.connect('agent-telemetry-changed',
+                                self._on_agent_telemetry_changed),
+            ]
+            self._last_connection_state = session.state
             self._update_connection_status(self._last_connection_state)
-            # Roster unificado dockeado a la izquierda.
-            if session is not None:
-                self._session_handler_ids = [
-                    session.connect('contact-status-changed',
-                                    self._on_contact_status_changed),
-                    session.connect('presence-changed',
-                                    self._on_contact_presence_changed),
-                ]
-                from .chat_roster_sidebar import ChatRosterSidebar
-                self.roster_sidebar = ChatRosterSidebar(
-                    config=self.config,
-                    chat_history=self.chat_history,
-                    xmpp_session=session,
-                    on_llm_conversation_selected=self._on_llm_conversation_selected,
-                    on_xmpp_contact_selected=self._on_roster_contact_selected,
-                    on_xmpp_account=self._open_xmpp_account_from_sidebar)
-                self.model_sidebar = self.roster_sidebar
-                self.model_options = self.roster_sidebar.options_sidebar
-                self.split_view.set_sidebar_position(Gtk.PackType.START)
-                self.split_view.set_sidebar(self.roster_sidebar)
-                if backend is None:
-                    # Sin contacto: el roster se ve de entrada, no detrás
-                    # de un toggle — es lo único que hay que hacer aquí.
-                    self.split_view.set_show_sidebar(True)
-                    self.split_view.set_collapsed(False)
-        else:
-            # Initialize the backend *after* basic UI setup
-            try:
-                debug_print(f"Inicializando LLMClient con config: {self.config}")
-                self.backend = LLMClient(self.config, self.chat_history)
-                # Connect ChatBackend signals *here*
-                self._backend_handler_ids = [
-                    self.backend.connect('ready', self._on_backend_ready),
-                    self.backend.connect('response', self._on_llm_response),
-                    self.backend.connect('error', self._on_llm_error),
-                    self.backend.connect('finished', self._on_llm_finished),
-                ]
 
-                if self.cid:
-                    debug_print(f"LLMChatWindow: usando CID existente: {self.cid}")
-                else:
-                    debug_print("LLMChatWindow: sin CID específico, creando nueva conversación")
+        # El historial NO se pide aquí. Lo carga _on_backend_ready, que es
+        # cuando el backend está de verdad listo: en XMPP eso significa sesión
+        # conectada (sin conexión, la consulta MAM se descarta en silencio y el
+        # chat se queda vacío), y en LLM, modelo cargado y cid conocido.
+        if has_conversation and is_xmpp:
+            self._update_xmpp_title_status()
 
-            except Exception as e:
-                debug_print(_(f"Fatal error starting LLMClient: {e}"))
-                # Display error in UI instead of exiting?
-                error_widget = ErrorWidget(f"Fatal error starting LLMClient: {e}")
-                self.messages_box.append(error_widget)
-                self.set_enabled(False)  # Disable input if LLM fails critically
-                # Optionally: sys.exit(1) if it should still be fatal
+        # Roster unificado (izquierda): conversaciones LLM y contactos XMPP.
+        from .chat_roster_sidebar import ChatRosterSidebar
+        self.roster_sidebar = ChatRosterSidebar(
+            config=self.config,
+            llm_client=backend if not is_xmpp else None,
+            chat_history=self.chat_history,
+            xmpp_session=session,
+            on_llm_conversation_selected=self._on_llm_conversation_selected,
+            on_xmpp_contact_selected=self._on_roster_contact_selected,
+            on_xmpp_account=self._open_xmpp_account_from_sidebar)
+        self.model_sidebar = self.roster_sidebar
+        self.model_options = self.roster_sidebar.options_sidebar
+        self.split_view.set_sidebar_position(Gtk.PackType.START)
+        self.split_view.set_sidebar(self.roster_sidebar)
 
-            # Obtener el modelo predeterminado o el modelo de la conversación activa
-            if not self.config.get('cid'):
-                default_model_id = get_default_model()
-                if default_model_id:
-                    self.config['model'] = default_model_id
-                    debug_print(f"Usando modelo predeterminado: {default_model_id}")
-            else:
-                model_id = self.backend.get_model_id()
-                self.config['model'] = model_id
-                debug_print(f"Usando modelo de la conversación: {model_id}")
+        if not has_conversation:
+            # Ventana sin conversación (el "picker"): el roster se ve de
+            # entrada, no escondido tras un toggle.
+            self.split_view.set_show_sidebar(True)
+            self.split_view.set_collapsed(False)
+            self.set_enabled(False)
 
-                # Cargar el título de la conversación existente si hay un cid
-                try:
-                    conversation = self.chat_history.get_conversation(self.cid)
-                    if conversation and conversation.get('title'):
-                        title = conversation['title']
-                        self.set_conversation_name(title)
-                        debug_print(f"Cargando título de conversación existente: {title}")
-                except Exception as e:
-                    debug_print(f"Error al cargar el título de la conversación: {e}")
+        self._update_settings_panel()
 
-            self.title_widget.set_subtitle(self.config['model'])
+    @property
+    def is_messaging_backend(self):
+        """True si el backend es de mensajería (XMPP): hay una sesión y un
+        contacto al otro lado. Sustituye al viejo _injected_backend, que decía
+        "el backend me lo dieron construido" — algo que ahora es siempre cierto
+        (spec 009) y que además nunca fue la pregunta que se quería hacer."""
+        return self._xmpp_session is not None
 
-            app = self.get_application()
-            session = None
-            if app is not None and hasattr(app, 'get_xmpp_session_for_roster'):
-                session = app.get_xmpp_session_for_roster()
-            self._xmpp_session = session
-            if session is not None:
-                self._session_handler_ids = [
-                    session.connect('contact-status-changed',
-                                    self._on_contact_status_changed),
-                    session.connect('presence-changed',
-                                    self._on_contact_presence_changed),
-                ]
+    def _update_settings_panel(self):
+        """Puebla el sidebar derecho con lo que el backend actual ofrezca.
 
-            # Roster unificado: conversaciones LLM y contactos XMPP en el
-            # mismo panel. Las opciones de modelo quedan como segundo nivel.
-            from .chat_roster_sidebar import ChatRosterSidebar
-            self.model_sidebar = ChatRosterSidebar(
-                config=self.config,
-                llm_client=self.backend,
-                chat_history=self.chat_history,
-                xmpp_session=session,
-                on_llm_conversation_selected=self._on_llm_conversation_selected,
-                on_xmpp_contact_selected=self._on_roster_contact_selected,
-                on_xmpp_account=self._open_xmpp_account_from_sidebar)
-            self.roster_sidebar = self.model_sidebar
-            self.model_options = self.model_sidebar.options_sidebar
-            self.split_view.set_sidebar(self.model_sidebar)
-            self.split_view.set_sidebar_position(Gtk.PackType.START)
+        No se pregunta "¿esto es LLM o XMPP?", sino "¿qué ajustes tienes?" — un
+        agente ofrece sus comandos ad-hoc, un modelo local sus parámetros, y un
+        contacto XMPP normal nada (entonces el panel y su botón desaparecen).
+
+        El panel se CACHEA por contacto. Antes se reconstruía en cada llamada, y
+        como _on_contact_status_changed llama aquí, cada latido de presencia del
+        agente (cada 10s, y alternando chat/dnd mientras trabaja) creaba un
+        AgentCommandsSidebar nuevo — que pide los comandos por XMPP al
+        construirse. Resultado: una ráfaga de disco#items cada pocos segundos
+        contra el gateway, multiplicada por cada ventana abierta. Además era
+        destructivo: reconstruir el panel se llevaba por delante el formulario
+        XEP-0004 que el usuario estuviera rellenando.
+        """
+        key = self._settings_panel_key()
+        if key == self._settings_panel_for:
+            return
+        self._settings_panel_for = key
+
+        panel = self._build_settings_panel()
+        self.settings_split.set_sidebar(panel)
+        self.settings_button.set_visible(panel is not None)
+        if panel is None:
+            self.settings_split.set_show_sidebar(False)
+
+    def _settings_panel_key(self):
+        """Qué panel toca. Sólo cambia al cambiar de conversación — no cuando el
+        agente cambia de estado, que es lo que dispara la mayoría de llamadas."""
+        if self.backend is None:
+            return None
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is not None and bare_jid:
+            # is_agent_contact SÍ puede cambiar (las caps del contacto llegan
+            # después del roster), así que entra en la clave: en cuanto sabemos
+            # que es un agente, el panel se construye — pero una sola vez.
+            return ('xmpp', bare_jid, session.is_agent_contact(bare_jid))
+        return ('llm', self.cid)
+
+    def _build_settings_panel(self):
+        if self.backend is None:
+            return None
+
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is not None and bare_jid:
+            # Sólo un agente expone comandos; un contacto humano no tiene
+            # ajustes que ofrecer aquí.
+            if not session.is_agent_contact(bare_jid):
+                return None
+            from .agent_commands_sidebar import AgentCommandsSidebar
+            return AgentCommandsSidebar(
+                session, bare_jid,
+                on_error=lambda msg: self._on_llm_error(self.backend, msg))
+
+        # Backend LLM: los parámetros del modelo, que hasta ahora vivían
+        # escondidos dentro del stack del roster (a la izquierda).
+        return self.model_options
 
     # Resetear el stack al cerrar el sidebar
     def _on_sidebar_visibility_changed(self, split_view, param):
-        show_sidebar = split_view.get_show_sidebar()
-        if not show_sidebar:
-            if self.model_sidebar is not None:
-                self.model_sidebar.show_list()
-            if self.model_options is not None:
-                self.model_options.stack.set_visible_child_name("actions")
+        # Al cerrar el roster, volver a su lista (los ajustes del modelo ya no
+        # son una página suya: viven en el sidebar derecho).
+        if not split_view.get_show_sidebar():
+            if self.roster_sidebar is not None:
+                self.roster_sidebar.show_list()
             self.input_text.grab_focus()
 
     def _on_roster_contact_selected(self, bare_jid):
-        """Un contacto elegido en el roster unificado: abre/enfoca su chat."""
-        app = self.get_application()
+        """Un contacto XMPP elegido en el roster: abre/enfoca su ventana."""
         session = getattr(self.backend, 'session', None) or self._xmpp_session
         if session is None:
             return
-        if self.backend is None:
-            # Esta ventana era el picker de contacto (sin conversación
-            # elegida aún, spec 003): transformarla en la conversación
-            # in-place (T7) en vez de abrir una segunda ventana y cerrar
-            # esta — misma ventana, registrada en la app para focus-or-open.
-            conversation = session.get_conversation(bare_jid)
-            self._bind_backend(backend=conversation)
-            if app is not None and hasattr(app, '_window_by_cid'):
-                app._window_by_cid[f"xmpp:{session.bare_jid}:{bare_jid}"] = self
-        elif app is not None and hasattr(app, 'open_xmpp_conversation'):
-            # Ventana ya en una conversación: cambiar de contacto abre/
-            # enfoca la ventana de ese contacto vía el registro habitual.
-            app.open_xmpp_conversation(session, bare_jid)
+        self._open_from_roster({
+            'kind': 'xmpp',
+            'session': session,
+            'account': session.bare_jid,
+            'jid': bare_jid,
+        })
+
+    def _on_llm_conversation_selected(self, cid):
+        """Una conversación LLM elegida en el roster: abre/enfoca su ventana,
+        igual que un contacto XMPP. Antes esto transformaba la ventana actual,
+        que era la razón de todo el trasiego de claves del registro."""
+        if cid == self.cid:
             self.split_view.set_show_sidebar(False)
+            return
+        self._open_from_roster({'kind': 'llm', 'cid': cid})
+
+    def _open_from_roster(self, descriptor):
+        """Abre la conversación elegida. Si esta ventana es el picker (aún no
+        tiene conversación), se convierte en ella en vez de dejar una ventana
+        vacía huérfana; si ya tiene una, la nueva va en su propia ventana."""
+        app = self.get_application()
+        if app is None:
+            return
+        self.split_view.set_show_sidebar(False)
+
+        if self.backend is None:
+            backend = app.build_backend(descriptor, self.chat_history)
+            self.config['cid'] = descriptor.get('cid') or self.config.get('cid')
+            self.cid = descriptor.get('cid')
+            self._bind_backend(backend=backend,
+                               xmpp_session=descriptor.get('session'))
+            key = app.conversation_key(descriptor)
+            if key:
+                app._window_by_cid[key] = self
+            return
+
+        app.open_conversation(descriptor)
 
     def _open_xmpp_account_from_sidebar(self):
         app = self.get_application()
@@ -724,40 +854,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.model_options = self.model_sidebar.options_sidebar
         self.split_view.set_sidebar_position(Gtk.PackType.START)
         self.split_view.set_sidebar(self.model_sidebar)
-
-    def _on_llm_conversation_selected(self, cid):
-        """Una conversación LLM elegida en el roster: cambia esta ventana
-        in-place salvo que ya tenga una ventana registrada."""
-        if cid == self.cid:
-            self.split_view.set_show_sidebar(False)
-            return
-        app = self.get_application()
-        existing = getattr(app, '_window_by_cid', {}).get(cid) if app else None
-        if existing is not None and existing is not self:
-            existing.present()
-            self.split_view.set_show_sidebar(False)
-            return
-
-        # Sin ventana propia: transformar esta misma ventana in-place.
-        # _bind_backend's rama LLM lee self.config['cid'] para construir el
-        # LLMClient correcto (mismo camino que __init__ usa al abrir con
-        # un CID existente), así que basta con actualizarlo antes de llamar.
-        old_cid = self.cid
-        old_xmpp_key = None
-        old_session = getattr(self.backend, 'session', None)
-        old_bare_jid = getattr(self.backend, 'bare_jid', None)
-        if old_session is not None and old_bare_jid:
-            old_xmpp_key = f"xmpp:{old_session.bare_jid}:{old_bare_jid}"
-        self.config['cid'] = cid
-        self.cid = cid
-        self._bind_backend(backend=None)
-        if app is not None and hasattr(app, '_window_by_cid'):
-            if old_cid and app._window_by_cid.get(old_cid) is self:
-                del app._window_by_cid[old_cid]
-            if old_xmpp_key and app._window_by_cid.get(old_xmpp_key) is self:
-                del app._window_by_cid[old_xmpp_key]
-            app._window_by_cid[cid] = self
-        self.split_view.set_show_sidebar(False)
 
     def _setup_css(self):
         """Aplica estilos CSS específicos para la ventana de chat."""
@@ -905,7 +1001,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_save_title(self, widget):
         app = self.get_application()
-        if self._injected_backend:
+        if self.is_messaging_backend:
             self._title_is_user_renamed = True
             self._restore_header_title_widget()
             new_title = self.title_entry.get_text()
@@ -969,21 +1065,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         # Ctrl+M: Abrir selector de modelo (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_m and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.model_sidebar is not None and self.model_options is not None:
-                # Mostrar el sidebar, ir a opciones, y a la página del selector
-                self.split_view.set_show_sidebar(True)
-                self.model_sidebar.show_options()
-                self.model_options.stack.set_visible_child_name("model_selector")
+            self._open_model_options(page="model_selector")
             return True
 
         # Ctrl+S: Cambiar system prompt (no aplica a backends no-LLM)
         if keyval == Gdk.KEY_s and state & Gdk.ModifierType.CONTROL_MASK:
-            if self.model_sidebar is not None and self.model_options is not None:
-                # Mostrar el sidebar, ir a opciones, y abrir el diálogo de system prompt
-                self.split_view.set_show_sidebar(True)
-                self.model_sidebar.show_options()
-                if hasattr(self.model_options, '_on_system_prompt_button_clicked'):
-                    self.model_options._on_system_prompt_button_clicked(None)
+            self._open_model_options()
+            if self.model_options is not None and hasattr(
+                    self.model_options, '_on_system_prompt_button_clicked'):
+                self.model_options._on_system_prompt_button_clicked(None)
             return True
 
         # Ctrl+N: Nueva conversación
@@ -996,19 +1086,48 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return False
 
     def set_enabled(self, enabled):
-        """Habilita o deshabilita la entrada de texto"""
+        """Habilita o deshabilita la entrada de texto.
+
+        Deshabilitado equivale a "generando": es el único punto por el que pasan
+        tanto el envío como el fin (éxito o error), así que el spinner y el botón
+        de cancelar se conmutan aquí en vez de en cada sitio que emite.
+        """
         self.input_text.set_sensitive(enabled)
         self.send_button.set_sensitive(enabled)
+        self._set_busy(not enabled)
+
+    def _set_busy(self, busy):
+        self.action_stack.set_visible_child_name('busy' if busy else 'send')
+        if busy:
+            self.busy_spinner.start()
+        else:
+            self.busy_spinner.stop()
+            # La actividad la publica el agente por presencia; al terminar no
+            # llega ningún "ya no hago nada", así que se limpia aquí.
+            self.activity_label.set_label("")
+
+    def _on_stop_clicked(self, _button):
+        if self.backend is not None:
+            self.backend.cancel()
+        # No esperamos al backend para devolver el control: si cancel() no
+        # produjera un 'finished', el usuario se quedaría con la UI bloqueada.
+        self.set_enabled(True)
 
     def _on_text_changed(self, buffer):
-        lines = buffer.get_line_count()
-        # Ajustar altura entre 3 y 6 líneas
-        new_height = min(max(lines * 20, 60), 120)
-        self.input_text.set_size_request(-1, new_height)
+        if self._suppress_text_changed:
+            if DEBUG:
+                debug_print("[send] text-changed suppressed")
+            return
+        # La altura ya no se calcula aquí: get_line_count() sólo cuenta líneas
+        # lógicas, así que un párrafo largo sin saltos contaba como una sola y
+        # el TextView crecía sin tope al envolverse. Ahora el alto lo negocian
+        # el TextView y su ScrolledWindow (min/max_content_height).
 
         # Notificar 'composing' al backend (spec 001, T8). No-op en LLMClient.
         if self.backend is not None:
             has_text = buffer.get_char_count() > 0
+            if DEBUG:
+                debug_print(f"[send] text-changed has_text={has_text}")
             self.backend.notify_composing(has_text)
             if self._composing_timeout_id:
                 GLib.source_remove(self._composing_timeout_id)
@@ -1054,30 +1173,54 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         if sender == "user":
             self.last_message = message
-            # Clear the input buffer after sending a user message
-            buffer = self.input_text.get_buffer()
-            buffer.set_text("", 0)
 
         # Create the message widget
-        message_widget = MessageWidget(message)
+        use_markdown = not self.is_messaging_backend
+        message_widget = MessageWidget(message, use_markdown=use_markdown)
+        if DEBUG:
+            debug_print(f"[send] display_message sender={sender} len={len(str(content or ''))}")
 
-        # Connect to the 'map' signal to scroll *after* the widget is shown
-        def scroll_on_map(widget, *args):
-            # Use timeout_add to ensure scrolling happens after a short delay
-            def do_scroll():
-                self._scroll_to_bottom(True) # Force scroll
-                return GLib.SOURCE_REMOVE # Run only once
-            GLib.timeout_add(50, do_scroll) # Delay of 50ms
-            # Return False because we are using connect_after
-            return False
+        # Enviar un mensaje propio es intención explícita de volver al fondo;
+        # la llegada de uno del asistente no, así que ahí se respeta que el
+        # usuario pueda estar leyendo más arriba.
+        force = sender == "user"
 
-        # Use connect_after for potentially better timing
-        signal_id = message_widget.connect_after('map', scroll_on_map)
+        # Mensajes en vivo de XMPP: append directo para que se vean de inmediato
+        # y no dependan de timestamp/ordenado de historial.
+        if self.is_messaging_backend:
+            self.messages_box.append(message_widget)
+            self._content_added_pending = True
+            GLib.idle_add(lambda: setattr(self, '_content_added_pending', False)
+                          or GLib.SOURCE_REMOVE)
+            if DEBUG:
+                debug_print(
+                    f"[insert] live-append sender={sender} "
+                    f"children={len(list(self.messages_box))}")
+        else:
+            # LLM/historial: mantener inserción cronológica.
+            self._insert_bubble_by_timestamp(message_widget)
 
-        # Add the widget to the box
-        self.messages_box.append(message_widget)
+        # Propagar relayout también al ScrolledWindow: en GTK4 puede quedar el
+        # rango del adjustment viejo hasta el próximo ciclo de interacción.
+        self.messages_box.queue_resize()
+        self.message_scroll.queue_resize()
+        self._scroll_to_bottom_after_layout(force=force)
+        if DEBUG:
+            debug_print(f"[send] display_message done sender={sender}")
 
         return message_widget
+
+    def _clear_input_buffer_silently(self):
+        """Limpia el TextBuffer sin disparar efectos colaterales de
+        _on_text_changed (p.ej. notify_composing en red)."""
+        buffer = self.input_text.get_buffer()
+        self._suppress_text_changed = True
+        try:
+            if DEBUG:
+                debug_print("[send] clearing input buffer silently")
+            buffer.set_text("", 0)
+        finally:
+            self._suppress_text_changed = False
 
     def _update_connection_status(self, state):
         """Refleja el estado de conexión del backend en la barra XMPP."""
@@ -1140,7 +1283,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         active_bare = getattr(self.backend, 'bare_jid', None)
         if bare_jid == active_bare:
             self._update_xmpp_title_status()
-            self._refresh_agent_menu()
+            self._update_settings_panel()
+
+    def _on_agent_telemetry_changed(self, session, bare_jid):
+        """El agente publicó telemetría nueva (PEP): refrescar la barra de
+        contexto y el badge de modelo del área de entrada."""
+        if bare_jid == getattr(self.backend, 'bare_jid', None):
+            self._apply_agent_telemetry(session.get_agent_telemetry(bare_jid))
 
     def _on_contact_presence_changed(self, session, bare_jid, state):
         active_bare = getattr(self.backend, 'bare_jid', None)
@@ -1156,15 +1305,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.title_widget.set_subtitle("")
             self.title_presence_dot.set_visible(False)
             self.contact_status_label.set_label(self.backend.get_display_name())
-            self._update_agent_controls(False)
+            self._is_agent_contact = False
             self._update_agent_state_chips("")
             return
+        # El nombre del contacto, no su JID: get_display_name ya cae al localpart
+        # capitalizado cuando el roster no trae un nombre. El JID entero sigue a
+        # la vista en la barra de estado, y aquí a un hover.
         display_name = self.backend.get_display_name()
         if not self._title_is_user_renamed:
             self.title_widget.set_title(display_name)
             self.title_entry.set_text(display_name)
             self.set_title(display_name)
         self.title_widget.set_subtitle("")
+        self.title_widget.set_tooltip_text(bare_jid)
         status = session.get_contact_status(bare_jid)
         presence = session.get_presence(bare_jid)
         is_online = presence == 'online'
@@ -1173,34 +1326,124 @@ class LLMChatWindow(Adw.ApplicationWindow):
         display_status = status or presence_label
         self.contact_status_label.set_label(bare_jid)
         self.contact_status_label.set_tooltip_text(display_status)
+        # Un contacto-agente gestiona su propio modelo (comando XEP-0050); un
+        # contacto XMPP normal no tiene ajustes de modelo que ofrecer.
+        self._is_agent_contact = session.is_agent_contact(bare_jid)
         self._update_agent_state_chips(display_status)
-        self._update_agent_controls(session.is_agent_contact(bare_jid))
-
-    def _update_agent_controls(self, is_agent):
-        if not hasattr(self, 'approval_bypass_toggle'):
-            return
-        self.approval_bypass_toggle.set_sensitive(bool(is_agent))
-        self.agent_options_button.set_sensitive(bool(is_agent))
+        # Telemetría: pintar lo que ya tengamos, y pedir el valor actual — un
+        # agente quieto no publica eventos, así que sin esta petición la barra
+        # de contexto no aparecería hasta que el agente volviera a trabajar.
+        self._apply_agent_telemetry(session.get_agent_telemetry(bare_jid))
+        if self._is_agent_contact:
+            session.fetch_agent_telemetry(bare_jid)
 
     def _update_agent_state_chips(self, status):
-        if not hasattr(self, 'agent_activity_label'):
+        """El <status> de la presencia: qué está haciendo el agente, y nada más.
+
+        Los números (contexto, tokens, modelo) ya no viajan aquí — llegan por
+        PEP, ver _apply_agent_telemetry. El status es texto para humanos, y
+        meterle cifras hacía que cualquier otro cliente (Gajim) mostrara
+        "ctx_used=42865 | tok=…" como estado del contacto."""
+        if not hasattr(self, 'activity_label'):
             return
-        parsed = self._parse_agent_status(status)
-        activity = self._friendly_agent_activity(parsed.get('activity', ''))
-        details = self._format_agent_status_details(parsed)
-        self.agent_activity_label.set_label(activity)
-        self.agent_activity_label.set_tooltip_text(str(status or ""))
-        self.agent_context_label.set_label(details)
-        self.agent_context_label.set_tooltip_text(details)
-        lower = str(status or "").lower()
-        if "bypass de aprobaciones: activo" in lower or "approval bypass: active" in lower:
-            self._approval_bypass_updating = True
-            self.approval_bypass_toggle.set_active(True)
-            self._approval_bypass_updating = False
-        elif "bypass de aprobaciones: apagado" in lower or "approval bypass: off" in lower:
-            self._approval_bypass_updating = True
-            self.approval_bypass_toggle.set_active(False)
-            self._approval_bypass_updating = False
+        activity = self._friendly_agent_activity(
+            self._parse_agent_status(status).get('activity', ''))
+        self.activity_label.set_label(activity)
+        self.activity_label.set_tooltip_text(str(status or ""))
+
+    def _apply_agent_telemetry(self, telemetry):
+        """Telemetría recibida por PEP: barra de contexto y badge de modelo."""
+        if not hasattr(self, 'context_level'):
+            return
+        self._update_context_level(telemetry or {})
+        self._update_model_badge((telemetry or {}).get('model'))
+
+    def _update_context_level(self, telemetry):
+        used = telemetry.get('context_used')
+        total = telemetry.get('context_max')
+        if used is None or not total:
+            self.context_level.set_visible(False)
+            return
+        fraction = max(0.0, min(1.0, used / total))
+        self.context_level.set_value(fraction)
+        self.context_level.set_visible(True)
+
+        tooltip = [
+            _("Context: {percent}% ({used}k / {total}k tokens)").format(
+                percent=round(fraction * 100),
+                used=round(used / 1000),
+                total=round(total / 1000)),
+        ]
+        # Lo acumulado no cabe en la barra, pero sí a un hover de distancia.
+        if telemetry.get('tokens_total') is not None:
+            tooltip.append(_("Session: {total} tokens in {requests} requests").format(
+                total=f"{telemetry['tokens_total']:,}",
+                requests=telemetry.get('tokens_requests', '?')))
+        if telemetry.get('cost') is not None:
+            tooltip.append(_("Cost: ") + self._format_cost(telemetry['cost']))
+        self.context_level.set_tooltip_text("\n".join(tooltip))
+
+    def _update_model_badge(self, model):
+        if not model:
+            self.model_badge.set_visible(False)
+            return
+        # El id completo (provider/modelo) es demasiado largo para un badge; el
+        # nombre basta, y el id entero queda en el tooltip.
+        text = str(model)
+        self.model_badge.set_label(text.split('/')[-1])
+        self.model_badge.set_tooltip_text(text)
+        self.model_badge.set_visible(True)
+
+    def _on_model_badge_clicked(self, _button):
+        """Los ajustes del modelo son distintos según quién lo gobierne: en LLM
+        los decide esta app (panel de parámetros del sidebar); con un agente los
+        decide el agente, y la vía es su comando `model` (XEP-0050)."""
+        if self._is_agent_contact:
+            self._open_agent_model_command()
+            return
+        self._open_model_options()
+
+    def _open_model_options(self, page=None):
+        """Abre el panel de parámetros del modelo — ahora el sidebar derecho, no
+        una página escondida dentro del roster."""
+        if getattr(self, 'model_options', None) is None:
+            return
+        self.settings_split.set_show_sidebar(True)
+        if page:
+            self.model_options.stack.set_visible_child_name(page)
+
+    def _open_agent_model_command(self):
+        """Ejecuta el comando `model` del agente: el mismo formulario (selector
+        de alias) que aparece en el menú de comandos, sin tener que buscarlo."""
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            return
+
+        from .xmpp_commands import XmppCommandClient
+        client = self._agent_command_client or XmppCommandClient(
+            session, bare_jid)
+        self._agent_command_client = client
+
+        def on_error(message):
+            self._on_llm_error(self.backend, message)
+
+        def on_commands(commands):
+            command = next((c for c in commands
+                            if getattr(c, 'node', '') == 'model'), None)
+            if command is None:
+                on_error(_("This agent does not expose a model command."))
+                return
+            self._execute_agent_command(client, command)
+
+        client.request_commands(on_commands, on_error)
+
+    @staticmethod
+    def _as_number(value):
+        try:
+            return float(str(value).replace(',', ''))
+        except (TypeError, ValueError):
+            return None
 
     @classmethod
     def _parse_agent_status(cls, status):
@@ -1237,6 +1480,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             'model': ('model', 'model_id'),
             'tool': ('tool', 'current_tool'),
             'bypass': ('bypass', 'approval_bypass'),
+            'context_used': ('ctx_used', 'context_used'),
+            'context_max': ('ctx_max', 'context_max', 'context_window'),
         }
         for key, names in aliases.items():
             for name in names:
@@ -1275,6 +1520,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             'current_tool': 'tool',
             'approval_bypass': 'bypass',
             'bypass': 'bypass',
+            'ctx_used': 'context_used',
+            'context_used': 'context_used',
+            'ctx_max': 'context_max',
+            'context_max': 'context_max',
         }
         parsed[aliases.get(key, key)] = value
 
@@ -1346,148 +1595,162 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return _("Usando herramienta: ") + text.split(":", 1)[1].strip()
         return text
 
-    def _refresh_agent_menu(self):
-        if self.backend is None:
-            self.agent_menu_button.set_visible(False)
+    @staticmethod
+    def _as_number(value):
+        try:
+            return float(str(value).replace(',', ''))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _parse_agent_status(cls, status):
+        text = str(status or "").strip()
+        parsed = {'activity': text}
+        if not text:
+            return parsed
+        json_text = text
+        if json_text.startswith("nanoclaw:"):
+            json_text = json_text.split(":", 1)[1].strip()
+        if json_text.startswith("{"):
+            try:
+                data = json.loads(json_text)
+                if isinstance(data, dict):
+                    return cls._normalize_agent_status_dict(data, fallback=text)
+            except (TypeError, ValueError):
+                pass
+        parts = [part.strip() for part in re.split(r"\s*\|\s*", text) if part.strip()]
+        if parts:
+            parsed['activity'] = parts[0]
+        for part in parts[1:]:
+            cls._parse_agent_status_part(part, parsed)
+        return parsed
+
+    @classmethod
+    def _normalize_agent_status_dict(cls, data, fallback=""):
+        parsed = {'activity': data.get('activity') or data.get('state') or fallback}
+        aliases = {
+            'request': ('request', 'requests', 'requests_total', 'request_count'),
+            'tokens': ('tokens', 'total_tokens', 'tokens_total'),
+            'input_tokens': ('input_tokens', 'prompt_tokens', 'tokens_in'),
+            'output_tokens': ('output_tokens', 'completion_tokens', 'tokens_out'),
+            'cost': ('cost', 'usd', 'cost_usd'),
+            'model': ('model', 'model_id'),
+            'tool': ('tool', 'current_tool'),
+            'bypass': ('bypass', 'approval_bypass'),
+            'context_used': ('ctx_used', 'context_used'),
+            'context_max': ('ctx_max', 'context_max', 'context_window'),
+        }
+        for key, names in aliases.items():
+            for name in names:
+                if data.get(name) is not None:
+                    parsed[key] = data.get(name)
+                    break
+        return parsed
+
+    @staticmethod
+    def _parse_agent_status_part(part, parsed):
+        match = re.match(r"^([A-Za-z _-]+)\s*[:=]\s*(.+)$", part)
+        if not match:
+            parsed.setdefault('notes', []).append(part)
             return
-        session = getattr(self.backend, 'session', None)
-        bare_jid = getattr(self.backend, 'bare_jid', None)
-        if session is None or bare_jid is None or not session.is_agent_contact(bare_jid):
-            self.agent_menu_button.set_visible(False)
-            return
-        self.agent_menu_button.set_visible(True)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
+        key = match.group(1).strip().lower().replace(" ", "_").replace("-", "_")
+        value = match.group(2).strip()
+        aliases = {
+            'req': 'request',
+            'requests': 'request',
+            'request': 'request',
+            'tok': 'tokens',
+            'tokens': 'tokens',
+            'total_tokens': 'tokens',
+            'in': 'input_tokens',
+            'input': 'input_tokens',
+            'input_tokens': 'input_tokens',
+            'prompt_tokens': 'input_tokens',
+            'out': 'output_tokens',
+            'output': 'output_tokens',
+            'output_tokens': 'output_tokens',
+            'completion_tokens': 'output_tokens',
+            'cost': 'cost',
+            'usd': 'cost',
+            'model': 'model',
+            'tool': 'tool',
+            'current_tool': 'tool',
+            'approval_bypass': 'bypass',
+            'bypass': 'bypass',
+            'ctx_used': 'context_used',
+            'context_used': 'context_used',
+            'ctx_max': 'context_max',
+            'context_max': 'context_max',
+        }
+        parsed[aliases.get(key, key)] = value
 
-        compact = Gtk.Button(label=_("Compact Context"))
-        compact.connect("clicked", lambda _b: self._confirm_agent_text_command(
-            _("Compact Context"), _("Ask the agent to compact its current context?"),
-            "/compact"))
-        clear = Gtk.Button(label=_("Clear Context"))
-        clear.add_css_class("destructive-action")
-        clear.connect("clicked", lambda _b: self._confirm_agent_text_command(
-            _("Clear Context"), _("Ask the agent to clear its current context?"),
-            "/clear", destructive=True))
-        box.append(compact)
-        box.append(clear)
+    @classmethod
+    def _format_agent_status_details(cls, parsed):
+        details = []
+        if parsed.get('tool'):
+            details.append(_("Tool: ") + str(parsed['tool']))
+        token_detail = cls._format_token_detail(parsed)
+        if token_detail:
+            details.append(token_detail)
+        if parsed.get('request') not in (None, ""):
+            details.append(_("Req: ") + str(parsed['request']))
+        if parsed.get('cost') not in (None, ""):
+            details.append(_("Cost: ") + cls._format_cost(parsed['cost']))
+        if parsed.get('model'):
+            details.append(str(parsed['model']))
+        for note in parsed.get('notes', [])[:2]:
+            details.append(str(note))
+        return " | ".join(details)
 
-        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        box.append(separator)
+    @classmethod
+    def _format_token_detail(cls, parsed):
+        total = parsed.get('tokens')
+        input_tokens = parsed.get('input_tokens')
+        output_tokens = parsed.get('output_tokens')
+        if total in (None, "") and input_tokens in (None, "") and output_tokens in (None, ""):
+            return ""
+        pieces = []
+        if total not in (None, ""):
+            pieces.append(_("tok ") + cls._format_count(total))
+        if input_tokens not in (None, ""):
+            pieces.append(_("in ") + cls._format_count(input_tokens))
+        if output_tokens not in (None, ""):
+            pieces.append(_("out ") + cls._format_count(output_tokens))
+        return " ".join(pieces)
 
-        loading = Gtk.Label(label=_("Loading commands…"))
-        loading.add_css_class("dim-label")
-        box.append(loading)
-        popover = Gtk.Popover()
-        popover.set_child(box)
-        self.agent_menu_button.set_popover(popover)
-        self._load_agent_commands(box, loading)
+    @staticmethod
+    def _format_count(value):
+        try:
+            number = int(float(str(value).replace(",", "")))
+        except (TypeError, ValueError):
+            return str(value)
+        if abs(number) >= 1_000_000:
+            return f"{number / 1_000_000:.1f}M"
+        if abs(number) >= 1_000:
+            return f"{number / 1_000:.1f}k"
+        return str(number)
 
-    def _on_approval_bypass_toggled(self, button):
-        if self._approval_bypass_updating:
-            return
-        mode = 'activar' if button.get_active() else 'apagar'
-        self._run_approval_bypass_command(mode)
+    @staticmethod
+    def _format_cost(value):
+        try:
+            number = float(str(value).replace("$", "").replace(",", ""))
+        except (TypeError, ValueError):
+            return str(value)
+        return f"${number:.4f}" if number < 1 else f"${number:.2f}"
 
-    def _run_approval_bypass_command(self, mode):
-        if self.backend is None:
-            return
-        session = getattr(self.backend, 'session', None)
-        bare_jid = getattr(self.backend, 'bare_jid', None)
-        if session is None or bare_jid is None:
-            return
-
-        from .xmpp_commands import XmppCommandClient, next_action_for
-        from nbxmpp.modules.dataforms import SimpleDataForm, create_field
-
-        client = XmppCommandClient(session, bare_jid)
-        self._agent_command_client = client
-
-        def revert_toggle():
-            self._approval_bypass_updating = True
-            self.approval_bypass_toggle.set_active(not self.approval_bypass_toggle.get_active())
-            self._approval_bypass_updating = False
-
-        def on_error(message):
-            revert_toggle()
-            self._on_llm_error(self.backend, message)
-
-        def submit_bypass_form(result):
-            fields = [
-                create_field('list-single', var='mode', value='on' if mode == 'activar' else 'off'),
-                create_field('text-single', var='minutes', value='15'),
-            ]
-            dataform = SimpleDataForm(type_='submit', fields=fields)
-
-            def on_done(done):
-                self.connection_status_label.set_label(_("Approval bypass updated"))
-                GLib.timeout_add_seconds(3, self._restore_connection_status)
-
-            client.execute(
-                result, on_done, on_error,
-                action=next_action_for(result), dataform=dataform)
-
-        def on_commands(commands):
-            command = next((cmd for cmd in commands
-                            if getattr(cmd, 'node', '') == 'approval-bypass'), None)
-            if command is None:
-                revert_toggle()
-                self._on_llm_error(self.backend, _("Agent does not expose approval-bypass."))
-                return
-            client.execute(command, submit_bypass_form, on_error)
-
-        client.request_commands(on_commands, on_error)
-
-    def _confirm_agent_text_command(self, heading, body, command, destructive=False):
-        dialog = Adw.MessageDialog(
-            transient_for=self,
-            modal=True,
-            heading=heading,
-            body=body,
-        )
-        dialog.add_response("cancel", _("Cancel"))
-        dialog.add_response("send", _("Send"))
-        if destructive:
-            dialog.set_response_appearance("send", Adw.ResponseAppearance.DESTRUCTIVE)
-        else:
-            dialog.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("cancel")
-
-        def on_response(_dialog, response):
-            if response == "send" and self.backend is not None:
-                self.display_message(command, sender="user")
-                self.backend.send_message(command)
-
-        dialog.connect("response", on_response)
-        dialog.present()
-
-    def _load_agent_commands(self, box, loading):
-        from .xmpp_commands import XmppCommandClient
-
-        client = XmppCommandClient(self.backend.session, self.backend.bare_jid)
-        self._agent_command_client = client
-
-        def on_success(commands):
-            box.remove(loading)
-            for command in commands:
-                button = Gtk.Button(label=command.name or command.node)
-                button.connect("clicked", self._on_agent_command_clicked, client, command)
-                box.append(button)
-            if not commands:
-                empty = Gtk.Label(label=_("No agent commands"))
-                empty.add_css_class("dim-label")
-                box.append(empty)
-
-        def on_error(message):
-            loading.set_label(message)
-            loading.add_css_class("error")
-
-        client.request_commands(on_success, on_error)
-
-    def _on_agent_command_clicked(self, _button, client, command):
-        self._execute_agent_command(client, command)
+    @staticmethod
+    def _friendly_agent_activity(activity):
+        text = str(activity or "").strip()
+        lower = text.lower()
+        if lower == "processing":
+            return _("Trabajando")
+        if lower == "available":
+            return _("Disponible")
+        if lower == "waiting":
+            return _("En espera")
+        if lower.startswith("tool:"):
+            return _("Usando herramienta: ") + text.split(":", 1)[1].strip()
+        return text
 
     def _execute_agent_command(self, client, command):
         """Ejecuta un comando ad-hoc (XEP-0050) y maneja la respuesta:
@@ -1525,24 +1788,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
         client.execute(command, handle_result, on_error)
 
     def _display_command_result(self, command):
+        # Sin encabezado: el usuario acaba de elegir el comando del menú, así
+        # que repetir su nombre sobre la respuesta no aporta nada.
         from .xmpp_commands import command_result_body
-        title = command.name or _("Agent Command")
-        body = command_result_body(command)
-        message = Message(f"**{title}**\n\n{body}", "assistant")
+        message = Message(command_result_body(command), "assistant")
         widget = MessageWidget(message)
         widget.add_css_class("command-result-message")
         self.messages_box.append(widget)
-        GLib.idle_add(self._scroll_to_bottom, False)
+        # El widget recién añadido todavía no tiene altura asignada, así que un
+        # solo scroll usaría el `upper` viejo y se quedaría corto: reintentar
+        # tras el layout es lo que ya hace la carga de historial.
+        self._scroll_to_bottom_after_layout()
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
         debug_print(f"Backend listo: {display_name}")
 
-        if self._injected_backend:
+        if self.is_messaging_backend:
             self._update_xmpp_title_status()
             self._load_xmpp_history()
             return
 
+        # Backend LLM: el modelo activo lo anuncia 'ready'; con un agente llega
+        # por presencia (_update_agent_state_chips).
+        self._update_model_badge(display_name)
         self.title_widget.set_subtitle(display_name)
 
         # Verificar si necesitamos cargar una conversación existente basada en CID
@@ -1609,25 +1878,32 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             GLib.idle_add(load_initial_history)
 
+    # Los batches son None mientras no hay una carga de historial en curso. Un
+    # evento que llegue fuera de una (una sesión anterior que aún no se había
+    # callado) se ignora en vez de reventar sobre un None.
+
     def _on_xmpp_history_message(self, backend, body, direction, timestamp):
+        if self._xmpp_history_batch is None:
+            return
         self._xmpp_history_batch.append((body, direction, timestamp))
 
     def _on_xmpp_history_actions(self, backend, body, timestamp,
                                  quick_responses, commands):
+        if self._xmpp_history_actions_batch is None:
+            return
         self._xmpp_history_actions_batch.append(
             (body, timestamp, quick_responses, commands))
 
     def _on_xmpp_history_complete(self, backend, has_more):
-        batch = self._xmpp_history_batch
-        action_batch = self._xmpp_history_actions_batch
+        batch = self._xmpp_history_batch or []
+        action_batch = self._xmpp_history_actions_batch or []
         is_backfill = self._xmpp_backfill_remaining > 0
         if batch:
-            if is_backfill:
-                for body, direction, timestamp in batch:
-                    self._display_history_bubble(body, direction, timestamp)
-            else:
-                for body, direction, timestamp in reversed(batch):
-                    self._prepend_history_bubble(body, direction, timestamp)
+            # El lote se pinta por timestamp, no por su procedencia: de dónde
+            # venga (carga inicial, backfill, scroll hacia arriba) no dice nada
+            # sobre si es más nuevo o más viejo que lo que ya hay en pantalla.
+            for body, direction, timestamp in batch:
+                self._add_history_bubble(body, direction, timestamp)
             self._history_displayed = True
         for body, timestamp, quick_responses, commands in action_batch:
             self._restore_history_actions(body, timestamp, quick_responses, commands)
@@ -1635,8 +1911,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._xmpp_backfill_remaining -= 1
         self._xmpp_history_batch = []
         self._xmpp_history_actions_batch = []
-        if is_backfill:
-            self._scroll_to_bottom_after_history_load()
+        # Bajar al fondo SIEMPRE que se hayan pintado mensajes, no sólo en el
+        # backfill. La carga inicial también deja la ventana llena de burbujas
+        # nuevas, y antes se quedaba donde estuviera: el usuario abría el chat y
+        # no veía lo último. `load_more_history` (scroll hacia arriba) es el
+        # único caso que NO debe saltar — y ése no pasa por aquí con batch,
+        # porque el usuario está leyendo hacia atrás a propósito.
+        if batch and not self._loading_older_history:
+            self._scroll_to_bottom_after_layout()
+        # Se consume aquí: si se quedara puesto, el siguiente mensaje que llegue
+        # tampoco bajaría y el chat volvería a "no seguir el fondo".
+        self._loading_older_history = False
 
     def _restore_history_actions(self, body, timestamp, quick_responses, _commands):
         if quick_responses and not self._history_quick_response_was_answered(
@@ -1671,19 +1956,111 @@ class LLMChatWindow(Adw.ApplicationWindow):
         value = response.get('value', '')
         label = response.get('label') or value
         if value and hasattr(self.backend, 'send_quick_response'):
+            self.display_message(label, sender="user")
+            GLib.idle_add(self._scroll_to_bottom, False)
             self.backend.send_quick_response(value, label)
 
-    def _display_history_bubble(self, body, direction, timestamp):
-        sender = "user" if direction == 'out' else "assistant"
-        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
-        widget = MessageWidget(msg)
-        self.messages_box.append(widget)
+    def _insert_bubble_by_timestamp(self, widget):
+        """Inserta la burbuja en su sitio CRONOLÓGICO, no al final.
 
-    def _prepend_history_bubble(self, body, direction, timestamp):
+        Antes cada camino decidía la posición por su procedencia: la carga
+        inicial hacía prepend, el backfill y los mensajes en vivo hacían append.
+        Eso presupone que todo lote de backfill es más nuevo que lo ya pintado, y
+        no lo es: el catch-up de MAM pide un solape hacia atrás (_overlap_timestamp,
+        una semana), así que al reconectar se anexaban abajo mensajes de días
+        atrás. El scroll sí llegaba al fondo — pero el fondo ya no era el mensaje
+        más reciente.
+
+        Se recorre desde el final porque el caso normal, con diferencia, es el
+        mensaje que va justo al final: así es O(1) en vivo y sólo se paga el
+        recorrido cuando de verdad llega algo fuera de orden.
+        """
+        ts = self._comparable_ts(widget.message.timestamp)
+
+        # NO se silencia el adjustment aquí. La tentación es marcar la inserción
+        # como "movimiento propio" (_restoring_scroll) para que el reajuste que
+        # hace GTK no se lea como que el usuario se movió — pero eso silencia
+        # también _on_vadj_value_changed, que es justo donde vive la lógica que
+        # vuelve a bajar cuando el contenido CRECE. Silenciarlo se come el
+        # autoscroll: la burbuja se inserta y no se ve.
+        #
+        # No hace falta: _on_vadj_value_changed ya distingue las dos cosas por su
+        # cuenta (si el `upper` creció, no fue el usuario).
+        for child in reversed(list(self.messages_box)):
+            child_ts = self._comparable_ts(
+                getattr(getattr(child, 'message', None), 'timestamp', None))
+            # Un hijo sin timestamp (un ErrorWidget, algo que no es
+            # MessageWidget) no es un ancla fiable: se salta.
+            if child_ts is None:
+                continue
+            if child_ts <= ts:
+                # El primer hijo no más nuevo que nosotros: vamos detrás.
+                self.messages_box.insert_child_after(widget, child)
+                self._content_added_pending = True
+                GLib.idle_add(lambda: setattr(self, '_content_added_pending', False)
+                              or GLib.SOURCE_REMOVE)
+                if DEBUG:
+                    debug_print(
+                        f"[insert] after-ts ts={ts} child_ts={child_ts} "
+                        f"children={len(list(self.messages_box))}")
+                return
+        # Más viejo que todo lo pintado (o el contenedor está vacío).
+        self.messages_box.prepend(widget)
+
+        self._content_added_pending = True
+        GLib.idle_add(lambda: setattr(self, '_content_added_pending', False)
+                      or GLib.SOURCE_REMOVE)
+        if DEBUG:
+            debug_print(
+                f"[insert] prepend-ts ts={ts} children={len(list(self.messages_box))}")
+
+    @staticmethod
+    def _comparable_ts(dt):
+        """Un datetime que se pueda comparar con cualquier otro de la lista.
+
+        Los del historial vienen de MAM en UTC y _parse_history_ts los pasa a
+        local con astimezone(), así que son AWARE. Los de un mensaje en vivo los
+        pone Message.__init__ con datetime.now(), que es NAIVE. Compararlos
+        lanza "can't compare offset-naive and offset-aware datetimes" — y como
+        eso ocurría dentro de display_message, la excepción se llevaba por
+        delante la burbuja: los mensajes propios no aparecían en la ventana.
+
+        Un naive aquí siempre es hora local (lo pone datetime.now()), así que se
+        le asigna la zona local en vez de descartarlo.
+        """
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.astimezone()
+        return dt
+
+    def _history_bubble_key(self, body, direction, timestamp):
+        """Identidad de un mensaje del historial, para no repintarlo.
+
+        MAM no da un id estable entre la caché local y el archivo del servidor,
+        así que la identidad se compone de lo que sí es estable: quién, qué y
+        cuándo. El solape de una semana del catch-up reenvía mensajes que ya
+        están en pantalla; sin esto se pintaban otra vez tras cada reconexión
+        (el comentario de _overlap_timestamp prometía una deduplicación que en
+        realidad no existía en ninguna parte).
+        """
+        dt = self._parse_history_ts(timestamp)
+        return (direction, Message.compact_blank_lines(body),
+                dt.isoformat() if dt is not None else None)
+
+    def _add_history_bubble(self, body, direction, timestamp):
+        """Pinta un mensaje del historial en su sitio, si no estaba ya."""
+        key = self._history_bubble_key(body, direction, timestamp)
+        # Una clave sin fecha no identifica nada (dos mensajes iguales sin
+        # timestamp colisionarían), así que ésas no se deduplican.
+        if key[2] is not None:
+            if key in self._history_keys:
+                return
+            self._history_keys.add(key)
+
         sender = "user" if direction == 'out' else "assistant"
         msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
-        widget = MessageWidget(msg)
-        self.messages_box.prepend(widget)
+        self._insert_bubble_by_timestamp(MessageWidget(msg))
 
     @staticmethod
     def _parse_history_ts(timestamp):
@@ -1714,6 +2091,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_edge_reached(self, scroll, pos):
         if pos == Gtk.PositionType.TOP and self.backend is not None:
+            # El usuario subió a leer hacia atrás: el lote que llegue NO debe
+            # saltar al fondo (ver _on_xmpp_history_complete).
+            self._loading_older_history = True
             self.backend.load_more_history()
 
     def _load_and_display_history(self, history_entries):
@@ -1729,7 +2109,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._display_conversation_history(history_entries)
             
             # Asegurarse de que se haga scroll al final
-            self._scroll_to_bottom_after_history_load()
+            self._scroll_to_bottom_after_layout()
             
             return False  # Ejecutar solo una vez
         except Exception as e:
@@ -1745,30 +2125,53 @@ class LLMChatWindow(Adw.ApplicationWindow):
         )
 
         if text:
+            if DEBUG:
+                debug_print(f"[send] click text_len={len(text)}")
             # Ya se envía el mensaje: cancelar el aviso pendiente de 'composing'
             if self._composing_timeout_id:
                 GLib.source_remove(self._composing_timeout_id)
                 self._composing_timeout_id = None
+                if DEBUG:
+                    debug_print("[send] composing timeout cancelled")
+            # El mensaje local debe verse al instante: limpiar el input sin
+            # notificar composing aquí evita trabajo de red en este mismo tick.
+            self._clear_input_buffer_silently()
             # Display user message
             self.display_message(text, sender="user")
-            # Deshabilitar entrada y empezar tarea
-            self.set_enabled(False)
-            if self._injected_backend:
+            if self.is_messaging_backend:
+                # XMPP: no bloquear la UI ni cambiar al estado busy; hacerlo
+                # aquí añade relayout extra y retrasa el primer frame del
+                # mensaje propio.
                 # Backends de mensajería (XMPP): no hay una respuesta que
                 # rellenar; los mensajes entrantes crean su propia burbuja
                 # cuando llegan (_on_llm_response). No dejar un placeholder.
                 self.current_message_widget = None
             else:
+                # LLM: mantener estado busy durante generación.
+                self.set_enabled(False)
                 # LLM: crear ya la burbuja de respuesta que el stream irá
                 # rellenando vía 'response'.
                 self.current_message_widget = self.display_message("", sender="assistant")
                 self._on_llm_response(self.backend, "")
-            GLib.idle_add(self._start_llm_task, text)
+            # Sin latencia fija: enviar en idle de baja prioridad para que el
+            # bubble local se pinte primero, pero sin esperar milisegundos
+            # artificiales.
+            GLib.idle_add(
+                self._start_llm_task,
+                text,
+                priority=GLib.PRIORITY_LOW,
+            )
 
     def _start_llm_task(self, prompt_text):
         """Inicia la tarea del backend con el prompt dado."""
+        started = time.monotonic()
+        if DEBUG:
+            debug_print(f"[send] start backend send len={len(str(prompt_text or ''))}")
         # Enviar el prompt usando el ChatBackend
         self.backend.send_message(prompt_text)
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        if DEBUG:
+            debug_print(f"[send] backend send returned in {elapsed_ms:.1f}ms")
 
         # Devolver False para que idle_add no se repita
         return GLib.SOURCE_REMOVE
@@ -1776,7 +2179,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
         debug_print(message, file=sys.stderr)
-        if self._injected_backend:
+        if self.is_messaging_backend:
             # Un error de sesión (p.ej. roster fallido) no siempre viene
             # acompañado de 'state-changed'; reflejarlo brevemente en el
             # header. Pero si la sesión sigue conectada (error no fatal),
@@ -1828,10 +2231,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(f"Conversation ID updated in config: {conversation_id}")
                 app = self.get_application()
                 if hasattr(app, '_window_by_cid'):
+                    # La conversación LLM acaba de nacer y ya tiene cid: pasa a
+                    # registrarse con su clave definitiva (spec 009).
+                    llm_key = f"llm:{conversation_id}"
                     for key, win in list(app._window_by_cid.items()):
-                        if win is self and key != conversation_id:
+                        if win is self and key != llm_key:
                             del app._window_by_cid[key]
-                    app._window_by_cid[conversation_id] = self
+                    app._window_by_cid[llm_key] = self
 
         # Refrescar el sidebar de conversaciones: para el caso normal (CID
         # nuevo) es aquí, no en _on_llm_response, donde la fila ya existe
@@ -1847,15 +2253,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         Backends de mensajería (XMPP): cada 'response' es un mensaje
         entrante completo e independiente; crea su propia burbuja.
         """
-        if self._injected_backend:
-            self.accumulated_response = ""
-            if self._is_context_unavailable_response(response):
-                self.current_message_widget = None
-                self._display_context_unavailable(response)
-            else:
-                self.current_message_widget = self.display_message(
-                    response, sender="assistant")
-            GLib.idle_add(self._scroll_to_bottom, False)
+        if self.is_messaging_backend:
+            def apply_response_on_ui_thread():
+                self.accumulated_response = ""
+                if self._is_context_unavailable_response(response):
+                    self.current_message_widget = None
+                    self._display_context_unavailable(response)
+                else:
+                    self.current_message_widget = self.display_message(
+                        response, sender="assistant")
+                # display_message ya dispara el autoscroll post-layout.
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(apply_response_on_ui_thread)
             return
 
         if not self.current_message_widget:
@@ -1876,15 +2286,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 # Registrar la ventana en el mapa global de ventanas por CID
                 app = self.get_application()
                 if hasattr(app, '_window_by_cid'):
+                    # La conversación LLM acaba de nacer y ya tiene cid: pasa a
+                    # registrarse con su clave definitiva (spec 009).
+                    llm_key = f"llm:{conversation_id}"
                     for key, win in list(app._window_by_cid.items()):
-                        if win is self and key != conversation_id:
+                        if win is self and key != llm_key:
                             del app._window_by_cid[key]
-                    app._window_by_cid[conversation_id] = self
+                    app._window_by_cid[llm_key] = self
 
         self.accumulated_response += response
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
-        GLib.idle_add(self._scroll_to_bottom, False)
+        self._scroll_to_bottom_after_layout_if_following()
 
     @staticmethod
     def _is_context_unavailable_response(response):
@@ -1927,16 +2340,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 break
         return "\n".join(detail_lines)
 
-    def _on_llm_response_correction(self, backend, body):
-        """XEP-0308 correction: reemplaza el contenido de la burbuja actual
-        en lugar de crear una nueva. Mantiene intactos los botones de
-        quick-response y commands ya anexados."""
+    def _on_llm_response_correction(self, backend, request_id, body):
+        """XEP-0308 correction: actualiza el texto de la pregunta original
+        (localizada por request_id, no necesariamente la burbuja más
+        reciente — con varias preguntas abiertas a la vez, antes esto sólo
+        tocaba current_message_widget) y atenúa su card de botones si
+        seguía visible. Si request_id no coincide con ninguna card conocida
+        (no se pudo correlacionar, o ya se había limpiado), se degrada a
+        actualizar sólo la burbuja más reciente como antes."""
+        resolved_a_card = self._mark_sticky_response_resolved(request_id)
         if self.current_message_widget is None:
             return
         GLib.idle_add(self.current_message_widget.update_content, body)
-        GLib.idle_add(self._scroll_to_bottom, False)
+        self._scroll_to_bottom_after_layout_if_following()
+        if not resolved_a_card:
+            debug_print(
+                f"chat_window: corrección sin card correlacionada "
+                f"(request_id={request_id!r}) — sólo se actualizó la burbuja")
 
-    def _add_sticky_response_card(self, responses, on_selected, detail_text=None):
+    def _add_sticky_response_card(self, responses, on_selected, detail_text=None,
+                                   request_id=None):
         if not responses:
             return
 
@@ -1945,12 +2368,50 @@ class LLMChatWindow(Adw.ApplicationWindow):
             'responses': list(responses),
             'on_selected': on_selected,
             'detail_text': detail_text or "",
+            # request_id (stanza id de la pregunta original) permite que
+            # _on_llm_response_correction encuentre y atenúe ESTA card
+            # específica cuando llega la corrección XEP-0308 que la
+            # resuelve — sin esto sólo podíamos tocar la burbuja más
+            # reciente, rompiendo el caso de varias preguntas abiertas.
+            'request_id': request_id,
+            'resolved': False,
         }
         self._sticky_response_next_id += 1
         self._sticky_response_items.insert(0, item)
         self._rebuild_sticky_response_box()
 
+    def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000):
+        """Atenúa (no retira de inmediato) la card cuyo request_id coincide
+        con una corrección XEP-0308 entrante — decisión de UX: dejar rastro
+        visible unos segundos cuando había varias preguntas abiertas, en vez
+        de hacerla desaparecer al instante."""
+        if not request_id:
+            return False
+        found = False
+        for item in self._sticky_response_items:
+            if item.get('request_id') == request_id and not item.get('resolved'):
+                item['resolved'] = True
+                found = True
+        if found:
+            self._rebuild_sticky_response_box()
+            GLib.timeout_add(
+                resolved_timeout_ms, self._remove_sticky_response_item, None,
+                request_id)
+        return found
+
     def _rebuild_sticky_response_box(self):
+        # La tarjeta vive DEBAJO del scroll en la misma caja vertical, así que
+        # aparecer/crecer/desaparecer le cambia la altura al viewport. Al
+        # encogerse, el final del último mensaje queda por debajo del área
+        # visible — y ninguna señal del adjustment lo arregla sola: `upper` no
+        # cambia (el contenido es el mismo), sólo `page_size`.
+        #
+        # Además la tarjeta llega en una señal APARTE del backend
+        # (quick-responses / commands), milisegundos después de la burbuja, con
+        # el scroll ya dado por terminado. Por eso se veía sólo la parte de
+        # arriba de la burbuja nueva, con la tarjeta tapando el resto.
+        self._scroll_to_bottom_after_layout_if_following()
+
         for child in list(self.sticky_response_box):
             self.sticky_response_box.remove(child)
         if not self._sticky_response_items:
@@ -1961,10 +2422,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         responses = item['responses']
         detail_text = item.get('detail_text') or ""
         count = len(self._sticky_response_items)
+        resolved = bool(item.get('resolved'))
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
         card.add_css_class("sticky-response-card")
+        if resolved:
+            # Otro dispositivo (o el propio agente vía corrección XEP-0308)
+            # ya resolvió esta pregunta — se deja un rastro atenuado en vez
+            # de retirarla al instante, útil cuando había varias abiertas.
+            # set_opacity en vez de una clase CSS nueva: no hay hoja de
+            # estilos propia para sticky-response-card, todo el look sale
+            # de la clase "card" de Adwaita.
+            card.set_opacity(0.5)
         card.set_margin_start(0)
         card.set_margin_end(0)
 
@@ -2040,6 +2510,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 continue
             button = Gtk.Button(label=label)
             button.add_css_class("pill")
+            button.set_sensitive(not resolved)
             button.connect("clicked", handle_click, response)
             flow.append(button)
             buttons.append(button)
@@ -2105,12 +2576,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return text
         return f"{text[:max_chars].rstrip()}..."
 
-    def _remove_sticky_response_item(self, item_id):
-        self._sticky_response_items = [
-            item for item in self._sticky_response_items
-            if item.get('id') != item_id
-        ]
+    def _remove_sticky_response_item(self, item_id, request_id=None):
+        """Quita una card por su id local, o por request_id (usado por el
+        timeout de _mark_sticky_response_resolved — GLib.timeout_add sólo
+        pasa argumentos posicionales fijos, así que item_id llega como None
+        en ese camino). Devuelve False para que timeout_add no reprograme."""
+        if item_id is not None:
+            self._sticky_response_items = [
+                item for item in self._sticky_response_items
+                if item.get('id') != item_id
+            ]
+        elif request_id is not None:
+            self._sticky_response_items = [
+                item for item in self._sticky_response_items
+                if item.get('request_id') != request_id
+            ]
         self._rebuild_sticky_response_box()
+        return GLib.SOURCE_REMOVE
 
     def _clear_sticky_response_cards(self):
         for child in list(self.sticky_response_box):
@@ -2126,7 +2608,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return ""
         return Message.compact_blank_lines(message.content)
 
-    def _on_quick_responses(self, backend, responses):
+    def _on_quick_responses(self, backend, responses, request_id=None):
         if self.current_message_widget is None:
             return
 
@@ -2140,14 +2622,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
             label = response.get('label') or value
             if not value:
                 return
+            self.display_message(label, sender="user")
+            GLib.idle_add(self._scroll_to_bottom, False)
             if hasattr(backend, 'send_quick_response'):
                 backend.send_quick_response(value, label)
 
         self._add_sticky_response_card(
             responses, on_selected,
-            detail_text=self._current_agent_message_text())
+            detail_text=self._current_agent_message_text(),
+            request_id=request_id)
 
-    def _on_commands(self, backend, commands):
+    def _on_commands(self, backend, commands, request_id=None):
         if self.current_message_widget is None:
             return
 
@@ -2177,64 +2662,236 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self._add_sticky_response_card(
             commands, on_selected,
-            detail_text=self._current_agent_message_text())
+            detail_text=self._current_agent_message_text(),
+            request_id=request_id)
+
+    # Margen (px) dentro del cual se considera que el usuario está "al fondo".
+    # Un par de píxeles de holgura: GTK no siempre deja el valor exacto.
+    _SCROLL_BOTTOM_EPSILON = 4.0
+
+    def _log_scroll_state(self, where, adj=None, extra=""):
+        """Traza compacta del estado de scroll para depurar carreras."""
+        if not DEBUG:
+            return
+        if adj is None and hasattr(self, 'message_scroll'):
+            adj = self.message_scroll.get_vadjustment()
+        if adj is None:
+            debug_print(f"[scroll] {where} | adj=<none> {extra}")
+            return
+        value = adj.get_value()
+        upper = adj.get_upper()
+        page = adj.get_page_size()
+        distance = max(0.0, upper - (value + page))
+        at_bottom = distance <= self._SCROLL_BOTTOM_EPSILON
+        debug_print(
+            "[scroll] "
+            f"{where} | v={value:.1f} u={upper:.1f} p={page:.1f} "
+            f"d={distance:.1f} at_bottom={at_bottom} "
+            f"stick={getattr(self, '_stick_to_bottom', None)} "
+            f"pending={getattr(self, '_post_layout_scroll_pending', None)} "
+            f"force={getattr(self, '_post_layout_scroll_force', None)} "
+            f"added_pending={getattr(self, '_content_added_pending', None)} "
+            f"restoring={getattr(self, '_restoring_scroll', None)} "
+            f"{extra}"
+        )
+
+    def _at_bottom(self, adj):
+        return (adj.get_upper() - (adj.get_value() + adj.get_page_size())
+                <= self._SCROLL_BOTTOM_EPSILON)
 
     def _on_vadj_value_changed(self, adj):
-        """El usuario (o el código) movió el scroll: recordar la distancia
-        actual al fondo, para poder reanclarla al redimensionar. Se ignora
-        mientras nosotros mismos restauramos el valor (evita realimentación)."""
+        """El usuario movió el scroll: decide si seguimos anclados al fondo.
+        Se ignora cuando el movimiento lo provocamos nosotros, que si no cada
+        auto-scroll se reafirmaría a sí mismo.
+
+        OJO con la otra fuente de movimiento espurio: cuando una burbuja CRECE
+        (los TextView con wrap sólo saben su alto real tras el layout, así que se
+        estiran después de insertarse), el `upper` sube y el valor deja de estar
+        al fondo — sin que el usuario haya tocado nada. Leer eso como "se fue
+        hacia arriba" apagaba _stick_to_bottom justo cuando más falta hacía, y el
+        scroll se quedaba A MEDIA BURBUJA. Un `upper` que crece nunca es intención
+        del usuario: sólo se desancla si el contenido NO creció."""
         if self._restoring_scroll:
+            self._log_scroll_state("value-changed(skip restoring)", adj)
             return
+
         upper = adj.get_upper()
-        page_size = adj.get_page_size()
-        self._scroll_bottom_distance = max(0.0, upper - (adj.get_value() + page_size))
+        grew = upper > self._scroll_last_upper + 0.5
+        self._scroll_last_upper = upper
+
+        if grew:
+            if self._stick_to_bottom:
+                self._set_value_silently(adj, max(0.0, upper - adj.get_page_size()))
+                self._log_scroll_state("value-changed(grew -> stick)", adj)
+            else:
+                self._log_scroll_state("value-changed(grew no-stick)", adj)
+            return
+
+        # Si estamos en medio de una inserción de burbuja (content_added flag),
+        # no recalcular _stick_to_bottom — GTK mueve el value automáticamente
+        # y _at_bottom daría False hasta que termine el layout.
+        if self._content_added_pending:
+            self._log_scroll_state("value-changed(skip content_added_pending)", adj)
+            return
+
+        self._stick_to_bottom = self._at_bottom(adj)
+        self._scroll_bottom_distance = max(
+            0.0, upper - (adj.get_value() + adj.get_page_size()))
+        self._log_scroll_state(
+            "value-changed(update intent)",
+            adj,
+            extra=f"bottom_distance={self._scroll_bottom_distance:.1f}")
 
     def _on_vadj_changed(self, adj):
-        """Cambió el rango del adjustment. Si fue por un cambio de alto del
-        viewport (page_size), es un redimensionado: reanclar el último
-        mensaje visible restaurando la distancia al fondo guardada. Un cambio
-        que solo afecta 'upper' (mensaje nuevo, carga de historial) no se
-        toca aquí — de eso se encarga _scroll_to_bottom."""
+        """Cambió el rango: contenido nuevo o ya medido, o un redimensionado.
+        Este es el único punto donde `upper` es de fiar, así que aquí es donde
+        se hace el auto-scroll de verdad."""
         page_size = adj.get_page_size()
-        if page_size == self._scroll_last_page_size:
-            return
+        resized = page_size != self._scroll_last_page_size
         self._scroll_last_page_size = page_size
-        upper = adj.get_upper()
-        target = max(0.0, upper - page_size - self._scroll_bottom_distance)
-        if abs(target - adj.get_value()) < 1.0:
+        self._log_scroll_state("changed(entry)", adj, extra=f"resized={resized}")
+
+        if self._stick_to_bottom:
+            # Contenido nuevo (o el widget que acaba de crecer al renderizar):
+            # pegarse al fondo con el alto ya definitivo.
+            self._set_value_silently(adj, adj.get_upper() - page_size)
+            self._log_scroll_state("changed(apply stick)", adj)
             return
+
+        if resized:
+            # El usuario está leyendo más arriba y cambió el alto del viewport:
+            # mantener anclado lo que estaba viendo, no saltar.
+            target = max(
+                0.0,
+                adj.get_upper() - page_size - self._scroll_bottom_distance)
+            if abs(target - adj.get_value()) >= 1.0:
+                self._set_value_silently(adj, target)
+                self._log_scroll_state(
+                    "changed(restore anchor)", adj, extra=f"target={target:.1f}")
+            else:
+                self._log_scroll_state(
+                    "changed(anchor no-op)", adj, extra=f"target={target:.1f}")
+
+    def _on_vadj_range_notify(self, adj, _pspec):
+        """En GTK4 hay casos donde `changed` llega tarde; al notificar rango
+        (upper/page-size) aplicamos la misma lógica de seguimiento al fondo."""
+        self._log_scroll_state("notify(range)", adj)
+        self._on_vadj_changed(adj)
+
+    def _set_value_silently(self, adj, value):
+        """Mover el scroll sin que _on_vadj_value_changed lo lea como que el
+        usuario cambió de intención."""
         self._restoring_scroll = True
-        adj.set_value(target)
+        adj.set_value(max(0.0, value))
         self._restoring_scroll = False
+        self._log_scroll_state(
+            "set_value_silently", adj, extra=f"requested={value:.1f}")
 
     def _scroll_to_bottom(self, force=True):
-        scroll = self.messages_box.get_parent()
-        adj = scroll.get_vadjustment()
-        upper = adj.get_upper()
-        page_size = adj.get_page_size()
-        value = adj.get_value()
+        """Reanuda el seguimiento del fondo. `force` lo reanuda aunque el
+        usuario se hubiera ido hacia arriba (p. ej. porque él mismo acaba de
+        enviar un mensaje); si no, respeta que esté leyendo el historial.
 
-        bottom_distance = upper - (value + page_size)
-        threshold = page_size * 0.1  # 10% del viewport
-
+        El scroll efectivo lo hace _on_vadj_changed tras el layout — aquí sólo
+        se fija la intención y se baja con lo que ya se conoce."""
+        adj = self.message_scroll.get_vadjustment()
         if force:
-            adj.set_value(upper - page_size)
+            self._stick_to_bottom = True
+        self._content_added_pending = False
+        if self._stick_to_bottom:
+            self._set_value_silently(
+                adj, adj.get_upper() - adj.get_page_size())
+        self._log_scroll_state("scroll_to_bottom", adj, extra=f"force={force}")
+
+    def _scroll_to_bottom_after_layout_if_following(self):
+        """Como _scroll_to_bottom_after_layout, pero RESPETA al que está leyendo.
+
+        Para cambios de layout que no son contenido nuevo (la tarjeta sticky
+        apareciendo o yéndose): si el usuario seguía el fondo, hay que volver a
+        pegarlo ahí con el viewport ya redimensionado; si estaba leyendo más
+        arriba, no se le mueve la vista."""
+        if not self._stick_to_bottom:
             return
+        self._scroll_to_bottom_after_layout(force=False)
 
-        if bottom_distance < threshold:
-            def scroll_after():
-                adj.set_value(upper - page_size)
-                return False
-            GLib.timeout_add(50, scroll_after)
+    def _arm_post_layout_scroll_settle(self):
+        if self._post_layout_scroll_settle_id is not None:
+            GLib.source_remove(self._post_layout_scroll_settle_id)
+        self._post_layout_scroll_settle_id = GLib.timeout_add(
+            200, self._finish_post_layout_scroll)
+        self._log_scroll_state("arm_settle", extra="timeout_ms=200")
 
-    def _scroll_to_bottom_after_history_load(self):
+    def _finish_post_layout_scroll(self):
+        if self._post_layout_scroll_watch_id is not None:
+            GLib.source_remove(self._post_layout_scroll_watch_id)
+            self._post_layout_scroll_watch_id = None
+        self._post_layout_scroll_settle_id = None
+        self._post_layout_scroll_pending = False
+        self._post_layout_scroll_force = False
+        self._log_scroll_state("finish_post_layout_scroll")
+        return GLib.SOURCE_REMOVE
+
+    def _get_messages_box_height(self):
+        """Altura asignada actual de messages_box, compatible con distintas
+        versiones de bindings Gtk4."""
+        if hasattr(self.messages_box, 'get_height'):
+            return self.messages_box.get_height()
+        if hasattr(self.messages_box, 'get_allocated_height'):
+            return self.messages_box.get_allocated_height()
+        return 0
+
+    def _watch_post_layout_scroll(self):
+        if not self._post_layout_scroll_pending:
+            self._post_layout_scroll_watch_id = None
+            self._log_scroll_state("watch(stop no pending)")
+            return GLib.SOURCE_REMOVE
+
+        should_follow = self._post_layout_scroll_force or self._stick_to_bottom
+        if not should_follow:
+            self._finish_post_layout_scroll()
+            self._log_scroll_state("watch(stop no follow)")
+            return GLib.SOURCE_REMOVE
+
+        height = self._get_messages_box_height()
+        height_changed = height != self._messages_box_last_height
+        self._messages_box_last_height = height
+
+        if height_changed:
+            # El bubble todavía está creciendo (wrap/markdown): bajar de nuevo
+            # con el alto real del layout actual.
+            self._scroll_to_bottom(force=self._post_layout_scroll_force)
+            self._arm_post_layout_scroll_settle()
+            self._log_scroll_state("watch(height changed)", extra=f"height={height}")
+        else:
+            self._log_scroll_state("watch(height stable)", extra=f"height={height}")
+
+        return GLib.SOURCE_CONTINUE
+
+    def _ensure_post_layout_scroll_watch(self):
+        if self._post_layout_scroll_watch_id is None:
+            self._post_layout_scroll_watch_id = GLib.timeout_add(
+                33, self._watch_post_layout_scroll)
+            self._log_scroll_state("watch(start)", extra="interval_ms=33")
+
+    def _scroll_to_bottom_after_layout(self, force=True):
+        """Baja del todo cuando el alto aún no es definitivo (carga de
+        historial, un bubble que renderiza markdown después)."""
+        if force:
+            self._stick_to_bottom = True
+        self._post_layout_scroll_pending = True
+        self._post_layout_scroll_force = self._post_layout_scroll_force or force
+        self._messages_box_last_height = self._get_messages_box_height()
+        self._ensure_post_layout_scroll_watch()
+        self._arm_post_layout_scroll_settle()
+        self._log_scroll_state(
+            "scroll_to_bottom_after_layout",
+            extra=f"force={force} box_h={self._messages_box_last_height}")
+
         def scroll_once():
-            self._scroll_to_bottom(True)
+            self._scroll_to_bottom(force)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(scroll_once)
-        for delay in (50, 150, 300):
-            GLib.timeout_add(delay, scroll_once)
 
     def _on_close_request(self, window):
         # Soltar backend/sidebar/timeout pendiente (spec 003, T7: mismo
@@ -2366,7 +3023,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 debug_print(f"Excepción completa:", exc_info=True)
         
         # Scroll hasta el final cuando todos los mensajes estén en pantalla
-        self._scroll_to_bottom_after_history_load()
+        self._scroll_to_bottom_after_layout()
 
     def _on_focus_enter(self, controller):
         """Set focus to the input text when the window gains focus."""
