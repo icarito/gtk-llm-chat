@@ -438,6 +438,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         input_actions = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
+        # Adjuntar archivo (XEP-0363). Sólo tiene sentido con un backend XMPP:
+        # el backend LLM local no sube archivos a ningún sitio.
+        self.attach_button = Gtk.Button()
+        self.attach_button.add_css_class('flat')
+        resource_manager.set_widget_icon_name(
+            self.attach_button, "mail-attachment-symbolic")
+        self.attach_button.set_tooltip_text(_("Attach a file"))
+        self.attach_button.connect('clicked', self._on_attach_clicked)
+        self.attach_button.set_visible(False)
+        input_actions.append(self.attach_button)
+
         # Badge del modelo activo, y a la vez el acceso a sus ajustes: en LLM
         # abre el panel de parámetros que ya existe; con un agente, su comando
         # `model` (ver _on_model_badge_clicked). Es un Button y no un MenuButton
@@ -659,6 +670,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.connect('quick-responses', self._on_quick_responses),
                 backend.connect('commands', self._on_commands),
             ]
+            # Adjuntar sólo se ofrece si el backend sabe subir archivos
+            # (XMPP vía XEP-0363); el backend LLM local no.
+            self.attach_button.set_visible(hasattr(backend, 'send_file'))
             # El cid sale de la config, no del backend: LLMClient.get_conversation_id()
             # fuerza la carga del modelo y, si aún no hay conversación, se INVENTA
             # una nueva — con lo que la ventana acababa apuntando a una conversación
@@ -2375,6 +2389,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
             import traceback
             debug_print(traceback.format_exc())
             return False  # Ejecutar solo una vez
+
+    def _on_attach_clicked(self, _button):
+        """Elige un archivo y lo manda como adjunto (XEP-0363 + OOB)."""
+        if not hasattr(self.backend, 'send_file'):
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title(_("Attach a file"))
+
+        def on_open(dlg, result):
+            try:
+                gfile = dlg.open_finish(result)
+            except GLib.Error:
+                return  # cancelado por el usuario
+            if gfile is None:
+                return
+            path = gfile.get_path()
+            if not path:
+                self._on_llm_error(
+                    self.backend, _("Could not read the selected file"))
+                return
+            # La subida es asíncrona: el backend avisa por 'finished'/'error'.
+            self.backend.send_file(path)
+
+        dialog.open(self, None, on_open)
 
     def _on_send_clicked(self, button):
         buffer = self.input_text.get_buffer()

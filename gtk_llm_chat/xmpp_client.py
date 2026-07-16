@@ -16,8 +16,11 @@ Hallazgos del spike (specs/001-xmpp-backend/design.md) aplicados aquí:
 """
 from gi.repository import GLib, GObject
 
+import mimetypes
 import os
 import re
+import threading
+import urllib.request
 import uuid
 
 from nbxmpp.client import Client as NbxmppClient
@@ -176,6 +179,9 @@ class XmppSession(GObject.Object):
         self._conversations = {}
         self._pending_mam_queries: dict = {}
         self.history: XmppHistory | None = None
+        # JID del componente XEP-0363 del server. None = sin descubrir aún;
+        # '' = ya se buscó y el server no tiene uno (no reintentar en cada envío).
+        self._upload_host_cache: str | None = None
 
     # --- Estado ---
 
@@ -827,6 +833,153 @@ class XmppSession(GObject.Object):
         debug_print(f"XmppSession: enviando mensaje a {to_bare_jid}: {text[:60]!r}")
         self._client.send_stanza(msg)
 
+    # --- Adjuntos: XEP-0363 (HTTP File Upload) + XEP-0066 (OOB) ---
+
+    def send_file(self, to_bare_jid: str, path: str, on_done=None):
+        """Sube un archivo por XEP-0363 y lo envía como link OOB (XEP-0066).
+
+        Flujo (todo asíncrono, sin bloquear la UI):
+          1. descubrir el componente de subida (disco#items del dominio ->
+             disco#info de cada item -> feature urn:xmpp:http:upload:0),
+          2. pedir un slot (put_uri/get_uri/headers),
+          3. PUT de los bytes en un hilo (requests/urllib bloquean),
+          4. <message> con el get_uri en el body + <x xmlns='jabber:x:oob'>.
+
+        `on_done(ok: bool, detail: str)` se llama en el hilo principal.
+        Igual que el plugin (upload.ts/send.ts): el link va en el body Y en el
+        OOB, para que lo vea cualquier cliente."""
+        if not self.is_connected:
+            self._finish_send_file(on_done, False, _("Not connected to the XMPP server"))
+            return
+        try:
+            size = os.path.getsize(path)
+        except OSError as exc:
+            self._finish_send_file(on_done, False, str(exc))
+            return
+        filename = os.path.basename(path)
+        content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+        def with_host(host):
+            if not host:
+                self._finish_send_file(
+                    on_done, False,
+                    _("This server has no HTTP upload service (XEP-0363)"))
+                return
+            task = self._client.get_module('HTTPUpload').request_slot(
+                JID.from_string(host), filename, size, content_type)
+            task.add_done_callback(
+                lambda t: self._on_upload_slot(t, to_bare_jid, path, filename,
+                                               content_type, on_done))
+
+        self._resolve_upload_host(with_host)
+
+    def _resolve_upload_host(self, callback):
+        """Descubre (y cachea) el JID del componente XEP-0363 del server.
+
+        TRAMPA conocida: el componente vive en un subdominio (p.ej.
+        upload.dominio), NO en el dominio base — hay que descubrirlo."""
+        if self._upload_host_cache is not None:
+            callback(self._upload_host_cache or None)
+            return
+        domain = None
+        if self.bare_jid:
+            try:
+                domain = JID.from_string(self.bare_jid).domain
+            except Exception:
+                domain = None
+        if not domain:
+            callback(None)
+            return
+
+        def on_items(task):
+            try:
+                result = task.finish()
+            except Exception as exc:
+                debug_print(f"XmppSession: disco#items falló: {exc}")
+                self._upload_host_cache = ''
+                callback(None)
+                return
+            items = [i.jid for i in getattr(result, 'items', [])]
+            self._probe_upload_items(items, callback)
+
+        task = self._client.get_module('Discovery').disco_items(domain)
+        task.add_done_callback(on_items)
+
+    def _probe_upload_items(self, items, callback):
+        """disco#info de cada item hasta encontrar la feature de upload."""
+        if not items:
+            self._upload_host_cache = ''
+            callback(None)
+            return
+        item, rest = items[0], items[1:]
+
+        def on_info(task):
+            try:
+                info = task.finish()
+            except Exception:
+                self._probe_upload_items(rest, callback)
+                return
+            if HTTP_UPLOAD_NS in getattr(info, 'features', []):
+                self._upload_host_cache = str(item)
+                callback(str(item))
+                return
+            self._probe_upload_items(rest, callback)
+
+        task = self._client.get_module('Discovery').disco_info(item)
+        task.add_done_callback(on_info)
+
+    def _on_upload_slot(self, task, to_bare_jid, path, filename,
+                        content_type, on_done):
+        try:
+            slot = task.finish()
+        except Exception as exc:
+            self._finish_send_file(on_done, False, str(exc))
+            return
+
+        def do_put():
+            # El PUT bloquea: va en un hilo. El resultado vuelve al hilo
+            # principal con GLib.idle_add.
+            try:
+                with open(path, 'rb') as fh:
+                    data = fh.read()
+                request = urllib.request.Request(
+                    slot.put_uri, data=data, method='PUT')
+                request.add_header('Content-Type', content_type)
+                for key, value in (slot.headers or {}).items():
+                    request.add_header(key, value)
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    ok = 200 <= response.status < 300
+                    detail = '' if ok else f"HTTP {response.status}"
+            except Exception as exc:
+                ok, detail = False, str(exc)
+            GLib.idle_add(
+                lambda: (self._after_upload(ok, detail, to_bare_jid,
+                                            slot.get_uri, filename, on_done),
+                         GLib.SOURCE_REMOVE)[1])
+
+        threading.Thread(target=do_put, daemon=True).start()
+
+    def _after_upload(self, ok, detail, to_bare_jid, get_uri, filename, on_done):
+        if not ok:
+            self._finish_send_file(on_done, False, detail)
+            return
+        # El link va en el body Y como OOB: los clientes que no entienden OOB
+        # igual ven (y pueden abrir) la URL.
+        oob = Node('x', attrs={'xmlns': OOB_NS})
+        oob.addChild('url', payload=[get_uri])
+        chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
+        msg = Message(to=to_bare_jid, body=get_uri, typ='chat',
+                      payload=[oob, chatstate])
+        self._client.send_stanza(msg)
+        debug_print(f"XmppSession: adjunto enviado a {to_bare_jid}: {filename}")
+        self._finish_send_file(on_done, True, get_uri)
+
+    @staticmethod
+    def _finish_send_file(on_done, ok, detail):
+        if on_done is None:
+            return
+        GLib.idle_add(lambda: (on_done(ok, detail), GLib.SOURCE_REMOVE)[1])
+
     def send_chatstate(self, to_bare_jid: str, chatstate: str):
         """Envía solo un chat state (XEP-0085), sin cuerpo de mensaje."""
         if not self.is_connected:
@@ -1033,6 +1186,29 @@ class XmppConversation(ChatBackend):
             history.record_message(self.bare_jid, prompt, 'out', ts)
         self.session.send_text(self.bare_jid, prompt)
         self.emit('finished', True)
+
+    def send_file(self, path: str):
+        """Sube y envía un adjunto (XEP-0363 + OOB). El link se registra en el
+        historial recién cuando la subida termina bien."""
+        if not self.session.is_connected:
+            self.emit('error', _("Not connected to the XMPP server"))
+            self.emit('finished', False)
+            return
+
+        def on_done(ok, detail):
+            if not ok:
+                self.emit('error', _("Could not send the file: %s") % detail)
+                self.emit('finished', False)
+                return
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).isoformat()
+            history = self.session.history
+            if history is not None:
+                # `detail` es el get_uri devuelto por el slot.
+                history.record_message(self.bare_jid, detail, 'out', ts)
+            self.emit('finished', True)
+
+        self.session.send_file(self.bare_jid, path, on_done)
 
     def send_quick_response(self, value: str, label: str):
         if not self.session.is_connected:
