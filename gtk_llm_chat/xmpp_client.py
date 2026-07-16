@@ -116,6 +116,12 @@ LEGACY_QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
 MESSAGE_CORRECT_NS = 'urn:xmpp:message-correct:0'
 DISCO_ITEMS_NS = 'http://jabber.org/protocol/disco#items'
 COMMANDS_NS = 'http://jabber.org/protocol/commands'
+# XEP-0066 (Out of Band Data): envoltorio del link de un adjunto subido por
+# XEP-0363. XEP-0363 (HTTP File Upload): descubrimiento del componente de
+# subida y pedido de slot.
+OOB_NS = 'jabber:x:oob'
+HTTP_UPLOAD_NS = 'urn:xmpp:http:upload:0'
+DISCO_INFO_NS = 'http://jabber.org/protocol/disco#info'
 
 
 class XmppSession(GObject.Object):
@@ -711,9 +717,16 @@ class XmppSession(GObject.Object):
 
         if properties.has_chatstate and conversation is not None:
             conversation.notify_chatstate(str(properties.chatstate))
-        if not properties.body:
+        # Un adjunto (link de XEP-0363 enviado como OOB XEP-0066) puede venir
+        # SIN body. No lo descartes: se sintetiza un body con el link para que
+        # se vea y se pueda abrir/descargar.
+        oob_url = self._parse_oob_url(_stanza, properties.body)
+        body = properties.body
+        if not body and oob_url:
+            body = oob_url
+        if not body:
             return
-        debug_print(f"XmppSession: mensaje de {bare}: {properties.body[:60]!r}")
+        debug_print(f"XmppSession: mensaje de {bare}: {body[:60]!r}")
         quick_responses = self._parse_quick_responses(_stanza)
         commands = self._parse_inline_commands(_stanza)
         stanza_id = _stanza.getAttr('id')
@@ -721,11 +734,29 @@ class XmppSession(GObject.Object):
         correction = (replace_id, stanza_id) if replace_id else None
         if conversation is not None:
             conversation.deliver(
-                properties.body, quick_responses, commands,
+                body, quick_responses, commands,
                 correction=correction, request_id=stanza_id)
         # Emitir siempre para que la app pueda notificar si la ventana de
         # esa conversación no tiene foco (o no existe) — spec 002 T5.
-        self.emit('message-received', bare, properties.body)
+        self.emit('message-received', bare, body)
+
+    @staticmethod
+    def _parse_oob_url(stanza, body) -> str | None:
+        """URL de un adjunto entrante (XEP-0066 OOB), si lo hay.
+
+        Mismo criterio que el plugin XMPP de OpenClaw (extractOobUrl en
+        protocol.ts): primero el <x xmlns='jabber:x:oob'><url/></x> canónico,
+        y como heurística secundaria un body que sea sólo una URL (así se
+        detectan también los envíos de clientes que sólo pegan el link)."""
+        x = stanza.getTag('x', namespace=OOB_NS)
+        if x is not None:
+            url = x.getTagData('url')
+            if url:
+                return url.strip()
+        trimmed = (body or '').strip()
+        if re.fullmatch(r'https?://\S+', trimmed):
+            return trimmed
+        return None
 
     def _parse_quick_responses(self, stanza) -> list[dict[str, str]]:
         responses = []
