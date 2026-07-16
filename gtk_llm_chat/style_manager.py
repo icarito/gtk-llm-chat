@@ -240,30 +240,40 @@ class StyleManager:
             font-size: 0.85em;
         }
 
-        /* Colores de botón por estilo (paridad con el menú de Telegram):
-           primary=suggested-action y danger=destructive-action ya los pinta
-           Adwaita; success/secondary se definen aquí. Se mantiene la forma
-           de píldora. */
-        .quick-responses button.pill.suggested-action,
-        .quick-responses button.pill.destructive-action {
-            border-radius: 999px;
+        /* Colores de botón por estilo (paridad con el menú de Telegram).
+           Se define un background explícito para las CUATRO variantes en vez de
+           delegar en las clases de acción de Adwaita (suggested-action /
+           destructive-action), que en un botón .pill con radius/padding propios
+           no llegan a pintar de forma fiable. Se mantiene la forma de píldora. */
+        .quick-responses button.pill.qr-primary {
+            background-color: alpha(@accent_bg_color, 0.9);
+            color: @accent_fg_color;
+        }
+        .quick-responses button.pill.qr-primary:hover {
+            background-color: @accent_bg_color;
         }
 
         .quick-responses button.pill.qr-success {
             background-color: alpha(@success_color, 0.85);
             color: white;
         }
-
         .quick-responses button.pill.qr-success:hover {
             background-color: @success_color;
         }
 
-        .quick-responses button.pill.qr-secondary {
-            background-color: alpha(@theme_fg_color, 0.12);
+        .quick-responses button.pill.qr-danger {
+            background-color: alpha(@error_color, 0.85);
+            color: white;
+        }
+        .quick-responses button.pill.qr-danger:hover {
+            background-color: @error_color;
         }
 
+        .quick-responses button.pill.qr-secondary {
+            background-color: alpha(currentColor, 0.15);
+        }
         .quick-responses button.pill.qr-secondary:hover {
-            background-color: alpha(@theme_fg_color, 0.2);
+            background-color: alpha(currentColor, 0.25);
         }
 
         .timestamp {

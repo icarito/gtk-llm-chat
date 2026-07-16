@@ -185,12 +185,12 @@ class MessageWidget(Gtk.Box):
             on_selected(response)
 
         # Mapea el hint de estilo del servidor (primary|secondary|success|
-        # danger, igual que los botones de Telegram) a clases CSS. primary y
-        # danger reusan las clases nativas de Adwaita; success/secondary usan
-        # clases propias definidas en chat_window (CSS). Sin style => "pill".
+        # danger, igual que los botones de Telegram) a clases CSS propias
+        # (qr-*), definidas en style_manager con background explícito para que
+        # pinten de forma fiable sobre el botón .pill. Sin style => "pill".
         style_classes = {
-            'primary': 'suggested-action',
-            'danger': 'destructive-action',
+            'primary': 'qr-primary',
+            'danger': 'qr-danger',
             'success': 'qr-success',
             'secondary': 'qr-secondary',
         }

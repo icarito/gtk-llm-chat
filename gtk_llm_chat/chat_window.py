@@ -18,6 +18,7 @@ from llm import get_default_model
 from .style_manager import style_manager
 from .resource_manager import resource_manager
 from .debug_utils import debug_print
+from .xmpp_client import XmppSession
 import traceback
 
 DEBUG = os.environ.get('DEBUG') or False
@@ -66,7 +67,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._post_layout_scroll_force = False
         self._post_layout_scroll_settle_id = None
         self._post_layout_scroll_watch_id = None
-        self._post_layout_scroll_tick_id = None
+        self._scroll_animation_tick_id = None
+        self._scroll_animation_adj = None
+        self._scroll_animation_start_value = 0.0
+        self._scroll_animation_target = 0.0
+        self._scroll_animation_started_at = 0.0
+        self._scroll_animation_duration = 0.0
         self._suppress_text_changed = False
         self._pending_messaging_send_text = None
         self._pending_messaging_send_tick_id = None
@@ -104,6 +110,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._sticky_response_cards = []
         self._sticky_response_items = []
         self._sticky_response_next_id = 0
+        self._rendered_response_request_ids = set()
         self._is_agent_contact = False
         self.roster_sidebar = None
         self.model_sidebar = None
@@ -155,8 +162,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.header.set_centering_policy(Adw.CenteringPolicy.LOOSE)
         self.title_widget = Adw.WindowTitle.new(title, "")
         self.title_presence_dot = Gtk.Image.new_from_icon_name("media-record-symbolic")
-        self.title_presence_dot.add_css_class("success")
-        self.title_presence_dot.set_tooltip_text(_("Online"))
+        self._title_presence_css = set()
+        self._set_title_presence_state(XmppSession.PRESENCE_OFFLINE)
         self.title_presence_dot.set_valign(Gtk.Align.CENTER)
         self.title_presence_dot.set_visible(False)
 
@@ -567,6 +574,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_actions_batch = []
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
+        self._rendered_response_request_ids = set()
         # Identidad de cada burbuja ya pintada, para que el solape del catch-up
         # no la repinte. Se vacía con las burbujas: si no, al reabrir la
         # conversación el historial se descartaría entero por "ya visto".
@@ -581,9 +589,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._post_layout_scroll_watch_id is not None:
             GLib.source_remove(self._post_layout_scroll_watch_id)
             self._post_layout_scroll_watch_id = None
-        if self._post_layout_scroll_tick_id is not None:
-            self.remove_tick_callback(self._post_layout_scroll_tick_id)
-            self._post_layout_scroll_tick_id = None
+        self._cancel_scroll_animation()
         if self._post_layout_scroll_settle_id is not None:
             GLib.source_remove(self._post_layout_scroll_settle_id)
             self._post_layout_scroll_settle_id = None
@@ -1229,14 +1235,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.messages_box.queue_draw()
         self.message_scroll.queue_resize()
         self.message_scroll.queue_draw()
-        self._queue_native_render()
         if self.is_messaging_backend:
             self._scroll_to_bottom_messaging(force=force)
         else:
             self._scroll_to_bottom_after_layout(force=force)
         if DEBUG:
             debug_print(f"[send] display_message done sender={sender}")
-            self._log_last_message_geometry("display_message")
 
         return message_widget
 
@@ -1368,9 +1372,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.title_widget.set_tooltip_text(bare_jid)
         status = session.get_contact_status(bare_jid)
         presence = session.get_presence(bare_jid)
-        is_online = presence == 'online'
-        self.title_presence_dot.set_visible(is_online)
-        presence_label = _("Online") if is_online else _("Offline")
+        presence_label = self._set_title_presence_state(presence)
         display_status = status or presence_label
         self.contact_status_label.set_label(bare_jid)
         self.contact_status_label.set_tooltip_text(display_status)
@@ -1399,12 +1401,59 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.activity_label.set_label(activity)
         self.activity_label.set_tooltip_text(str(status or ""))
 
+    def _set_title_presence_state(self, presence):
+        """Reflect XMPP show/session state in the header status dot."""
+        if not hasattr(self, 'title_presence_dot'):
+            return _("Offline")
+        for css_class in getattr(self, '_title_presence_css', set()):
+            self.title_presence_dot.remove_css_class(css_class)
+        css_classes = set()
+        state = presence or XmppSession.PRESENCE_OFFLINE
+        if state == XmppSession.PRESENCE_BUSY:
+            label = _("Busy")
+            css_classes.add("error")
+            visible = True
+        elif state == XmppSession.PRESENCE_AWAY:
+            label = _("Away")
+            css_classes.add("warning")
+            visible = True
+        elif state == XmppSession.PRESENCE_ONLINE:
+            label = _("Online")
+            css_classes.add("success")
+            visible = True
+        else:
+            label = _("Offline")
+            css_classes.add("dim-label")
+            visible = False
+        for css_class in css_classes:
+            self.title_presence_dot.add_css_class(css_class)
+        self._title_presence_css = css_classes
+        self.title_presence_dot.set_tooltip_text(label)
+        self.title_presence_dot.set_visible(visible)
+        return label
+
     def _apply_agent_telemetry(self, telemetry):
         """Telemetría recibida por PEP: barra de contexto y badge de modelo."""
         if not hasattr(self, 'context_level'):
             return
-        self._update_context_level(telemetry or {})
-        self._update_model_badge((telemetry or {}).get('model'))
+        telemetry = telemetry or {}
+        self._update_context_level(telemetry)
+        self._update_model_badge(telemetry.get('model'))
+        if telemetry and hasattr(self, 'activity_label'):
+            parsed = self._normalize_agent_status_dict(telemetry)
+            activity = self._friendly_agent_activity(parsed.get('activity', ''))
+            if parsed.get('tool'):
+                activity = _("Usando herramienta: ") + str(parsed['tool'])
+            details = self._format_agent_status_details(parsed)
+            self.activity_label.set_label(activity or details)
+            self.activity_label.set_tooltip_text(details or activity or "")
+            availability = str(telemetry.get('availability') or telemetry.get('activity') or '').lower()
+            if availability in ('busy', 'processing', 'working'):
+                self._set_title_presence_state(XmppSession.PRESENCE_BUSY)
+            elif availability in ('away', 'paused', 'xa'):
+                self._set_title_presence_state(XmppSession.PRESENCE_AWAY)
+            elif availability == 'available':
+                self._set_title_presence_state(XmppSession.PRESENCE_ONLINE)
 
     def _update_context_level(self, telemetry):
         used = telemetry.get('context_used')
@@ -1429,6 +1478,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 requests=telemetry.get('tokens_requests', '?')))
         if telemetry.get('cost') is not None:
             tooltip.append(_("Cost: ") + self._format_cost(telemetry['cost']))
+        if telemetry.get('session_cost') is not None:
+            tooltip.append(_("Session cost: ") + self._format_cost(telemetry['session_cost']))
+        if telemetry.get('day_cost') is not None:
+            tooltip.append(_("Today: ") + self._format_cost(telemetry['day_cost']))
         self.context_level.set_tooltip_text("\n".join(tooltip))
 
     def _update_model_badge(self, model):
@@ -1500,7 +1553,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not text:
             return parsed
         json_text = text
-        if json_text.startswith("nanoclaw:"):
+        if json_text.startswith("nanoclaw:") or json_text.startswith("openclaw:"):
             json_text = json_text.split(":", 1)[1].strip()
         if json_text.startswith("{"):
             try:
@@ -1518,13 +1571,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     @classmethod
     def _normalize_agent_status_dict(cls, data, fallback=""):
-        parsed = {'activity': data.get('activity') or data.get('state') or fallback}
+        parsed = {'activity': data.get('activity') or data.get('state') or data.get('availability') or fallback}
         aliases = {
             'request': ('request', 'requests', 'requests_total', 'request_count'),
             'tokens': ('tokens', 'total_tokens', 'tokens_total'),
             'input_tokens': ('input_tokens', 'prompt_tokens', 'tokens_in'),
             'output_tokens': ('output_tokens', 'completion_tokens', 'tokens_out'),
             'cost': ('cost', 'usd', 'cost_usd'),
+            'session_cost': ('session_cost', 'session_usd', 'session_cost_usd'),
+            'day_cost': ('day_cost', 'today_cost', 'day_usd', 'daily_cost_usd'),
+            'balance': ('balance', 'balance_usd', 'kilo_balance'),
+            'availability': ('availability', 'presence'),
             'model': ('model', 'model_id'),
             'tool': ('tool', 'current_tool'),
             'bypass': ('bypass', 'approval_bypass'),
@@ -1563,6 +1620,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             'completion_tokens': 'output_tokens',
             'cost': 'cost',
             'usd': 'cost',
+            'session_cost': 'session_cost',
+            'session_usd': 'session_cost',
+            'day_cost': 'day_cost',
+            'today_cost': 'day_cost',
+            'balance': 'balance',
+            'balance_usd': 'balance',
+            'kilo_balance': 'balance',
+            'availability': 'availability',
             'model': 'model',
             'tool': 'tool',
             'current_tool': 'tool',
@@ -1587,6 +1652,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             details.append(_("Req: ") + str(parsed['request']))
         if parsed.get('cost') not in (None, ""):
             details.append(_("Cost: ") + cls._format_cost(parsed['cost']))
+        if parsed.get('session_cost') not in (None, ""):
+            details.append(_("Session: ") + cls._format_cost(parsed['session_cost']))
+        if parsed.get('day_cost') not in (None, ""):
+            details.append(_("Today: ") + cls._format_cost(parsed['day_cost']))
+        if parsed.get('balance') not in (None, ""):
+            details.append(_("Balance: ") + cls._format_cost(parsed['balance']))
         if parsed.get('model'):
             details.append(str(parsed['model']))
         for note in parsed.get('notes', [])[:2]:
@@ -1633,12 +1704,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _friendly_agent_activity(activity):
         text = str(activity or "").strip()
         lower = text.lower()
-        if lower == "processing":
+        if lower in ("processing", "busy", "working"):
             return _("Trabajando")
         if lower == "available":
             return _("Disponible")
-        if lower == "waiting":
+        if lower in ("waiting", "queued"):
             return _("En espera")
+        if lower in ("paused", "away", "xa"):
+            return _("Ausente")
         if lower.startswith("tool:"):
             return _("Usando herramienta: ") + text.split(":", 1)[1].strip()
         return text
@@ -1657,7 +1730,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not text:
             return parsed
         json_text = text
-        if json_text.startswith("nanoclaw:"):
+        if json_text.startswith("nanoclaw:") or json_text.startswith("openclaw:"):
             json_text = json_text.split(":", 1)[1].strip()
         if json_text.startswith("{"):
             try:
@@ -1675,13 +1748,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     @classmethod
     def _normalize_agent_status_dict(cls, data, fallback=""):
-        parsed = {'activity': data.get('activity') or data.get('state') or fallback}
+        parsed = {'activity': data.get('activity') or data.get('state') or data.get('availability') or fallback}
         aliases = {
             'request': ('request', 'requests', 'requests_total', 'request_count'),
             'tokens': ('tokens', 'total_tokens', 'tokens_total'),
             'input_tokens': ('input_tokens', 'prompt_tokens', 'tokens_in'),
             'output_tokens': ('output_tokens', 'completion_tokens', 'tokens_out'),
             'cost': ('cost', 'usd', 'cost_usd'),
+            'session_cost': ('session_cost', 'session_usd', 'session_cost_usd'),
+            'day_cost': ('day_cost', 'today_cost', 'day_usd', 'daily_cost_usd'),
+            'balance': ('balance', 'balance_usd', 'kilo_balance'),
+            'availability': ('availability', 'presence'),
             'model': ('model', 'model_id'),
             'tool': ('tool', 'current_tool'),
             'bypass': ('bypass', 'approval_bypass'),
@@ -1720,6 +1797,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             'completion_tokens': 'output_tokens',
             'cost': 'cost',
             'usd': 'cost',
+            'session_cost': 'session_cost',
+            'session_usd': 'session_cost',
+            'day_cost': 'day_cost',
+            'today_cost': 'day_cost',
+            'balance': 'balance',
+            'balance_usd': 'balance',
+            'kilo_balance': 'balance',
+            'availability': 'availability',
             'model': 'model',
             'tool': 'tool',
             'current_tool': 'tool',
@@ -1744,6 +1829,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             details.append(_("Req: ") + str(parsed['request']))
         if parsed.get('cost') not in (None, ""):
             details.append(_("Cost: ") + cls._format_cost(parsed['cost']))
+        if parsed.get('session_cost') not in (None, ""):
+            details.append(_("Session: ") + cls._format_cost(parsed['session_cost']))
+        if parsed.get('day_cost') not in (None, ""):
+            details.append(_("Today: ") + cls._format_cost(parsed['day_cost']))
+        if parsed.get('balance') not in (None, ""):
+            details.append(_("Balance: ") + cls._format_cost(parsed['balance']))
         if parsed.get('model'):
             details.append(str(parsed['model']))
         for note in parsed.get('notes', [])[:2]:
@@ -1790,12 +1881,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _friendly_agent_activity(activity):
         text = str(activity or "").strip()
         lower = text.lower()
-        if lower == "processing":
+        if lower in ("processing", "busy", "working"):
             return _("Trabajando")
         if lower == "available":
             return _("Disponible")
-        if lower == "waiting":
+        if lower in ("waiting", "queued"):
             return _("En espera")
+        if lower in ("paused", "away", "xa"):
+            return _("Ausente")
         if lower.startswith("tool:"):
             return _("Usando herramienta: ") + text.split(":", 1)[1].strip()
         return text
@@ -1972,8 +2065,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # tampoco bajaría y el chat volvería a "no seguir el fondo".
         self._loading_older_history = False
 
+    # Edad máxima para restaurar una tarjeta de acción pendiente que NO trae
+    # expires_at_ms explícito. El registro de comandos del servidor caduca a
+    # los 15 min (command-node-registry DEFAULT_TTL_MS), así que una tarjeta
+    # más vieja ya está muerta en el servidor —presionarla no haría nada— y no
+    # debe re-renderizarse al reabrir el cliente. Las que sí traen expires_at_ms
+    # se filtran por ese valor exacto en _filter_unexpired_actions.
+    _PENDING_ACTION_MAX_AGE_MS = 15 * 60 * 1000
+
     def _restore_history_actions(self, body, timestamp, quick_responses,
-                                 _commands, request_id=None):
+                                 commands, request_id=None):
+        if request_id and request_id in self._rendered_response_request_ids:
+            return
+        quick_responses = self._filter_unexpired_actions(quick_responses)
+        commands = self._filter_unexpired_actions(commands)
+        # Descartar tarjetas viejas sin expiry explícito (ya caducadas en el
+        # servidor). Solo aplica a las que quedaron sin expires_at_ms tras el
+        # filtro anterior.
+        if (quick_responses or commands) and self._pending_actions_are_stale(
+                timestamp, quick_responses, commands):
+            return
         if quick_responses and not self._history_quick_response_was_answered(
                 timestamp, quick_responses):
             self._add_sticky_response_card(
@@ -1981,6 +2092,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 lambda response: self._send_restored_quick_response(response),
                 detail_text=Message.compact_blank_lines(body),
                 request_id=request_id)
+        if commands and not quick_responses:
+            self._add_sticky_response_card(
+                commands,
+                lambda command: self._execute_inline_command(command),
+                detail_text=Message.compact_blank_lines(body),
+                request_id=request_id)
+
+    def _pending_actions_are_stale(self, timestamp, quick_responses, commands):
+        """True si la tarjeta pendiente es demasiado vieja para restaurar.
+
+        Solo se considera vieja cuando NINGUNA de sus acciones trae un
+        expires_at_ms explícito (esas ya se filtran por su propio valor) y el
+        timestamp del mensaje supera _PENDING_ACTION_MAX_AGE_MS. Si no se puede
+        parsear el timestamp, no se descarta (conservador)."""
+        has_explicit_expiry = any(
+            self._action_remaining_ms(a) is not None
+            for a in list(quick_responses or []) + list(commands or [])
+        )
+        if has_explicit_expiry:
+            return False
+        request_dt = self._parse_history_ts(timestamp)
+        if request_dt is None:
+            return False
+        age_ms = int(time.time() * 1000) - int(request_dt.timestamp() * 1000)
+        return age_ms > self._PENDING_ACTION_MAX_AGE_MS
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)
@@ -2010,6 +2146,48 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.display_message(label, sender="user")
             GLib.idle_add(self._scroll_to_bottom, False)
             self.backend.send_quick_response(value, label)
+
+    @staticmethod
+    def _action_remaining_ms(action):
+        raw = action.get('expires_at_ms') if isinstance(action, dict) else None
+        if raw in (None, ""):
+            return None
+        try:
+            expires_at_ms = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return expires_at_ms - int(time.time() * 1000)
+
+    @classmethod
+    def _filter_unexpired_actions(cls, actions):
+        filtered = []
+        for action in actions or []:
+            remaining = cls._action_remaining_ms(action)
+            if remaining is not None and remaining <= 0:
+                continue
+            filtered.append(action)
+        return filtered
+
+    def _expire_quick_responses_from_actions(self, widget, actions):
+        expiries = [
+            remaining for remaining in (
+                self._action_remaining_ms(action) for action in (actions or [])
+            )
+            if remaining is not None
+        ]
+        if not expiries:
+            return
+        remaining_ms = min(expiries)
+        if remaining_ms <= 0:
+            widget.hide_quick_responses()
+            return
+
+        def expire_if_same_widget():
+            if widget.get_parent() is not None:
+                widget.hide_quick_responses()
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(max(1000, remaining_ms), expire_if_same_widget)
 
     def _insert_bubble_by_timestamp(self, widget):
         """Inserta la burbuja en su sitio CRONOLÓGICO, no al final.
@@ -2110,8 +2288,29 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._history_keys.add(key)
 
         sender = "user" if direction == 'out' else "assistant"
+        if self._has_recent_matching_bubble(body, sender, timestamp):
+            return
         msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
         self._insert_bubble_by_timestamp(MessageWidget(msg))
+
+    def _has_recent_matching_bubble(self, body, sender, timestamp,
+                                    window_seconds=60):
+        target_dt = self._parse_history_ts(timestamp)
+        if target_dt is None:
+            return False
+        normalized_body = Message.compact_blank_lines(body)
+        for child in list(self.messages_box):
+            message = getattr(child, 'message', None)
+            if message is None or message.sender != sender:
+                continue
+            if Message.compact_blank_lines(message.content) != normalized_body:
+                continue
+            child_dt = self._comparable_ts(message.timestamp)
+            if child_dt is None:
+                continue
+            if abs((target_dt - child_dt).total_seconds()) <= window_seconds:
+                return True
+        return False
 
     @staticmethod
     def _parse_history_ts(timestamp):
@@ -2493,6 +2692,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                                    request_id=None):
         if not responses:
             return
+        if request_id:
+            if request_id in self._rendered_response_request_ids:
+                return
+            self._rendered_response_request_ids.add(request_id)
 
         item = {
             'id': self._sticky_response_next_id,
@@ -2743,8 +2946,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return ""
         return Message.compact_blank_lines(message.content)
 
-    def _on_quick_responses(self, backend, responses, request_id=None):
+    def _on_quick_responses(self, backend, responses, request_id=None,
+                            _defer_attempt=0):
+        responses = self._filter_unexpired_actions(responses)
+        if not responses:
+            return
+        if request_id and request_id in self._rendered_response_request_ids:
+            return
         if self.current_message_widget is None:
+            if self.is_messaging_backend and _defer_attempt < 8:
+                GLib.idle_add(
+                    lambda: (
+                        self._on_quick_responses(
+                            backend, responses, request_id, _defer_attempt + 1),
+                        GLib.SOURCE_REMOVE,
+                    )[1],
+                    priority=GLib.PRIORITY_DEFAULT_IDLE,
+                )
             return
 
         # Multi-pregunta: NO ocultar los botones de preguntas anteriores al
@@ -2762,43 +2980,65 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if hasattr(backend, 'send_quick_response'):
                 backend.send_quick_response(value, label)
 
-        self._add_sticky_response_card(
-            responses, on_selected,
-            detail_text=self._current_agent_message_text(),
-            request_id=request_id)
+        self.current_message_widget.add_quick_responses(responses, on_selected)
+        if request_id:
+            self._rendered_response_request_ids.add(request_id)
+        self._expire_quick_responses_from_actions(
+            self.current_message_widget, responses)
+        self._scroll_to_bottom_after_layout_if_following()
 
-    def _on_commands(self, backend, commands, request_id=None):
+    def _on_commands(self, backend, commands, request_id=None,
+                     _defer_attempt=0):
+        commands = self._filter_unexpired_actions(commands)
+        if not commands:
+            return
+        if request_id and request_id in self._rendered_response_request_ids:
+            return
         if self.current_message_widget is None:
+            if self.is_messaging_backend and _defer_attempt < 8:
+                GLib.idle_add(
+                    lambda: (
+                        self._on_commands(
+                            backend, commands, request_id, _defer_attempt + 1),
+                        GLib.SOURCE_REMOVE,
+                    )[1],
+                    priority=GLib.PRIORITY_DEFAULT_IDLE,
+                )
             return
 
         def on_selected(command):
-            name = command.get('name', '')
-            node = command.get('node', '')
-            jid = command.get('jid', '')
-            if not name or not node or not jid:
-                return
-            # Los comandos inline también pasan por el flujo ad-hoc completo
-            # (con formularios XEP-0004), no por el viejo send_command. Se
-            # arma un AdHocCommand mínimo a partir del anuncio inline.
-            session = getattr(backend, 'session', None)
-            bare_jid = getattr(backend, 'bare_jid', None)
-            if session is None or bare_jid is None:
-                return
-            from .xmpp_commands import XmppCommandClient
-            from nbxmpp.structs import AdHocCommand
-            from nbxmpp.protocol import JID
-            client = XmppCommandClient(session, bare_jid)
-            # Mantener viva la referencia: XmppCommandClient guarda callbacks
-            # pendientes y no debe recolectarse antes de que llegue la
-            # respuesta (mismo cuidado que _agent_command_client).
-            self._agent_command_client = client
-            adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
-            self._execute_agent_command(client, adhoc)
+            self._execute_inline_command(command)
 
-        self._add_sticky_response_card(
-            commands, on_selected,
-            detail_text=self._current_agent_message_text(),
-            request_id=request_id)
+        self.current_message_widget.add_quick_responses(commands, on_selected)
+        if request_id:
+            self._rendered_response_request_ids.add(request_id)
+        self._expire_quick_responses_from_actions(
+            self.current_message_widget, commands)
+        self._scroll_to_bottom_after_layout_if_following()
+
+    def _execute_inline_command(self, command):
+        name = command.get('name', '')
+        node = command.get('node', '')
+        jid = command.get('jid', '')
+        if not name or not node or not jid:
+            return
+        # Los comandos inline también pasan por el flujo ad-hoc completo
+        # (con formularios XEP-0004), no por el viejo send_command. Se arma
+        # un AdHocCommand mínimo a partir del anuncio inline.
+        backend = self.backend
+        session = getattr(backend, 'session', None)
+        bare_jid = getattr(backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            return
+        from .xmpp_commands import XmppCommandClient
+        from nbxmpp.structs import AdHocCommand
+        from nbxmpp.protocol import JID
+        client = XmppCommandClient(session, bare_jid)
+        # Mantener viva la referencia: XmppCommandClient guarda callbacks
+        # pendientes y no debe recolectarse antes de que llegue la respuesta.
+        self._agent_command_client = client
+        adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
+        self._execute_agent_command(client, adhoc)
 
     # Margen (px) dentro del cual se considera que el usuario está "al fondo".
     # Un par de píxeles de holgura: GTK no siempre deja el valor exacto.
@@ -2825,56 +3065,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             f"stick={getattr(self, '_stick_to_bottom', None)} "
             f"pending={getattr(self, '_post_layout_scroll_pending', None)} "
             f"force={getattr(self, '_post_layout_scroll_force', None)} "
-            f"tick={getattr(self, '_post_layout_scroll_tick_id', None)} "
             f"added_pending={getattr(self, '_content_added_pending', None)} "
             f"restoring={getattr(self, '_restoring_scroll', None)} "
             f"{extra}"
         )
-
-    def _log_last_message_geometry(self, where):
-        if not DEBUG or not hasattr(self, 'messages_box'):
-            return
-        children = list(self.messages_box)
-        if not children:
-            debug_print(f"[geom] {where} | no children")
-            return
-        child = children[-1]
-        message = getattr(child, 'message', None)
-        content = getattr(message, 'content', '')
-        sender = getattr(message, 'sender', '<none>')
-        try:
-            _, rect = child.compute_bounds(self.message_scroll)
-            bounds = (
-                f"x={rect.get_x():.1f} y={rect.get_y():.1f} "
-                f"w={rect.get_width():.1f} h={rect.get_height():.1f}"
-            )
-        except Exception as exc:
-            bounds = f"bounds_error={exc!r}"
-        try:
-            _, box_rect = self.messages_box.compute_bounds(self.message_scroll)
-            box_bounds = (
-                f"box_y={box_rect.get_y():.1f} box_h={box_rect.get_height():.1f}"
-            )
-        except Exception as exc:
-            box_bounds = f"box_bounds_error={exc!r}"
-        debug_print(
-            f"[geom] {where} | sender={sender} len={len(str(content or ''))} "
-            f"child_h={child.get_height()} allocated={child.get_allocated_height()} "
-            f"scroll_h={self.message_scroll.get_height()} "
-            f"{bounds} {box_bounds}"
-        )
-
-    def _queue_native_render(self):
-        native = self.get_native()
-        if native is None:
-            return
-        surface = native.get_surface()
-        if surface is None:
-            return
-        if hasattr(surface, 'request_layout'):
-            surface.request_layout()
-        if hasattr(surface, 'queue_render'):
-            surface.queue_render()
 
     def _at_bottom(self, adj):
         return (adj.get_upper() - (adj.get_value() + adj.get_page_size())
@@ -2902,7 +3096,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         if grew:
             if self._stick_to_bottom:
-                self._set_value_silently(adj, max(0.0, upper - adj.get_page_size()))
+                self._animate_value_silently(
+                    adj, max(0.0, upper - adj.get_page_size()))
                 self._log_scroll_state("value-changed(grew -> stick)", adj)
             else:
                 self._log_scroll_state("value-changed(grew no-stick)", adj)
@@ -2935,7 +3130,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._stick_to_bottom:
             # Contenido nuevo (o el widget que acaba de crecer al renderizar):
             # pegarse al fondo con el alto ya definitivo.
-            self._set_value_silently(adj, adj.get_upper() - page_size)
+            self._animate_value_silently(adj, adj.get_upper() - page_size)
             self._log_scroll_state("changed(apply stick)", adj)
             return
 
@@ -2962,6 +3157,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _set_value_silently(self, adj, value):
         """Mover el scroll sin que _on_vadj_value_changed lo lea como que el
         usuario cambió de intención."""
+        self._cancel_scroll_animation()
+        self._jump_to_value_silently(adj, value)
+
+    def _jump_to_value_silently(self, adj, value):
         target = max(0.0, value)
         self._restoring_scroll = True
         try:
@@ -2978,7 +3177,58 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._log_scroll_state(
             "set_value_silently", adj, extra=f"requested={value:.1f}")
 
-    def _scroll_to_bottom(self, force=True):
+    def _animate_value_silently(self, adj, value, duration_ms=140):
+        target = max(0.0, value)
+        start = adj.get_value()
+        if abs(target - start) < 24.0:
+            self._set_value_silently(adj, target)
+            return
+
+        self._cancel_scroll_animation()
+        self._scroll_animation_adj = adj
+        self._scroll_animation_start_value = start
+        self._scroll_animation_target = target
+        self._scroll_animation_started_at = time.monotonic()
+        self._scroll_animation_duration = max(0.001, duration_ms / 1000.0)
+        self._scroll_animation_tick_id = self.add_tick_callback(
+            self._on_scroll_animation_tick)
+
+    def _cancel_scroll_animation(self):
+        if getattr(self, '_scroll_animation_tick_id', None) is not None:
+            self.remove_tick_callback(self._scroll_animation_tick_id)
+            self._scroll_animation_tick_id = None
+        self._scroll_animation_adj = None
+
+    def _on_scroll_animation_tick(self, _widget, _frame_clock):
+        adj = self._scroll_animation_adj
+        if adj is None:
+            self._scroll_animation_tick_id = None
+            return GLib.SOURCE_REMOVE
+
+        elapsed = time.monotonic() - self._scroll_animation_started_at
+        progress = min(1.0, elapsed / self._scroll_animation_duration)
+        # Ease-out cubic: quick response, soft landing.
+        eased = 1.0 - pow(1.0 - progress, 3)
+        value = (
+            self._scroll_animation_start_value +
+            (self._scroll_animation_target - self._scroll_animation_start_value) * eased
+        )
+
+        if progress >= 1.0:
+            target = self._scroll_animation_target
+            self._scroll_animation_tick_id = None
+            self._scroll_animation_adj = None
+            self._jump_to_value_silently(adj, target)
+            return GLib.SOURCE_REMOVE
+
+        self._restoring_scroll = True
+        try:
+            adj.set_value(max(0.0, value))
+        finally:
+            self._restoring_scroll = False
+        return GLib.SOURCE_CONTINUE
+
+    def _scroll_to_bottom(self, force=True, animate=False):
         """Reanuda el seguimiento del fondo. `force` lo reanuda aunque el
         usuario se hubiera ido hacia arriba (p. ej. porque él mismo acaba de
         enviar un mensaje); si no, respeta que esté leyendo el historial.
@@ -2990,8 +3240,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._stick_to_bottom = True
         self._content_added_pending = False
         if self._stick_to_bottom:
-            self._set_value_silently(
-                adj, adj.get_upper() - adj.get_page_size())
+            target = adj.get_upper() - adj.get_page_size()
+            if animate:
+                self._animate_value_silently(adj, target)
+            else:
+                self._set_value_silently(adj, target)
         self._log_scroll_state("scroll_to_bottom", adj, extra=f"force={force}")
 
     def _scroll_to_bottom_after_layout_if_following(self):
@@ -3016,9 +3269,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._post_layout_scroll_watch_id is not None:
             GLib.source_remove(self._post_layout_scroll_watch_id)
             self._post_layout_scroll_watch_id = None
-        if self._post_layout_scroll_tick_id is not None:
-            self.remove_tick_callback(self._post_layout_scroll_tick_id)
-            self._post_layout_scroll_tick_id = None
+        self._cancel_scroll_animation()
         self._post_layout_scroll_settle_id = None
         self._post_layout_scroll_pending = False
         self._post_layout_scroll_force = False
@@ -3053,7 +3304,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if height_changed:
             # El bubble todavía está creciendo (wrap/markdown): bajar de nuevo
             # con el alto real del layout actual.
-            self._scroll_to_bottom(force=self._post_layout_scroll_force)
+            self._scroll_to_bottom(
+                force=self._post_layout_scroll_force,
+                animate=True)
             self._arm_post_layout_scroll_settle()
             self._log_scroll_state("watch(height changed)", extra=f"height={height}")
         else:
@@ -3066,32 +3319,6 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._post_layout_scroll_watch_id = GLib.timeout_add(
                 33, self._watch_post_layout_scroll)
             self._log_scroll_state("watch(start)", extra="interval_ms=33")
-        if self._post_layout_scroll_tick_id is None:
-            self._post_layout_scroll_tick_id = self.add_tick_callback(
-                self._tick_post_layout_scroll)
-            self._log_scroll_state("tick(start)")
-
-    def _tick_post_layout_scroll(self, _widget, _frame_clock):
-        if not self._post_layout_scroll_pending:
-            self._post_layout_scroll_tick_id = None
-            self._log_scroll_state("tick(stop no pending)")
-            return GLib.SOURCE_REMOVE
-
-        should_follow = self._post_layout_scroll_force or self._stick_to_bottom
-        if not should_follow:
-            self._finish_post_layout_scroll()
-            self._log_scroll_state("tick(stop no follow)")
-            return GLib.SOURCE_REMOVE
-
-        self.queue_allocate()
-        self.messages_box.queue_allocate()
-        self.message_scroll.queue_allocate()
-        self._scroll_to_bottom(force=self._post_layout_scroll_force)
-        self.queue_draw()
-        self._queue_native_render()
-        self._log_last_message_geometry("tick")
-        self._log_scroll_state("tick(apply)")
-        return GLib.SOURCE_CONTINUE
 
     def _scroll_to_bottom_after_layout(self, force=True):
         """Baja del todo cuando el alto aún no es definitivo (carga de
@@ -3108,7 +3335,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             extra=f"force={force} box_h={self._messages_box_last_height}")
 
         def scroll_once():
-            self._scroll_to_bottom(force)
+            self._scroll_to_bottom(force, animate=True)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(scroll_once)
