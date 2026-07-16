@@ -2397,11 +2397,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
         dialog = Gtk.FileDialog()
         dialog.set_title(_("Attach a file"))
 
-        def on_open(dlg, result):
+        # OJO: PyGObject invoca el AsyncReadyCallback con TRES argumentos
+        # (source_object, result, user_data). Con dos, la llamada revienta con
+        # un TypeError que el bucle de GLib se traga -> el diálogo se cierra y
+        # "no pasa nada". El tercero es obligatorio aunque no se use.
+        def on_open(dlg, result, _user_data=None):
             try:
                 gfile = dlg.open_finish(result)
-            except GLib.Error:
-                return  # cancelado por el usuario
+            except GLib.Error as exc:
+                # DISMISSED = el usuario canceló: no es un error que mostrar.
+                if not exc.matches(Gtk.dialog_error_quark(),
+                                   Gtk.DialogError.DISMISSED):
+                    debug_print(f"[attach] open_finish falló: {exc}")
+                    self._on_llm_error(
+                        self.backend, _("Could not open the file: %s") % exc.message)
+                return
+            except Exception as exc:  # noqa: BLE001 - no dejarlo pasar en silencio
+                debug_print(f"[attach] error inesperado: {exc}")
+                self._on_llm_error(self.backend, str(exc))
+                return
             if gfile is None:
                 return
             path = gfile.get_path()
@@ -2409,8 +2423,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._on_llm_error(
                     self.backend, _("Could not read the selected file"))
                 return
+            debug_print(f"[attach] enviando {path}")
             # La subida es asíncrona: el backend avisa por 'finished'/'error'.
-            self.backend.send_file(path)
+            try:
+                self.backend.send_file(path)
+            except Exception as exc:  # noqa: BLE001
+                debug_print(f"[attach] send_file falló: {exc}")
+                self._on_llm_error(self.backend, str(exc))
 
         dialog.open(self, None, on_open)
 

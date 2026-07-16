@@ -867,9 +867,12 @@ class XmppSession(GObject.Object):
                 return
             task = self._client.get_module('HTTPUpload').request_slot(
                 JID.from_string(host), filename, size, content_type)
+            # weak=False: sin esto el lambda muere al retornar y el callback
+            # nunca corre (ver nota en _resolve_upload_host).
             task.add_done_callback(
                 lambda t: self._on_upload_slot(t, to_bare_jid, path, filename,
-                                               content_type, on_done))
+                                               content_type, on_done),
+                weak=False)
 
         self._resolve_upload_host(with_host)
 
@@ -902,8 +905,12 @@ class XmppSession(GObject.Object):
             items = [i.jid for i in getattr(result, 'items', [])]
             self._probe_upload_items(items, callback)
 
+        # weak=False es obligatorio: add_done_callback guarda por defecto una
+        # referencia DÉBIL, así que esta función local muere al retornar y el
+        # callback no se llama nunca (el IQ va, el server responde, y no pasa
+        # nada). Mismo motivo que en fetch_agent_telemetry.
         task = self._client.get_module('Discovery').disco_items(domain)
-        task.add_done_callback(on_items)
+        task.add_done_callback(on_items, weak=False)
 
     def _probe_upload_items(self, items, callback):
         """disco#info de cada item hasta encontrar la feature de upload."""
@@ -926,7 +933,7 @@ class XmppSession(GObject.Object):
             self._probe_upload_items(rest, callback)
 
         task = self._client.get_module('Discovery').disco_info(item)
-        task.add_done_callback(on_info)
+        task.add_done_callback(on_info, weak=False)  # ver nota en _resolve_upload_host
 
     def _on_upload_slot(self, task, to_bare_jid, path, filename,
                         content_type, on_done):
