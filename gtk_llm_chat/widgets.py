@@ -168,6 +168,7 @@ class MessageWidget(Gtk.Box):
         """Adjunta botones de respuesta rápida a esta burbuja."""
         if not responses:
             return
+        self.hide_quick_responses()
         flow = Gtk.FlowBox()
         flow.set_margin_top(6)
         flow.set_max_children_per_line(99)
@@ -183,10 +184,24 @@ class MessageWidget(Gtk.Box):
                 btn.set_sensitive(False)
             on_selected(response)
 
+        # Mapea el hint de estilo del servidor (primary|secondary|success|
+        # danger, igual que los botones de Telegram) a clases CSS. primary y
+        # danger reusan las clases nativas de Adwaita; success/secondary usan
+        # clases propias definidas en chat_window (CSS). Sin style => "pill".
+        style_classes = {
+            'primary': 'suggested-action',
+            'danger': 'destructive-action',
+            'success': 'qr-success',
+            'secondary': 'qr-secondary',
+        }
         for response in responses:
             label = response.get('label') or response.get('name') or response.get('value', '')
             button = Gtk.Button(label=label)
             button.add_css_class("pill")
+            style = response.get('style')
+            extra_class = style_classes.get(style) if style else None
+            if extra_class:
+                button.add_css_class(extra_class)
             button.connect("clicked", handle_click, response)
             flow.append(button)
             buttons.append(button)

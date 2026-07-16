@@ -240,6 +240,32 @@ class StyleManager:
             font-size: 0.85em;
         }
 
+        /* Colores de botón por estilo (paridad con el menú de Telegram):
+           primary=suggested-action y danger=destructive-action ya los pinta
+           Adwaita; success/secondary se definen aquí. Se mantiene la forma
+           de píldora. */
+        .quick-responses button.pill.suggested-action,
+        .quick-responses button.pill.destructive-action {
+            border-radius: 999px;
+        }
+
+        .quick-responses button.pill.qr-success {
+            background-color: alpha(@success_color, 0.85);
+            color: white;
+        }
+
+        .quick-responses button.pill.qr-success:hover {
+            background-color: @success_color;
+        }
+
+        .quick-responses button.pill.qr-secondary {
+            background-color: alpha(@theme_fg_color, 0.12);
+        }
+
+        .quick-responses button.pill.qr-secondary:hover {
+            background-color: alpha(@theme_fg_color, 0.2);
+        }
+
         .timestamp {
             font-size: 0.8em;
             opacity: 0.7;

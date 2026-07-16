@@ -36,7 +36,7 @@ STATE_CONNECTING = 'connecting'
 STATE_RECONNECTING = 'reconnecting'
 STATE_CONNECTED = 'connected'
 
-RESOURCE = 'gtk-llm-chat'
+RESOURCE = 'gtk-llm-chat-desktop'
 AGENT_CAPS_NODE = 'https://github.com/openclaw/openclaw'
 QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
 
@@ -44,6 +44,7 @@ QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
 # <status> de la presencia: el status es texto para humanos —cualquier cliente lo
 # pinta tal cual junto al contacto— y estos números cambian a cada token.
 TELEMETRY_NODE = 'urn:openclaw:telemetry:0'
+LEGACY_TELEMETRY_NODE = 'urn:nanoclaw:telemetry:0'
 
 
 def parse_telemetry(item):
@@ -55,6 +56,8 @@ def parse_telemetry(item):
     """
     payload = item.getTag('telemetry', namespace=TELEMETRY_NODE)
     if payload is None:
+        payload = item.getTag('telemetry', namespace=LEGACY_TELEMETRY_NODE)
+    if payload is None:
         return None
 
     def _int(node, attr):
@@ -64,6 +67,12 @@ def parse_telemetry(item):
             return None
 
     out = {}
+    activity = payload.getAttr('activity')
+    availability = payload.getAttr('availability')
+    if activity:
+        out['activity'] = activity
+    if availability:
+        out['availability'] = availability
     context = payload.getTag('context')
     if context is not None:
         used, total = _int(context, 'used'), _int(context, 'max')
@@ -85,6 +94,18 @@ def parse_telemetry(item):
         except (TypeError, ValueError):
             pass
 
+    for tag, key in (('session-cost', 'session_cost'), ('day-cost', 'day_cost')):
+        node = payload.getTag(tag)
+        if node is not None:
+            try:
+                out[key] = float(node.getAttr('usd'))
+            except (TypeError, ValueError):
+                pass
+
+    session = payload.getTag('session')
+    if session is not None and session.getAttr('status'):
+        out['session_status'] = session.getAttr('status')
+
     for tag in ('model', 'tool'):
         node = payload.getTag(tag)
         if node is not None and node.getData():
@@ -93,6 +114,8 @@ def parse_telemetry(item):
     return out or None
 LEGACY_QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
 MESSAGE_CORRECT_NS = 'urn:xmpp:message-correct:0'
+DISCO_ITEMS_NS = 'http://jabber.org/protocol/disco#items'
+COMMANDS_NS = 'http://jabber.org/protocol/commands'
 
 
 class XmppSession(GObject.Object):
@@ -120,6 +143,8 @@ class XmppSession(GObject.Object):
     }
 
     PRESENCE_ONLINE = 'online'
+    PRESENCE_BUSY = 'busy'
+    PRESENCE_AWAY = 'away'
     PRESENCE_OFFLINE = 'offline'
 
     def __init__(self, jid: str, password: str, resource: str = RESOURCE,
@@ -197,7 +222,11 @@ class XmppSession(GObject.Object):
         # disco. Un contacto que no publique el nodo simplemente no emite nada.
         client.get_module('EntityCaps').set_caps(
             [DiscoIdentity(category='client', type='pc', name='gtk-llm-chat')],
-            [Namespace.DISCO_INFO, f'{TELEMETRY_NODE}+notify'],
+            [
+                Namespace.DISCO_INFO,
+                f'{TELEMETRY_NODE}+notify',
+                f'{LEGACY_TELEMETRY_NODE}+notify',
+            ],
             'https://github.com/icarito/gtk-llm-chat')
         client.register_handler(
             StanzaHandler(name='message', callback=self._on_pep_event,
@@ -216,7 +245,7 @@ class XmppSession(GObject.Object):
         if not properties.is_pubsub_event:
             return
         event = properties.pubsub_event
-        if event.node != TELEMETRY_NODE or event.item is None:
+        if event.node not in (TELEMETRY_NODE, LEGACY_TELEMETRY_NODE) or event.item is None:
             return
         telemetry = parse_telemetry(event.item)
         if telemetry is None:
@@ -366,16 +395,23 @@ class XmppSession(GObject.Object):
         preguntamos por el último valor publicado."""
         if not self.is_connected:
             return
-        task = self._client.get_module('PubSub').request_items(
-            TELEMETRY_NODE, max_items=1, jid=JID.from_string(bare_jid))
+        nodes = [TELEMETRY_NODE, LEGACY_TELEMETRY_NODE]
 
-        def _done(t):
+        def _request(index=0):
+            if index >= len(nodes):
+                return
+            task = self._client.get_module('PubSub').request_items(
+                nodes[index], max_items=1, jid=JID.from_string(bare_jid))
+            task.add_done_callback(lambda t, i=index: _done(t, i), weak=False)
+
+        def _done(t, index):
             try:
                 items = t.finish()
             except Exception as err:
                 # Lo normal si el contacto no es un agente NanoClaw: no tiene
                 # el nodo. No es un error que merezca molestar al usuario.
                 debug_print(f"XmppSession: sin telemetría de {bare_jid}: {err}")
+                _request(index + 1)
                 return
             for item in items or []:
                 telemetry = parse_telemetry(item)
@@ -383,12 +419,13 @@ class XmppSession(GObject.Object):
                     self.agent_telemetry[bare_jid] = telemetry
                     self.emit('agent-telemetry-changed', bare_jid)
                     return
+            _request(index + 1)
 
         # weak=False es obligatorio: add_done_callback guarda por defecto una
         # referencia DÉBIL, así que una función local como ésta muere en cuanto
         # fetch_agent_telemetry retorna y el callback no se llama nunca — el IQ
         # va, el servidor responde, y no pasa nada.
-        task.add_done_callback(_done, weak=False)
+        _request()
 
     def get_contact_name(self, bare_jid: str) -> str:
         item = self.roster_items.get(bare_jid)
@@ -486,6 +523,8 @@ class XmppSession(GObject.Object):
         old_is_agent = self.roster_items[bare].get('is_agent', False)
         old_agent_full_jid = self.roster_items[bare].get('agent_full_jid')
         status = getattr(properties, 'status', None) or ''
+        show = getattr(properties, 'show', None)
+        show_value = getattr(show, 'value', show) or ''
         entity_caps = getattr(properties, 'entity_caps', None)
         caps_node = getattr(entity_caps, 'node', None)
         if caps_node == AGENT_CAPS_NODE:
@@ -500,8 +539,9 @@ class XmppSession(GObject.Object):
         else:  # available
             resources.add(resource)
         is_online = bool(resources)
-        if is_online != was_online:
-            state = self.PRESENCE_ONLINE if is_online else self.PRESENCE_OFFLINE
+        state = self._presence_state(is_online, show_value, status)
+        old_presence = self.roster_items[bare].get('presence')
+        if state != old_presence:
             self.roster_items[bare]['presence'] = state
             debug_print(f"XmppSession: presencia {bare} -> {state}")
             self.emit('presence-changed', bare, state)
@@ -509,6 +549,18 @@ class XmppSession(GObject.Object):
                 self.roster_items[bare].get('is_agent') != old_is_agent or
                 self.roster_items[bare].get('agent_full_jid') != old_agent_full_jid):
             self.emit('contact-status-changed', bare)
+
+    @classmethod
+    def _presence_state(cls, is_online: bool, show: str = '', status: str = '') -> str:
+        if not is_online:
+            return cls.PRESENCE_OFFLINE
+        lower_show = str(show or '').lower()
+        lower_status = str(status or '').lower()
+        if lower_show in ('dnd', 'busy') or '"availability":"busy"' in lower_status:
+            return cls.PRESENCE_BUSY
+        if lower_show in ('away', 'xa') or '"availability":"away"' in lower_status or '"activity":"paused"' in lower_status:
+            return cls.PRESENCE_AWAY
+        return cls.PRESENCE_ONLINE
 
     def _ensure_history(self):
         if self.history is None:
@@ -668,8 +720,9 @@ class XmppSession(GObject.Object):
         replace_id = self._parse_replace_id(_stanza)
         correction = (replace_id, stanza_id) if replace_id else None
         if conversation is not None:
-            conversation.deliver(properties.body, quick_responses, commands,
-                                 correction=correction)
+            conversation.deliver(
+                properties.body, quick_responses, commands,
+                correction=correction, request_id=stanza_id)
         # Emitir siempre para que la app pueda notificar si la ventana de
         # esa conversación no tiene foco (o no existe) — spec 002 T5.
         self.emit('message-received', bare, properties.body)
@@ -680,8 +733,20 @@ class XmppSession(GObject.Object):
             for child in stanza.getTags('response', namespace=namespace):
                 value = child.getAttr('value')
                 label = child.getAttr('label') or value
+                expires_at_ms = child.getAttr('expires-at-ms')
+                # Hint no estándar de color de botón (primary|secondary|
+                # success|danger) que emite el plugin XMPP de OpenClaw. Lo
+                # renderiza add_quick_responses; los demás clientes lo ignoran.
+                style = child.getAttr('style')
                 if value and label:
-                    responses.append({'value': value, 'label': label})
+                    response = {'value': value, 'label': label}
+                    if expires_at_ms:
+                        response['expires_at_ms'] = expires_at_ms
+                    if style:
+                        response['style'] = style
+                    responses.append(response)
+            if responses:
+                continue
             for reference in stanza.getTags('reference', namespace=namespace):
                 if reference.getAttr('type') != 'action':
                     continue
@@ -693,16 +758,29 @@ class XmppSession(GObject.Object):
 
     def _parse_inline_commands(self, stanza) -> list[dict[str, str]]:
         commands = []
-        for query in stanza.getTags('query', namespace=Namespace.DISCO_ITEMS):
+        queries = list(stanza.getTags('query', namespace=DISCO_ITEMS_NS))
+        if not queries:
+            # nbxmpp has changed namespace matching details across releases.
+            # Fall back to explicit child inspection so inline XEP-0050
+            # announcements do not degrade to plain fallback text.
+            for child in stanza.getTags('query'):
+                namespace = getattr(child, 'getNamespace', lambda: None)()
+                if namespace == DISCO_ITEMS_NS:
+                    queries.append(child)
+        for query in queries:
             node = query.getAttr('node')
-            if node != Namespace.COMMANDS:
+            if node != COMMANDS_NS:
                 continue
             for item in query.getTags('item'):
                 jid = item.getAttr('jid')
                 cmd_node = item.getAttr('node')
                 name = item.getAttr('name')
+                style = item.getAttr('style')
                 if jid and cmd_node and name:
-                    commands.append({'jid': jid, 'node': cmd_node, 'name': name})
+                    command = {'jid': jid, 'node': cmd_node, 'name': name}
+                    if style:
+                        command['style'] = style
+                    commands.append(command)
         return commands
 
     @staticmethod
@@ -815,7 +893,7 @@ class XmppConversation(ChatBackend):
     # --- Entrantes (llamados por la sesión) ---
 
     def deliver(self, body: str, quick_responses=None, commands=None,
-                correction=None):
+                correction=None, request_id=None):
         """Un mensaje del contacto: response + finished, cached.
 
         Si correction es una tupla (replace_id, stanza_id) se busca
@@ -837,7 +915,8 @@ class XmppConversation(ChatBackend):
         # futura corrección usará en su <replace id=...> para apuntar aquí
         # — sólo tiene sentido guardarlo si trae algo que luego pueda
         # resolverse (quick_responses/commands).
-        request_id = correction[1] if correction else None
+        if request_id is None and correction:
+            request_id = correction[1]
         has_pending = bool(quick_responses) or bool(commands)
         if history is not None:
             history.record_message(
@@ -847,10 +926,16 @@ class XmppConversation(ChatBackend):
         if has_pending and request_id:
             self._track_pending_request(request_id, quick_responses)
         self.emit('response', body)
-        if quick_responses:
-            self.emit('quick-responses', quick_responses, request_id)
+        # Preferir command-items (XEP-0050, responde por IQ off-band) sobre
+        # quick-responses (texto en el body) cuando el mensaje trae ambos.
+        # El plugin XMPP de OpenClaw manda ambos en el mismo <message> por
+        # compatibilidad; como NanoClaw, aquí preferimos el camino IQ para no
+        # dejar el `value` crudo visible en el chat. Los clientes sólo-texto
+        # (o mensajes sin command-items) siguen usando quick-responses.
         if commands:
             self.emit('commands', commands, request_id)
+        elif quick_responses:
+            self.emit('quick-responses', quick_responses, request_id)
         self.emit('finished', True)
 
     def _track_pending_request(self, request_id: str, quick_responses=None,
