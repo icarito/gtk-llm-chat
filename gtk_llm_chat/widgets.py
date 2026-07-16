@@ -17,6 +17,95 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
+
+# URL suelta en el texto (para autoenlazar y para detectar adjuntos).
+URL_RE = re.compile(r'https?://[^\s<>"\']+')
+IMAGE_EXT_RE = re.compile(
+    r'\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)(\?|#|$)', re.IGNORECASE)
+
+
+def _first_image_url(content):
+    """Primera URL del texto que apunte a una imagen, o None.
+
+    Los adjuntos de XEP-0363 llegan como una URL (en el body y en el OOB);
+    si es una imagen, la burbuja muestra un preview además del link."""
+    for match in URL_RE.finditer(content or ''):
+        url = match.group(0)
+        if IMAGE_EXT_RE.search(url):
+            return url
+    return None
+
+
+def _load_picture_async(picture, url):
+    """Descarga la imagen en un hilo y la pinta cuando llega.
+
+    En un hilo porque urlopen bloquea; el widget se toca sólo desde el hilo
+    principal vía GLib.idle_add. Si falla, se deja el preview vacío y el link
+    del cuerpo sigue sirviendo."""
+    import threading
+    import urllib.request
+
+    def work():
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                data = response.read()
+        except Exception as exc:
+            debug_print(f"[widget] no se pudo descargar {url}: {exc}")
+            GLib.idle_add(lambda: (picture.set_visible(False),
+                                   GLib.SOURCE_REMOVE)[1])
+            return
+
+        def apply():
+            try:
+                from gi.repository import Gdk, Gio
+                stream = Gio.MemoryInputStream.new_from_bytes(
+                    GLib.Bytes.new(data))
+                texture = Gdk.Texture.new_from_stream(stream)
+                picture.set_paintable(texture)
+            except Exception as exc:
+                debug_print(f"[widget] imagen inválida {url}: {exc}")
+                picture.set_visible(False)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(apply)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _on_activate_link(_label, uri):
+    """Abre el link en el navegador/visor del sistema."""
+    try:
+        Gtk.UriLauncher.new(uri).launch(None, None, None, None)
+    except Exception as exc:
+        debug_print(f"[widget] no se pudo abrir {uri}: {exc}")
+    return True  # consumido: no dejar que GTK lo intente otra vez
+
+
+def _autolink(markup):
+    """Convierte URLs sueltas en <a href> dentro de un markup de Pango.
+
+    Se aplica DESPUÉS de generar el markup, saltándose lo que ya está dentro
+    de un <a ...>...</a> para no anidar enlaces (Pango lo rechaza)."""
+    out = []
+    last = 0
+    # Tramos que ya son un enlace: no tocarlos.
+    linked = [(m.start(), m.end())
+              for m in re.finditer(r'<a\s[^>]*>.*?</a>', markup, re.DOTALL)]
+
+    def inside_link(pos):
+        return any(start <= pos < end for start, end in linked)
+
+    for match in URL_RE.finditer(markup):
+        if inside_link(match.start()):
+            continue
+        url = match.group(0)
+        out.append(markup[last:match.start()])
+        out.append(f'<a href="{url}">{url}</a>')
+        last = match.end()
+    out.append(markup[last:])
+    return ''.join(out)
+
+
 class Message:
     """
     Representa un mensaje
@@ -116,12 +205,27 @@ class MessageWidget(Gtk.Box):
         # scroll que se quedaba corto venían de ahí.
         self.content_view = None
         self.content_plain_view = None
+        # Adjunto de imagen: preview encima del texto. El link sigue estando
+        # en el cuerpo (clicable), así que si la descarga falla no se pierde.
+        self._attachment_picture = None
+        image_url = _first_image_url(content)
+        if image_url:
+            self._attachment_picture = Gtk.Picture()
+            self._attachment_picture.set_can_shrink(True)
+            self._attachment_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+            self._attachment_picture.set_size_request(-1, 180)
+            self._attachment_picture.add_css_class('attachment-image')
+            message_box.append(self._attachment_picture)
+            _load_picture_async(self._attachment_picture, image_url)
+
         self.content_label = Gtk.Label()
         self.content_label.set_wrap(True)
         self.content_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.content_label.set_xalign(0.0)
         self.content_label.set_selectable(True)
         self.content_label.set_hexpand(True)
+        # Abrir links (markdown y URLs sueltas autoenlazadas) en el navegador.
+        self.content_label.connect('activate-link', _on_activate_link)
         self._set_label_content(content)
         message_box.append(self.content_label)
 
@@ -145,13 +249,23 @@ class MessageWidget(Gtk.Box):
         vacío (set_markup inválido no pinta nada)."""
         if self.use_markdown:
             from .pango_markdown import markdown_to_pango
-            markup = markdown_to_pango(content)
+            markup = _autolink(markdown_to_pango(content))
             try:
                 Pango.parse_markup(markup, -1, '\x00')
                 self.content_label.set_markup(markup)
                 return
             except GLib.Error:
                 debug_print("[widget] markup inválido; fallback a texto plano")
+        # Texto plano: aun así autoenlazar las URLs (los adjuntos llegan como
+        # una URL suelta). Se escapa primero para que el markup sea válido.
+        escaped = GLib.markup_escape_text(content or '')
+        markup = _autolink(escaped)
+        try:
+            Pango.parse_markup(markup, -1, '\x00')
+            self.content_label.set_markup(markup)
+            return
+        except GLib.Error:
+            debug_print("[widget] autolink inválido; texto plano tal cual")
         self.content_label.set_text(content)
 
     def update_content(self, new_content):

@@ -276,6 +276,12 @@ class StyleManager:
             background-color: alpha(currentColor, 0.25);
         }
 
+        /* Preview de un adjunto de imagen dentro de la burbuja. */
+        .attachment-image {
+            border-radius: 8px;
+            margin-bottom: 3px;
+        }
+
         .timestamp {
             font-size: 0.8em;
             opacity: 0.7;
