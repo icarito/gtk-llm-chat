@@ -7,7 +7,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Adw', '1')
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -69,6 +69,25 @@ def _remove_attachment_label(content):
     """Quita etiquetas genéricas de adjunto cuando ya hay preview."""
     return re.sub(r'^\[Photo\]\s*[^:\n]*:\s*$', '', content or '',
                   flags=re.IGNORECASE).strip()
+
+
+CODE_FENCE_RE = re.compile(r'```([^\n`]*)\n?([\s\S]*?)```')
+
+
+def _split_code_fences(content):
+    """Devuelve fragmentos ('text'|'code', language, content) preservando orden."""
+    parts = []
+    pos = 0
+    for match in CODE_FENCE_RE.finditer(content or ''):
+        if match.start() > pos:
+            parts.append(('text', '', content[pos:match.start()]))
+        language = (match.group(1) or '').strip().split()[0]
+        code = match.group(2) or ''
+        parts.append(('code', language, code.rstrip('\n')))
+        pos = match.end()
+    if pos < len(content or ''):
+        parts.append(('text', '', (content or '')[pos:]))
+    return parts or [('text', '', content or '')]
 
 
 def _texture_from_bytes(data):
@@ -394,14 +413,8 @@ class MessageWidget(Gtk.Box):
         if is_user and content.startswith("user:"):
             content = content[5:].strip()
 
-        # Un único Gtk.Label para markdown (vía Pango markup) y texto plano.
-        # Un Label mide su alto real de forma síncrona; el GtkTextView del
-        # viejo MarkdownView reportaba una altura basura hasta validar su
-        # layout en un idle posterior (a veces 0 -> burbuja colapsada que
-        # sólo aparecía con el próximo relayout; a veces varias veces la
-        # real -> burbujón de espacio vacío que dejaba el mensaje fuera del
-        # viewport). Toda la "tormenta" de queue_draw/queue_resize y el
-        # scroll que se quedaba corto venían de ahí.
+        # Texto normal sigue en Gtk.Label/Pango por estabilidad de layout; los
+        # fences se montan como widgets separados para copiar sólo el bloque.
         self.content_view = None
         self.content_plain_view = None
         # Adjunto de imagen: preview encima del texto. El link sigue estando
@@ -415,16 +428,10 @@ class MessageWidget(Gtk.Box):
             self._ensure_attachment_preview(message_box, image_url)
         visible_content = _content_without_attachment_url(content, image_url)
 
-        self.content_label = Gtk.Label()
-        self.content_label.set_wrap(True)
-        self.content_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self.content_label.set_xalign(0.0)
-        self.content_label.set_selectable(True)
-        self.content_label.set_hexpand(True)
-        # Abrir links (markdown y URLs sueltas autoenlazadas) en el navegador.
-        self.content_label.connect('activate-link', _on_activate_link)
-        self._set_label_content(visible_content)
-        message_box.append(self.content_label)
+        self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.content_box.set_hexpand(True)
+        self._set_message_content(visible_content)
+        message_box.append(self.content_box)
 
         # Agregar timestamp
         time_label = Gtk.Label(
@@ -474,22 +481,37 @@ class MessageWidget(Gtk.Box):
             data=self._attachment_data)
         dialog.present()
 
-    def _set_label_content(self, content):
-        """Pinta `content` en el label — markdown como Pango markup, o texto
+    def _clear_content_box(self):
+        for child in list(self.content_box):
+            self.content_box.remove(child)
+
+    def _build_text_label(self, content):
+        label = Gtk.Label()
+        label.set_wrap(True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_xalign(0.0)
+        label.set_selectable(True)
+        label.set_hexpand(True)
+        label.connect('activate-link', _on_activate_link)
+        self._set_label_content(label, content)
+        return label
+
+    def _set_label_content(self, label, content):
+        """Pinta `content` en `label` — markdown como Pango markup, o texto
         plano. El markup generado es balanceado por construcción, pero ante
         cualquier sorpresa se degrada a texto plano en vez de a un label
         vacío (set_markup inválido no pinta nada)."""
         if not (content or '').strip():
-            self.content_label.set_text('')
-            self.content_label.set_visible(False)
+            label.set_text('')
+            label.set_visible(False)
             return
-        self.content_label.set_visible(True)
+        label.set_visible(True)
         if self.use_markdown:
             from .pango_markdown import markdown_to_pango
             markup = _autolink(markdown_to_pango(content))
             try:
                 Pango.parse_markup(markup, -1, '\x00')
-                self.content_label.set_markup(markup)
+                label.set_markup(markup)
                 return
             except GLib.Error:
                 debug_print("[widget] markup inválido; fallback a texto plano")
@@ -499,11 +521,66 @@ class MessageWidget(Gtk.Box):
         markup = _autolink(escaped)
         try:
             Pango.parse_markup(markup, -1, '\x00')
-            self.content_label.set_markup(markup)
+            label.set_markup(markup)
             return
         except GLib.Error:
             debug_print("[widget] autolink inválido; texto plano tal cual")
-        self.content_label.set_text(content)
+        label.set_text(content)
+
+    def _build_code_block(self, code, language):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.add_css_class('code-block')
+        card.set_hexpand(True)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.add_css_class('code-block-header')
+        label = Gtk.Label(label=language or 'code')
+        label.add_css_class('code-block-language')
+        label.set_xalign(0.0)
+        label.set_hexpand(True)
+        header.append(label)
+
+        copy_button = Gtk.Button(icon_name='edit-copy-symbolic')
+        copy_button.add_css_class('flat')
+        copy_button.add_css_class('code-copy-button')
+        copy_button.set_tooltip_text('Copiar código')
+
+        def on_copy(_button):
+            display = Gdk.Display.get_default()
+            if display:
+                display.get_clipboard().set(code or '')
+
+        copy_button.connect('clicked', on_copy)
+        header.append(copy_button)
+        card.append(header)
+
+        view = Gtk.TextView()
+        view.add_css_class('code-block-text')
+        view.set_editable(False)
+        view.set_cursor_visible(False)
+        view.set_wrap_mode(Gtk.WrapMode.NONE)
+        view.set_monospace(True)
+        view.set_hexpand(True)
+        view.get_buffer().set_text(code or '')
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.add_css_class('code-block-scroll')
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scrolled.set_min_content_height(42)
+        scrolled.set_max_content_height(260)
+        scrolled.set_child(view)
+        card.append(scrolled)
+        return card
+
+    def _set_message_content(self, content):
+        self._clear_content_box()
+        if not (content or '').strip():
+            return
+        for kind, language, value in _split_code_fences(content):
+            if kind == 'code':
+                self.content_box.append(self._build_code_block(value, language))
+            elif (value or '').strip():
+                self.content_box.append(self._build_text_label(value))
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
@@ -516,7 +593,7 @@ class MessageWidget(Gtk.Box):
             self._ensure_attachment_preview(self.message_box, image_url)
         visible_content = _content_without_attachment_url(
             self.message.content, image_url)
-        self._set_label_content(visible_content)
+        self._set_message_content(visible_content)
         # Cambiar el label ya invalida el layout del widget; no hace falta
         # propagar queue_resize a mano (GTK4 lo hace hacia arriba).
 

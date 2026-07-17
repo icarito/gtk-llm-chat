@@ -223,6 +223,39 @@ class StyleManager:
             border-radius: 12px 12px 12px 0;
         }
 
+        .code-block {
+            background-color: alpha(@theme_fg_color, 0.08);
+            border: 1px solid alpha(@theme_fg_color, 0.14);
+            border-radius: 8px;
+            margin-top: 2px;
+            margin-bottom: 2px;
+        }
+
+        .code-block-header {
+            padding: 4px 6px;
+            border-bottom: 1px solid alpha(@theme_fg_color, 0.12);
+        }
+
+        .code-block-language {
+            font-size: 0.78em;
+            opacity: 0.75;
+        }
+
+        .code-copy-button {
+            min-width: 28px;
+            min-height: 24px;
+            padding: 2px;
+        }
+
+        .code-block-scroll {
+            padding: 0;
+        }
+
+        .code-block-text {
+            font-family: monospace;
+            padding: 7px;
+        }
+
         /* Quick response / inline command pill buttons */
         .quick-responses {
             padding: 2px;
