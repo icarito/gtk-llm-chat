@@ -6,15 +6,27 @@ roster es la superficie primaria para cambiar de conversación, sin separar
 visualmente "modo LLM" y "modo XMPP".
 """
 import gi
+import json
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, Gdk, GLib
 
 from .chat_application import _
 from .chat_sidebar import ChatSidebar
 from .db_operations import ChatHistory
+from .debug_utils import debug_print
 from .resource_manager import resource_manager
 from .xmpp_client import XmppSession
+
+
+def _display_name(bare_jid, name=None):
+    """Nombre legible de un contacto: el del roster, o la parte local del JID
+    ("rolando@hablar.fuentelibre.org" -> "rolando"), que dice más que el JID
+    entero en una fila estrecha."""
+    if name and name.strip():
+        return name.strip()
+    local = bare_jid.split('@')[0]
+    return local or bare_jid
 
 
 class ChatRosterSidebar(Gtk.Box):
@@ -55,6 +67,8 @@ class ChatRosterSidebar(Gtk.Box):
         if self.xmpp_session is not None:
             self._handler_ids = [
                 self.xmpp_session.connect('roster-updated', lambda _s: self._populate()),
+                # Un avatar recién descargado tiene que aparecer sin reabrir.
+                self.xmpp_session.connect('avatar-changed', lambda _s, _jid: self._populate()),
                 self.xmpp_session.connect('presence-changed', self._on_presence_changed),
                 self.xmpp_session.connect(
                     'contact-status-changed', self._on_contact_status_changed),
@@ -132,6 +146,29 @@ class ChatRosterSidebar(Gtk.Box):
             row.cid = conv.get('id')
             self.list_box.append(row)
 
+    def _contacts_by_activity(self):
+        """Contactos por actividad reciente: la conversación que se acaba de
+        mover, arriba. Los que no tienen historial van al final por nombre, en
+        vez de intercalarse entre las conversaciones vivas."""
+        items = self.xmpp_session.roster_items.items()
+        history = getattr(self.xmpp_session, 'history', None)
+        latest = {}
+        if history is not None:
+            try:
+                latest = history.get_latest_timestamps()
+            except Exception:
+                # El orden del roster nunca debe tumbar la barra lateral.
+                latest = {}
+
+        # Dos pasadas, aprovechando que sorted() es estable: primero por nombre
+        # (el desempate), y encima por actividad descendente. Los timestamps son
+        # ISO-8601, así que comparan bien como texto.
+        by_name = sorted(items, key=lambda e: _display_name(e[0], e[1].get('name')).lower())
+        with_activity = [e for e in by_name if latest.get(e[0])]
+        without_activity = [e for e in by_name if not latest.get(e[0])]
+        with_activity.sort(key=lambda e: latest[e[0]], reverse=True)
+        return with_activity + without_activity
+
     def _append_xmpp_contacts(self):
         self.list_box.append(self._section_label(_("Contacts")))
         if self.xmpp_session is None:
@@ -146,14 +183,17 @@ class ChatRosterSidebar(Gtk.Box):
             row.set_selectable(False)
             self.list_box.append(row)
         else:
-            for bare_jid, item in sorted(self.xmpp_session.roster_items.items()):
-                row = Adw.ActionRow(title=item.get('name') or bare_jid)
-                subtitle = item.get('status') or (bare_jid if item.get('name') else '')
+            for bare_jid, item in self._contacts_by_activity():
+                row = Adw.ActionRow(title=_display_name(bare_jid, item.get('name')))
+                subtitle = self._display_status(item, bare_jid)
                 if subtitle:
                     row.set_subtitle(subtitle)
                 row.set_activatable(True)
                 row.chat_kind = "xmpp"
                 row.bare_jid = bare_jid
+                avatar = self._contact_avatar(bare_jid, item)
+                if avatar is not None:
+                    row.add_prefix(avatar)
                 dot = self._presence_dot(
                     item.get('presence', XmppSession.PRESENCE_OFFLINE))
                 row.add_prefix(dot)
@@ -161,6 +201,80 @@ class ChatRosterSidebar(Gtk.Box):
                 self._rows[bare_jid] = (row, dot)
 
         self._append_add_contact_row()
+
+    def _contact_avatar(self, bare_jid, item):
+        """Avatar del contacto (XEP-0084) si lo publicó; si no, Adw.Avatar cae
+        solo en las iniciales del nombre, que ya es mejor que un icono igual
+        para todos."""
+        name = _display_name(bare_jid, item.get('name'))
+        avatar = Adw.Avatar(size=32, text=name, show_initials=True)
+        path = None
+        if self.xmpp_session is not None:
+            path = (getattr(self.xmpp_session, 'avatar_paths', {}) or {}).get(bare_jid)
+            if path is None:
+                # Aún no lo tenemos: los eventos PEP sólo llegan cuando el
+                # contacto publica, así que hay que preguntar por el actual.
+                # Si llega, 'avatar-changed' repuebla el roster.
+                try:
+                    self.xmpp_session.fetch_avatar(bare_jid)
+                except Exception as exc:  # noqa: BLE001
+                    debug_print(f"[avatar] no se pudo pedir el de {bare_jid}: {exc}")
+        if path:
+            try:
+                avatar.set_custom_image(Gdk.Texture.new_from_filename(path))
+            except GLib.Error as exc:
+                debug_print(f"[avatar] no se pudo pintar el de {bare_jid}: {exc}")
+        return avatar
+
+    def _display_status(self, item, bare_jid):
+        status = item.get('status') or ''
+        parsed = self._parse_agent_status(status)
+        if parsed:
+            activity = parsed.get('activity') or ''
+            tool = parsed.get('tool') or ''
+            if tool:
+                return _("Usando herramienta: ") + str(tool)
+            label = self._friendly_activity(activity)
+            if label:
+                return label
+        return bare_jid if item.get('name') else ''
+
+    @staticmethod
+    def _parse_agent_status(status):
+        text = str(status or '').strip()
+        if not text:
+            return {}
+        json_text = text
+        if json_text.startswith('nanoclaw:') or json_text.startswith('openclaw:'):
+            json_text = json_text.split(':', 1)[1].strip()
+        if not json_text.startswith('{'):
+            if text.lower().startswith('tool:'):
+                return {'activity': 'processing', 'tool': text.split(':', 1)[1].strip()}
+            return {'activity': text}
+        try:
+            data = json.loads(json_text)
+        except (TypeError, ValueError):
+            return {'activity': text}
+        if not isinstance(data, dict):
+            return {'activity': text}
+        return {
+            'activity': data.get('activity') or data.get('state') or data.get('availability') or '',
+            'availability': data.get('availability') or '',
+            'tool': data.get('tool') or data.get('current_tool') or '',
+        }
+
+    @staticmethod
+    def _friendly_activity(activity):
+        lower = str(activity or '').strip().lower()
+        if lower in ('processing', 'busy', 'working'):
+            return _("Trabajando")
+        if lower == 'available':
+            return _("Disponible")
+        if lower in ('waiting', 'queued'):
+            return _("En espera")
+        if lower in ('paused', 'away', 'xa'):
+            return _("Ausente")
+        return str(activity or '').strip()
 
     def _append_add_contact_row(self):
         add_button = Gtk.Button()
@@ -181,10 +295,18 @@ class ChatRosterSidebar(Gtk.Box):
 
     def _presence_dot(self, state):
         dot = Gtk.Image.new_from_icon_name("media-record-symbolic")
-        dot.add_css_class("success" if state == XmppSession.PRESENCE_ONLINE
-                          else "dim-label")
-        dot.set_tooltip_text(_("Online") if state == XmppSession.PRESENCE_ONLINE
-                             else _("Offline"))
+        if state == XmppSession.PRESENCE_ONLINE:
+            dot.add_css_class("success")
+            dot.set_tooltip_text(_("Online"))
+        elif state == XmppSession.PRESENCE_BUSY:
+            dot.add_css_class("error")
+            dot.set_tooltip_text(_("Busy"))
+        elif state == XmppSession.PRESENCE_AWAY:
+            dot.add_css_class("warning")
+            dot.set_tooltip_text(_("Away"))
+        else:
+            dot.add_css_class("dim-label")
+            dot.set_tooltip_text(_("Offline"))
         return dot
 
     def _show_add_contact_dialog(self):
@@ -231,7 +353,7 @@ class ChatRosterSidebar(Gtk.Box):
             return
         row, _dot = entry
         item = session.roster_items.get(bare_jid, {})
-        subtitle = item.get('status') or (bare_jid if item.get('name') else '')
+        subtitle = self._display_status(item, bare_jid)
         row.set_subtitle(subtitle)
 
     def _on_row_activated(self, _list_box, row):

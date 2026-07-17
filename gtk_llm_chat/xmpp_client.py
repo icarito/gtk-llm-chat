@@ -40,6 +40,38 @@ STATE_RECONNECTING = 'reconnecting'
 STATE_CONNECTED = 'connected'
 
 RESOURCE = 'gtk-llm-chat-desktop'
+_RESOURCE_SUFFIX_FILE = 'xmpp_resource_suffix'
+
+
+def _device_resource_suffix():
+    """Sufijo de recurso XMPP estable para esta instalación.
+
+    El sufijo era un uuid4 nuevo en cada arranque, así que el servidor no podía
+    reconocer la sesión anterior como nuestra: en vez de reemplazarla la dejaba
+    viva, y cada arranque/reconexión sumaba una sesión zombi (llegamos a ver 317
+    en Prosody entre este cliente y el de Android). Cada zombi sigue recibiendo
+    carbons y disparando notificaciones.
+
+    Persistirlo hace que reconectar reemplace limpiamente la sesión previa, sin
+    perder la posibilidad de tener escritorio y móvil conectados a la vez.
+    """
+    try:
+        from .platform_utils import ensure_user_dir_exists
+        path = os.path.join(ensure_user_dir_exists(), _RESOURCE_SUFFIX_FILE)
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as handle:
+                stored = handle.read().strip()
+            if stored:
+                return stored
+        suffix = uuid.uuid4().hex[:8]
+        with open(path, 'w', encoding='utf-8') as handle:
+            handle.write(suffix)
+        return suffix
+    except OSError:
+        # Sin disco nos toca uno efímero: mejor eso que no conectar.
+        return uuid.uuid4().hex[:8]
+
+
 AGENT_CAPS_NODE = 'https://github.com/openclaw/openclaw'
 QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
 
@@ -48,6 +80,11 @@ QUICK_RESPONSE_NS = 'urn:xmpp:quick-response:0'
 # pinta tal cual junto al contacto— y estos números cambian a cada token.
 TELEMETRY_NODE = 'urn:openclaw:telemetry:0'
 LEGACY_TELEMETRY_NODE = 'urn:nanoclaw:telemetry:0'
+
+# Avatares XEP-0084: el contacto anuncia el hash de su foto en el nodo de
+# metadata y sirve los bytes (base64) en el de data, pedidos a demanda.
+AVATAR_METADATA_NODE = 'urn:xmpp:avatar:metadata'
+AVATAR_DATA_NODE = 'urn:xmpp:avatar:data'
 
 
 def parse_telemetry(item):
@@ -149,6 +186,8 @@ class XmppSession(GObject.Object):
         'subscription-request': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # bare_jid — llegó telemetría nueva del agente por PEP
         'agent-telemetry-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # bare_jid — el avatar del contacto cambió y ya está cacheado en disco
+        'avatar-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
     }
 
     PRESENCE_ONLINE = 'online'
@@ -161,7 +200,7 @@ class XmppSession(GObject.Object):
         GObject.Object.__init__(self)
         self._jid = JID.from_string(jid)
         self._password = password
-        self._resource = f"{resource}-{uuid.uuid4().hex[:8]}"
+        self._resource = f"{resource}-{_device_resource_suffix()}"
         self._auto_reconnect = auto_reconnect
         self._client = None
         self._state = STATE_DISCONNECTED
@@ -174,6 +213,8 @@ class XmppSession(GObject.Object):
         # bare jid (str) -> dict con lo último publicado en su nodo PEP de
         # telemetría. Sobrevive a una recarga de roster: sigue siendo válido.
         self.agent_telemetry = {}
+        # bare_jid -> ruta local del avatar cacheado (XEP-0084)
+        self.avatar_paths = {}
         self._roster_loaded = False
         self._online_resources = {}
         self._conversations = {}
@@ -238,6 +279,9 @@ class XmppSession(GObject.Object):
                 Namespace.DISCO_INFO,
                 f'{TELEMETRY_NODE}+notify',
                 f'{LEGACY_TELEMETRY_NODE}+notify',
+                # Avatares XEP-0084: sin el +notify del nodo de metadata el
+                # servidor no nos avisa de que un contacto cambió su foto.
+                f'{AVATAR_METADATA_NODE}+notify',
             ],
             'https://github.com/icarito/gtk-llm-chat')
         client.register_handler(
@@ -248,6 +292,73 @@ class XmppSession(GObject.Object):
         self._set_state(STATE_CONNECTING)
         client.connect()
 
+    def _avatar_cache_path(self, sha):
+        """Los avatares se cachean por su SHA-1: el hash ES la identidad de la
+        imagen en XEP-0084, así que un fichero por hash nunca queda obsoleto."""
+        from .platform_utils import ensure_user_dir_exists
+        cache_dir = os.path.join(ensure_user_dir_exists(), 'avatars')
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f'{sha}.img')
+
+    def _on_avatar_metadata(self, stanza, event):
+        """El contacto anuncia (XEP-0084) el hash de su avatar. Los bytes van en
+        otro nodo y se piden aparte: aquí sólo decidimos si ya lo tenemos.
+
+        A diferencia de la telemetría (namespace propio, payload crudo en
+        `item`), el de avatares SÍ lo conoce nbxmpp: lo parsea y deja un
+        AvatarMetaData en `event.data`. Leerlo del `item` no encuentra nada."""
+        bare_jid = str(stanza.getFrom().bare)
+        metadata = getattr(event, 'data', None)
+        infos = getattr(metadata, 'infos', None) if metadata is not None else None
+        if not infos:
+            # Metadata vacío = el contacto retiró su avatar.
+            self.avatar_paths.pop(bare_jid, None)
+            self.emit('avatar-changed', bare_jid)
+            return
+        sha = next((info.id for info in infos if getattr(info, 'id', None)), None)
+        if not sha:
+            return
+        cached = self._avatar_cache_path(sha)
+        if os.path.exists(cached):
+            self.avatar_paths[bare_jid] = cached
+            self.emit('avatar-changed', bare_jid)
+            return
+        self._request_avatar_data(bare_jid, sha)
+
+    def _request_avatar_data(self, bare_jid, sha):
+        """Pide los bytes del avatar al nodo de data (el item lleva el hash)."""
+        if self._client is None:
+            return
+        iq = Iq(typ='get', to=bare_jid)
+        pubsub = iq.addChild('pubsub', namespace=Namespace.PUBSUB)
+        items = pubsub.addChild('items', attrs={'node': AVATAR_DATA_NODE})
+        items.addChild('item', attrs={'id': sha})
+
+        def on_result(_client, response):
+            try:
+                if response.getType() != 'result':
+                    return
+                data_tag = None
+                for tag in response.getTag(
+                        'pubsub', namespace=Namespace.PUBSUB).getTag(
+                            'items').getTags('item'):
+                    data_tag = tag.getTag('data', namespace=AVATAR_DATA_NODE)
+                    if data_tag is not None:
+                        break
+                if data_tag is None:
+                    return
+                import base64
+                raw = base64.b64decode(data_tag.getData())
+                path = self._avatar_cache_path(sha)
+                with open(path, 'wb') as handle:
+                    handle.write(raw)
+                self.avatar_paths[bare_jid] = path
+                self.emit('avatar-changed', bare_jid)
+            except Exception as exc:  # noqa: BLE001 - un avatar no tumba el chat
+                debug_print(f"[avatar] no se pudo leer el de {bare_jid}: {exc}")
+
+        self._client.send_stanza(iq, callback=on_result)
+
     def _on_pep_event(self, _client, stanza, properties):
         """Un evento PEP del agente: telemetría (contexto, tokens, modelo).
 
@@ -257,6 +368,9 @@ class XmppSession(GObject.Object):
         if not properties.is_pubsub_event:
             return
         event = properties.pubsub_event
+        if event.node == AVATAR_METADATA_NODE:
+            self._on_avatar_metadata(stanza, event)
+            return
         if event.node not in (TELEMETRY_NODE, LEGACY_TELEMETRY_NODE) or event.item is None:
             return
         telemetry = parse_telemetry(event.item)
@@ -397,6 +511,47 @@ class XmppSession(GObject.Object):
     def get_agent_telemetry(self, bare_jid: str) -> dict:
         """Lo último que el agente publicó por PEP, o {} si nunca publicó."""
         return self.agent_telemetry.get(bare_jid, {})
+
+    def fetch_avatar(self, bare_jid: str):
+        """Pide el avatar actual del contacto (XEP-0084).
+
+        Mismo motivo que fetch_agent_telemetry: los eventos PEP sólo llegan
+        cuando el contacto *publica*, así que uno que puso su avatar antes de
+        que nos conectáramos no emitiría nada y nunca lo veríamos. Al abrir la
+        conversación preguntamos por el metadata actual."""
+        if not self.is_connected or bare_jid in self.avatar_paths:
+            return
+        task = self._client.get_module('PubSub').request_items(
+            AVATAR_METADATA_NODE, max_items=1, jid=JID.from_string(bare_jid))
+        if task is None:
+            return
+
+        def on_items(t):
+            try:
+                items = t.finish()
+            except Exception as exc:  # noqa: BLE001 - sin avatar no pasa nada
+                debug_print(f"[avatar] {bare_jid} no tiene avatar publicado: {exc}")
+                return
+            for item in items or []:
+                metadata = item.getTag('metadata', namespace=AVATAR_METADATA_NODE)
+                if metadata is None:
+                    continue
+                info = metadata.getTag('info')
+                sha = info.getAttr('id') if info is not None else None
+                if not sha:
+                    continue
+                cached = self._avatar_cache_path(sha)
+                if os.path.exists(cached):
+                    self.avatar_paths[bare_jid] = cached
+                    self.emit('avatar-changed', bare_jid)
+                else:
+                    self._request_avatar_data(bare_jid, sha)
+                return
+
+        # weak=False, por lo mismo que en fetch_agent_telemetry: por defecto la
+        # referencia es DÉBIL y este callback local moriría al retornar — el IQ
+        # sale, el servidor contesta, y el avatar no aparece nunca.
+        task.add_done_callback(on_items, weak=False)
 
     def fetch_agent_telemetry(self, bare_jid: str):
         """Pide el valor actual del nodo de telemetría del agente.
@@ -690,13 +845,20 @@ class XmppSession(GObject.Object):
             # pendiente sirve como señal de sync más rápida que esperar la
             # corrección XEP-0308 del servidor (ver notify_own_carbon).
             if conversation is not None and properties.body:
+                # El body de un adjunto puede venir vacío o sin el link (la URL
+                # va en el <x jabber:x:oob>), así que lo fusionamos igual que en
+                # los mensajes normales: si no, la imagen que mandas desde el
+                # móvil no se ve aquí.
+                body = self._body_with_oob(_stanza, properties.body)
                 conversation.notify_own_carbon(properties.body)
+                conversation.notify_own_message(body)
             return
 
         if getattr(properties, 'is_mam_message', False):
             mam = properties.mam
             pending = self._pending_mam_queries.get(mam.query_id)
-            if pending is not None and properties.body:
+            body = self._body_with_oob(_stanza, properties.body)
+            if pending is not None and body:
                 direction = (
                     'out' if properties.from_ is not None
                     and properties.from_.bare == self._jid.bare else 'in')
@@ -717,7 +879,7 @@ class XmppSession(GObject.Object):
                 # vía MAM (p.ej. tras reconectar) no podrían correlacionarse.
                 stanza_id = _stanza.getAttr('id')
                 pending['buffer'].append(
-                    (properties.body, direction, ts, mam.id, quick_responses,
+                    (body, direction, ts, mam.id, quick_responses,
                      commands, stanza_id))
             return
 
@@ -726,10 +888,7 @@ class XmppSession(GObject.Object):
         # Un adjunto (link de XEP-0363 enviado como OOB XEP-0066) puede venir
         # SIN body. No lo descartes: se sintetiza un body con el link para que
         # se vea y se pueda abrir/descargar.
-        oob_url = self._parse_oob_url(_stanza, properties.body)
-        body = properties.body
-        if not body and oob_url:
-            body = oob_url
+        body = self._body_with_oob(_stanza, properties.body)
         if not body:
             return
         debug_print(f"XmppSession: mensaje de {bare}: {body[:60]!r}")
@@ -763,6 +922,24 @@ class XmppSession(GObject.Object):
         if re.fullmatch(r'https?://\S+', trimmed):
             return trimmed
         return None
+
+    @classmethod
+    def _body_with_oob(cls, stanza, body) -> str:
+        """Preserva el link OOB dentro del body renderizable.
+
+        Algunos clientes envían XEP-0363 solo en <x xmlns='jabber:x:oob'>; otros
+        ponen una etiqueta humana en el body y el link en OOB. La UI necesita el
+        URL en texto para autolink y preview de imagen.
+        """
+        text = (body or '').strip()
+        oob_url = cls._parse_oob_url(stanza, text)
+        if not oob_url:
+            return text
+        if not text:
+            return oob_url
+        if oob_url in text:
+            return text
+        return f"{text}\n{oob_url}"
 
     def _parse_quick_responses(self, stanza) -> list[dict[str, str]]:
         responses = []
@@ -1158,6 +1335,26 @@ class XmppConversation(ChatBackend):
         self.emit('response-correction', request_id, body)
         self.emit('finished', True)
 
+    def notify_own_message(self, body: str):
+        """Carbon (XEP-0280) de un mensaje MÍO enviado desde otro dispositivo
+        (p.ej. una imagen desde el móvil): hay que guardarlo y pintarlo, porque
+        esta ventana no lo envió y no tiene su burbuja.
+
+        Los carbons de lo que envío desde AQUÍ también llegan, así que se
+        descartan por dedup contra el historial: el envío local ya grabó la
+        fila."""
+        body = (body or '').strip()
+        if not body:
+            return
+        history = self.session.history
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        if history is not None:
+            if history.has_recent_outgoing(self.bare_jid, body):
+                return
+            history.record_message(self.bare_jid, body, 'out', ts)
+        self.emit('own-message', body)
+
     def notify_own_carbon(self, body: str):
         """Carbon (XEP-0280) de una respuesta que YO envié desde otro
         recurso/dispositivo. Señal secundaria y más rápida que la
@@ -1213,6 +1410,10 @@ class XmppConversation(ChatBackend):
             if history is not None:
                 # `detail` es el get_uri devuelto por el slot.
                 history.record_message(self.bare_jid, detail, 'out', ts)
+            # La ventana no pudo pintar la burbuja al pulsar "adjuntar": la URL
+            # no existía hasta ahora. Sin esto el adjunto se enviaba de verdad
+            # pero no aparecía en el chat hasta recargar.
+            self.emit('own-message', detail)
             self.emit('finished', True)
 
         self.session.send_file(self.bare_jid, path, on_done)

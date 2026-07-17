@@ -663,6 +663,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                                 self._on_llm_response_correction),
                 backend.connect('own-carbon-resolved',
                                 self._on_own_carbon_resolved),
+                backend.connect('own-message', self._on_own_message),
                 backend.connect('error', self._on_llm_error),
                 backend.connect('finished', self._on_llm_finished),
                 backend.connect('state-changed', self._on_backend_state_changed),
@@ -2744,6 +2745,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         de _on_llm_response_correction, aquí no hay texto de corrección
         del servidor todavía, sólo la señal de que ya se respondió)."""
         self._mark_sticky_response_resolved(request_id)
+
+    def _on_own_message(self, backend, body):
+        """Un mensaje mío que esta ventana no pintó al enviarlo: un adjunto
+        (su burbuja no puede existir hasta que la subida devuelve la URL) o un
+        carbon de otro dispositivo, como una imagen mandada desde el móvil."""
+        if not (body or '').strip():
+            return
+        self.display_message(body, sender="user")
 
     def _add_sticky_response_card(self, responses, on_selected, detail_text=None,
                                    request_id=None):

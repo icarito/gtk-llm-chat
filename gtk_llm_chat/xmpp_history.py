@@ -2,7 +2,7 @@ import sqlite3
 import os
 import threading
 import json
-from typing import Optional
+from typing import Dict, Optional
 from datetime import datetime
 
 SCHEMA = """
@@ -151,6 +151,19 @@ class XmppHistory:
         ).fetchone()
         return row["timestamp"] if row else None
 
+    def get_latest_timestamps(self) -> Dict[str, str]:
+        """Última actividad de cada conversación, en una sola consulta.
+
+        Para ordenar el roster por actividad reciente: hacerlo con un
+        get_latest_timestamp() por contacto son N consultas cada vez que se
+        repinta la lista.
+        """
+        conn = self.get_connection()
+        rows = conn.execute(
+            "SELECT bare_jid, MAX(timestamp) AS ts FROM messages GROUP BY bare_jid",
+        ).fetchall()
+        return {row["bare_jid"]: row["ts"] for row in rows if row["ts"]}
+
     def get_latest_mam_id(self, bare_jid: str) -> Optional[str]:
         """Ancla RSM (`after=`) para el catch-up de MAM: pedir sólo lo
         posterior al último mensaje ya verificado por el archivo, en vez
@@ -162,6 +175,33 @@ class XmppHistory:
             (bare_jid,),
         ).fetchone()
         return row["mam_id"] if row else None
+
+    def has_recent_outgoing(self, bare_jid: str, body: str,
+                            within_seconds: int = 120) -> bool:
+        """¿Ya grabamos este mensaje saliente hace nada?
+
+        El servidor nos devuelve por carbon (XEP-0280) hasta lo que enviamos
+        desde esta misma ventana, que ya quedó registrado al enviarlo. Sin este
+        filtro, cada mensaje propio se duplicaría.
+        """
+        text = (body or '').strip()
+        if not text:
+            return False
+        conn = self.get_connection()
+        rows = conn.execute(
+            "SELECT timestamp FROM messages WHERE bare_jid = ? "
+            "AND direction = 'out' AND body = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (bare_jid, text),
+        ).fetchall()
+        if not rows:
+            return False
+        recorded = self._parse_timestamp(rows[0]["timestamp"])
+        if recorded is None:
+            return True
+        from datetime import datetime, timezone
+        age = (datetime.now(timezone.utc) - recorded).total_seconds()
+        return age <= within_seconds
 
     def has_outgoing_after(self, bare_jid: str, timestamp: str, bodies) -> bool:
         target = self._parse_timestamp(timestamp)
