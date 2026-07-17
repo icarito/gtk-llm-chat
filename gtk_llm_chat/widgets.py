@@ -2,7 +2,10 @@ import gi
 import os
 import sys
 import re
+import urllib.parse
 gi.require_version('Gtk', '4.0')
+gi.require_version('Gdk', '4.0')
+gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Adw', '1')
 from gi.repository import GLib, Gtk, Pango
 from datetime import datetime
@@ -22,6 +25,7 @@ def debug_print(*args, **kwargs):
 URL_RE = re.compile(r'https?://[^\s<>"\']+')
 IMAGE_EXT_RE = re.compile(
     r'\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)(\?|#|$)', re.IGNORECASE)
+TRAILING_URL_PUNCT = '.,;:!?)]]}'
 
 
 def _first_image_url(content):
@@ -30,13 +34,57 @@ def _first_image_url(content):
     Los adjuntos de XEP-0363 llegan como una URL (en el body y en el OOB);
     si es una imagen, la burbuja muestra un preview además del link."""
     for match in URL_RE.finditer(content or ''):
-        url = match.group(0)
+        url = match.group(0).rstrip(TRAILING_URL_PUNCT)
         if IMAGE_EXT_RE.search(url):
             return url
     return None
 
 
-def _load_picture_async(picture, url):
+def _attachment_filename(url):
+    path = urllib.parse.urlparse(url or '').path
+    name = urllib.parse.unquote(os.path.basename(path))
+    return name or 'image'
+
+
+def _content_without_attachment_url(content, image_url):
+    """Quita del texto la URL que ya se muestra como preview."""
+    if not image_url:
+        return content
+    text = content or ''
+    for match in URL_RE.finditer(text):
+        url = match.group(0)
+        clean_url = url.rstrip(TRAILING_URL_PUNCT)
+        if clean_url != image_url:
+            continue
+        stripped = f"{text[:match.start()]}{text[match.end():]}"
+        stripped = re.sub(r'[ \t]+([,.;:!?])', r'\1', stripped)
+        stripped = re.sub(r'\s+[)\]}]+(?=\s|$)', '', stripped)
+        stripped = re.sub(r'(?m)^[ \t]+|[ \t]+$', '', stripped)
+        stripped = re.sub(r'\n{3,}', '\n\n', stripped).strip()
+        return _remove_attachment_label(stripped)
+    return text
+
+
+def _remove_attachment_label(content):
+    """Quita etiquetas genéricas de adjunto cuando ya hay preview."""
+    return re.sub(r'^\[Photo\]\s*[^:\n]*:\s*$', '', content or '',
+                  flags=re.IGNORECASE).strip()
+
+
+def _texture_from_bytes(data):
+    """Crea una Gdk.Texture desde bytes de imagen descargados."""
+    from gi.repository import Gdk, GdkPixbuf
+
+    loader = GdkPixbuf.PixbufLoader()
+    loader.write(data)
+    loader.close()
+    pixbuf = loader.get_pixbuf()
+    if pixbuf is None:
+        raise ValueError("image data did not produce a pixbuf")
+    return Gdk.Texture.new_for_pixbuf(pixbuf)
+
+
+def _load_picture_async(picture, url, on_loaded=None):
     """Descarga la imagen en un hilo y la pinta cuando llega.
 
     En un hilo porque urlopen bloquea; el widget se toca sólo desde el hilo
@@ -57,11 +105,11 @@ def _load_picture_async(picture, url):
 
         def apply():
             try:
-                from gi.repository import Gdk, Gio
-                stream = Gio.MemoryInputStream.new_from_bytes(
-                    GLib.Bytes.new(data))
-                texture = Gdk.Texture.new_from_stream(stream)
+                texture = _texture_from_bytes(data)
                 picture.set_paintable(texture)
+                picture.set_visible(True)
+                if on_loaded:
+                    on_loaded(texture, data)
             except Exception as exc:
                 debug_print(f"[widget] imagen inválida {url}: {exc}")
                 picture.set_visible(False)
@@ -79,6 +127,157 @@ def _on_activate_link(_label, uri):
     except Exception as exc:
         debug_print(f"[widget] no se pudo abrir {uri}: {exc}")
     return True  # consumido: no dejar que GTK lo intente otra vez
+
+
+class ImagePreviewDialog(Gtk.Window):
+    """Popup simple de imagen con fit por defecto, zoom y pan."""
+
+    MIN_ZOOM = 0.1
+    MAX_ZOOM = 8.0
+
+    def __init__(self, parent, texture, url=None, data=None):
+        super().__init__(title="Image preview")
+        if isinstance(parent, Gtk.Window):
+            self.set_transient_for(parent)
+        self.set_modal(True)
+        self.set_default_size(900, 700)
+        self.texture = texture
+        self.url = url
+        self.data = data
+        self.zoom = 1.0
+        self.fit_mode = True
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(root)
+
+        header = Gtk.HeaderBar()
+        root.append(header)
+
+        zoom_out = Gtk.Button.new_from_icon_name("zoom-out-symbolic")
+        zoom_out.set_tooltip_text("Zoom out")
+        zoom_out.connect("clicked", lambda *_: self._set_zoom(self.zoom / 1.25))
+        header.pack_start(zoom_out)
+
+        zoom_in = Gtk.Button.new_from_icon_name("zoom-in-symbolic")
+        zoom_in.set_tooltip_text("Zoom in")
+        zoom_in.connect("clicked", lambda *_: self._set_zoom(self.zoom * 1.25))
+        header.pack_start(zoom_in)
+
+        fit = Gtk.Button.new_from_icon_name("zoom-fit-best-symbolic")
+        fit.set_tooltip_text("Fit to window")
+        fit.connect("clicked", lambda *_: self._fit_to_window())
+        header.pack_start(fit)
+
+        if data:
+            save_button = Gtk.Button.new_from_icon_name("document-save-symbolic")
+            save_button.set_tooltip_text("Save image")
+            save_button.connect("clicked", self._on_save_clicked)
+            header.pack_end(save_button)
+
+        if url:
+            open_button = Gtk.Button.new_from_icon_name("document-open-symbolic")
+            open_button.set_tooltip_text("Open link")
+            open_button.connect("clicked", lambda *_: _on_activate_link(None, url))
+            header.pack_end(open_button)
+
+        self.scrolled = Gtk.ScrolledWindow()
+        self.scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.scrolled.set_hexpand(True)
+        self.scrolled.set_vexpand(True)
+        root.append(self.scrolled)
+
+        self.picture = Gtk.Picture.new_for_paintable(texture)
+        self.picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+        self.picture.set_can_shrink(True)
+        self.picture.set_hexpand(True)
+        self.picture.set_vexpand(True)
+        self.picture.add_css_class("image-preview-picture")
+        self.scrolled.set_child(self.picture)
+
+        click = Gtk.GestureClick.new()
+        click.connect("pressed", self._on_click)
+        self.picture.add_controller(click)
+
+        drag = Gtk.GestureDrag.new()
+        drag.connect("drag-begin", self._on_drag_begin)
+        drag.connect("drag-update", self._on_drag_update)
+        self.picture.add_controller(drag)
+        self._drag_start_h = 0.0
+        self._drag_start_v = 0.0
+
+    def _on_click(self, _gesture, n_press, _x, _y):
+        if n_press == 2:
+            if self.fit_mode:
+                self._set_zoom(1.0)
+            else:
+                self._fit_to_window()
+
+    def _on_drag_begin(self, *_args):
+        hadj = self.scrolled.get_hadjustment()
+        vadj = self.scrolled.get_vadjustment()
+        self._drag_start_h = hadj.get_value() if hadj else 0.0
+        self._drag_start_v = vadj.get_value() if vadj else 0.0
+
+    def _on_drag_update(self, _gesture, offset_x, offset_y):
+        if self.fit_mode:
+            return
+        hadj = self.scrolled.get_hadjustment()
+        vadj = self.scrolled.get_vadjustment()
+        if hadj:
+            self._set_adjustment_value(hadj, self._drag_start_h - offset_x)
+        if vadj:
+            self._set_adjustment_value(vadj, self._drag_start_v - offset_y)
+
+    @staticmethod
+    def _set_adjustment_value(adj, value):
+        lower = adj.get_lower()
+        upper = adj.get_upper() - adj.get_page_size()
+        adj.set_value(max(lower, min(value, upper)))
+
+    def _fit_to_window(self):
+        self.fit_mode = True
+        self.zoom = 1.0
+        self.picture.set_can_shrink(True)
+        self.picture.set_hexpand(True)
+        self.picture.set_vexpand(True)
+        self.picture.set_size_request(-1, -1)
+
+    def _set_zoom(self, zoom):
+        self.fit_mode = False
+        self.zoom = max(self.MIN_ZOOM, min(float(zoom), self.MAX_ZOOM))
+        width = max(1, int(self.texture.get_width() * self.zoom))
+        height = max(1, int(self.texture.get_height() * self.zoom))
+        self.picture.set_hexpand(False)
+        self.picture.set_vexpand(False)
+        self.picture.set_can_shrink(False)
+        self.picture.set_size_request(width, height)
+
+    def _on_save_clicked(self, _button):
+        if not self.data:
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Save image")
+        dialog.set_initial_name(_attachment_filename(self.url))
+
+        def on_save(dlg, result, _user_data=None):
+            try:
+                gfile = dlg.save_finish(result)
+            except GLib.Error as exc:
+                if not exc.matches(Gtk.dialog_error_quark(),
+                                   Gtk.DialogError.DISMISSED):
+                    debug_print(f"[widget] save_finish falló: {exc}")
+                return
+            except Exception as exc:
+                debug_print(f"[widget] error inesperado al guardar: {exc}")
+                return
+            if gfile is None:
+                return
+            try:
+                gfile.replace_contents(self.data, None, False, 0, None)
+            except Exception as exc:
+                debug_print(f"[widget] no se pudo guardar imagen: {exc}")
+
+        dialog.save(self, None, on_save, None)
 
 
 def _autolink(markup):
@@ -208,15 +407,13 @@ class MessageWidget(Gtk.Box):
         # Adjunto de imagen: preview encima del texto. El link sigue estando
         # en el cuerpo (clicable), así que si la descarga falla no se pierde.
         self._attachment_picture = None
+        self._attachment_texture = None
+        self._attachment_data = None
+        self._attachment_url = None
         image_url = _first_image_url(content)
         if image_url:
-            self._attachment_picture = Gtk.Picture()
-            self._attachment_picture.set_can_shrink(True)
-            self._attachment_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            self._attachment_picture.set_size_request(-1, 180)
-            self._attachment_picture.add_css_class('attachment-image')
-            message_box.append(self._attachment_picture)
-            _load_picture_async(self._attachment_picture, image_url)
+            self._ensure_attachment_preview(message_box, image_url)
+        visible_content = _content_without_attachment_url(content, image_url)
 
         self.content_label = Gtk.Label()
         self.content_label.set_wrap(True)
@@ -226,7 +423,7 @@ class MessageWidget(Gtk.Box):
         self.content_label.set_hexpand(True)
         # Abrir links (markdown y URLs sueltas autoenlazadas) en el navegador.
         self.content_label.connect('activate-link', _on_activate_link)
-        self._set_label_content(content)
+        self._set_label_content(visible_content)
         message_box.append(self.content_label)
 
         # Agregar timestamp
@@ -242,11 +439,51 @@ class MessageWidget(Gtk.Box):
 
         self.append(margin_box)
 
+    def _ensure_attachment_preview(self, message_box, image_url):
+        if self._attachment_url == image_url and self._attachment_picture is not None:
+            return
+        self._attachment_url = image_url
+        self._attachment_texture = None
+        self._attachment_data = None
+        if self._attachment_picture is None:
+            self._attachment_picture = Gtk.Picture()
+            self._attachment_picture.set_visible(False)
+            self._attachment_picture.set_can_shrink(True)
+            self._attachment_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+            self._attachment_picture.set_size_request(-1, 240)
+            self._attachment_picture.set_hexpand(True)
+            self._attachment_picture.add_css_class('attachment-image')
+
+            click = Gtk.GestureClick.new()
+            click.connect("released", self._on_attachment_clicked)
+            self._attachment_picture.add_controller(click)
+            message_box.prepend(self._attachment_picture)
+
+        def on_loaded(texture, data):
+            self._attachment_texture = texture
+            self._attachment_data = data
+
+        _load_picture_async(self._attachment_picture, image_url, on_loaded=on_loaded)
+
+    def _on_attachment_clicked(self, *_args):
+        if self._attachment_texture is None:
+            return
+        root = self.get_root()
+        dialog = ImagePreviewDialog(
+            root, self._attachment_texture, self._attachment_url,
+            data=self._attachment_data)
+        dialog.present()
+
     def _set_label_content(self, content):
         """Pinta `content` en el label — markdown como Pango markup, o texto
         plano. El markup generado es balanceado por construcción, pero ante
         cualquier sorpresa se degrada a texto plano en vez de a un label
         vacío (set_markup inválido no pinta nada)."""
+        if not (content or '').strip():
+            self.content_label.set_text('')
+            self.content_label.set_visible(False)
+            return
+        self.content_label.set_visible(True)
         if self.use_markdown:
             from .pango_markdown import markdown_to_pango
             markup = _autolink(markdown_to_pango(content))
@@ -274,7 +511,12 @@ class MessageWidget(Gtk.Box):
         debug_print(
             f"[widget] update_content sender={self.message.sender} "
             f"len={len(self.message.content)}")
-        self._set_label_content(self.message.content)
+        image_url = _first_image_url(self.message.content)
+        if image_url:
+            self._ensure_attachment_preview(self.message_box, image_url)
+        visible_content = _content_without_attachment_url(
+            self.message.content, image_url)
+        self._set_label_content(visible_content)
         # Cambiar el label ya invalida el layout del widget; no hace falta
         # propagar queue_resize a mano (GTK4 lo hace hacia arriba).
 
