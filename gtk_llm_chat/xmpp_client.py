@@ -248,7 +248,18 @@ class XmppSession(GObject.Object):
     # --- Ciclo de vida de la conexión ---
 
     def connect_to_server(self, reset_backoff: bool = True):
-        """Inicia la conexión. No bloqueante; el progreso llega por señales."""
+        """Inicia la conexión. No bloqueante; el progreso llega por señales.
+
+        Reutiliza self._client si ya existe: nbxmpp implementa Stream
+        Management (XEP-0198) completo (ver nbxmpp/smacks.py), y su Client
+        decide resumir la sesión (en vez de una nueva) según su estado interno
+        (_connect_successful, el stream-id guardado, los contadores de
+        smacks) -- estado que vive DENTRO del objeto Client y se pierde si se
+        instancia uno nuevo en cada reconexión. Antes de este fix, cada
+        reconexión creaba un NbxmppClient desde cero, así que nunca se pedía
+        resume: el servidor (mod_smacks) hibernaba la sesión vieja esperando
+        un resume que jamás llegaba, y cualquier mensaje o aprobación
+        entregado a esa sesión hibernada se perdía cuando expiraba (~6 min)."""
         if self._state not in (STATE_DISCONNECTED, STATE_RECONNECTING):
             debug_print(f"XmppSession: connect_to_server ignorado en estado {self._state}")
             return
@@ -256,6 +267,13 @@ class XmppSession(GObject.Object):
         if reset_backoff:
             self._reconnect_attempt = 0
         self._disconnect_requested = False
+
+        if self._client is not None:
+            debug_print("XmppSession: reutilizando Client existente (permite resume SM)")
+            self._set_state(STATE_CONNECTING)
+            self._client.connect()
+            return
+
         client = NbxmppClient(log_context=f'xmpp-{self.bare_jid}')
         client.set_username(self._jid.localpart)
         client.set_domain(self._jid.domain)
@@ -409,8 +427,13 @@ class XmppSession(GObject.Object):
         # Un fallo de autenticación llega por aquí, no por connection-failed
         error, text, _extra = self._client.get_error()
         if self._disconnect_requested:
-            # Cierre voluntario: el stream-end resultante no es un error
+            # Cierre voluntario: el stream-end resultante no es un error, y
+            # además invalida el smacks del lado servidor (se envía </stream:
+            # stream> limpio) -- reutilizar este objeto en la próxima conexión
+            # no resumiría nada, así que soltamos la instancia y que la
+            # siguiente connect_to_server() construya una desde cero.
             error = None
+            self._client = None
         if error is not None:
             message = f"{error}: {text}" if text else str(error)
             debug_print(f"XmppSession: desconectado con error: {message}")
@@ -990,10 +1013,13 @@ class XmppSession(GObject.Object):
                 cmd_node = item.getAttr('node')
                 name = item.getAttr('name')
                 style = item.getAttr('style')
+                expires_at_ms = item.getAttr('expires-at-ms')
                 if jid and cmd_node and name:
                     command = {'jid': jid, 'node': cmd_node, 'name': name}
                     if style:
                         command['style'] = style
+                    if expires_at_ms:
+                        command['expires_at_ms'] = expires_at_ms
                     commands.append(command)
         return commands
 

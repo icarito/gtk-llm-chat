@@ -2087,6 +2087,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
     # debe re-renderizarse al reabrir el cliente. Las que sí traen expires_at_ms
     # se filtran por ese valor exacto en _filter_unexpired_actions.
     _PENDING_ACTION_MAX_AGE_MS = 15 * 60 * 1000
+    # Las approval cards son más estrictas: si una approval antigua no trae
+    # expiry explícito, viene de una caché previa al soporte de expires-at-ms o
+    # de un gateway viejo. No debe reaparecer como pendiente al reabrir.
+    _APPROVAL_ACTION_FALLBACK_MAX_AGE_MS = 60 * 1000
 
     def _restore_history_actions(self, body, timestamp, quick_responses,
                                  commands, request_id=None):
@@ -2131,7 +2135,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if request_dt is None:
             return False
         age_ms = int(time.time() * 1000) - int(request_dt.timestamp() * 1000)
-        return age_ms > self._PENDING_ACTION_MAX_AGE_MS
+        max_age_ms = self._PENDING_ACTION_MAX_AGE_MS
+        if self._actions_look_like_approval(commands):
+            max_age_ms = self._APPROVAL_ACTION_FALLBACK_MAX_AGE_MS
+        return age_ms > max_age_ms
+
+    @staticmethod
+    def _actions_look_like_approval(actions):
+        labels = {
+            str(action.get('label') or action.get('name') or '').strip().lower()
+            for action in actions or []
+            if isinstance(action, dict)
+        }
+        nodes = [
+            str(action.get('node') or '').lower()
+            for action in actions or []
+            if isinstance(action, dict)
+        ]
+        if {'allow once', 'deny'}.issubset(labels):
+            return True
+        return any('approve' in node or 'approval' in node for node in nodes)
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)
@@ -2177,11 +2200,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _filter_unexpired_actions(cls, actions):
         filtered = []
         for action in actions or []:
-            remaining = cls._action_remaining_ms(action)
-            if remaining is not None and remaining <= 0:
+            if cls._action_is_expired(action):
                 continue
             filtered.append(action)
         return filtered
+
+    @classmethod
+    def _action_is_expired(cls, action):
+        remaining = cls._action_remaining_ms(action)
+        return remaining is not None and remaining <= 0
 
     def _expire_quick_responses_from_actions(self, widget, actions):
         expiries = [
@@ -2203,6 +2230,28 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
 
         GLib.timeout_add(max(1000, remaining_ms), expire_if_same_widget)
+
+    def _expire_sticky_response_item_from_actions(self, item_id, actions):
+        expiries = [
+            remaining for remaining in (
+                self._action_remaining_ms(action) for action in (actions or [])
+            )
+            if remaining is not None
+        ]
+        if not expiries and self._actions_look_like_approval(actions):
+            expiries = [self._APPROVAL_ACTION_FALLBACK_MAX_AGE_MS]
+        if not expiries:
+            return
+        remaining_ms = min(expiries)
+        if remaining_ms <= 0:
+            self._remove_sticky_response_item(item_id)
+            return
+
+        def expire_if_still_pending():
+            self._remove_sticky_response_item(item_id)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(max(1000, remaining_ms), expire_if_still_pending)
 
     def _insert_bubble_by_timestamp(self, widget):
         """Inserta la burbuja en su sitio CRONOLÓGICO, no al final.
@@ -2778,6 +2827,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         }
         self._sticky_response_next_id += 1
         self._sticky_response_items.insert(0, item)
+        self._expire_sticky_response_item_from_actions(item['id'], item['responses'])
         self._rebuild_sticky_response_box()
 
     def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000):
@@ -2899,6 +2949,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         buttons = []
 
         def handle_click(_button, response):
+            if self._action_is_expired(response):
+                self._remove_sticky_response_item(item['id'])
+                return
             for btn in buttons:
                 btn.set_sensitive(False)
             self._remove_sticky_response_item(item['id'])
@@ -2953,6 +3006,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             buttons = []
 
             def handle_click(_button, response, current_item=item, current_buttons=buttons):
+                if self._action_is_expired(response):
+                    self._remove_sticky_response_item(current_item['id'])
+                    return
                 for btn in current_buttons:
                     btn.set_sensitive(False)
                 self._remove_sticky_response_item(current_item['id'])
@@ -3037,6 +3093,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # responde; el cliente ya no fuerza "solo la más reciente"
         # (divergencia deliberada de XEP-0439 §6).
         def on_selected(response):
+            if self._action_is_expired(response):
+                if self.current_message_widget is not None:
+                    self.current_message_widget.hide_quick_responses()
+                return
             value = response.get('value', '')
             label = response.get('label') or value
             if not value:
@@ -3046,9 +3106,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if hasattr(backend, 'send_quick_response'):
                 backend.send_quick_response(value, label)
 
+        # Los botones van tanto en la burbuja del mensaje (contexto inmediato)
+        # como en la sticky card (arriba, visible aunque el usuario haga
+        # scroll) — antes esto último sólo pasaba al restaurar del historial
+        # (_restore_history_actions), así que una pregunta EN VIVO nunca
+        # quedaba fija y era fácil perderla de vista en una conversación larga.
+        # _add_sticky_response_card ya marca request_id en
+        # _rendered_response_request_ids, así que la comprobación de arriba
+        # (línea ~3020) sigue protegiendo contra un reenvío duplicado.
         self.current_message_widget.add_quick_responses(responses, on_selected)
-        if request_id:
-            self._rendered_response_request_ids.add(request_id)
+        self._add_sticky_response_card(
+            responses,
+            on_selected,
+            detail_text=Message.compact_blank_lines(self.current_message_widget.message.content),
+            request_id=request_id)
         self._expire_quick_responses_from_actions(
             self.current_message_widget, responses)
         self._scroll_to_bottom_after_layout_if_following()
@@ -3075,14 +3146,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         def on_selected(command):
             self._execute_inline_command(command)
 
-        self.current_message_widget.add_quick_responses(commands, on_selected)
-        if request_id:
-            self._rendered_response_request_ids.add(request_id)
-        self._expire_quick_responses_from_actions(
-            self.current_message_widget, commands)
+        # Los command-items de XEP-0050 se muestran sólo como sticky card. Si
+        # también se agregan a la burbuja, una approval card aparece duplicada:
+        # una vez en el flujo del mensaje y otra en la superficie fija.
+        self._add_sticky_response_card(
+            commands,
+            on_selected,
+            detail_text=Message.compact_blank_lines(self.current_message_widget.message.content),
+            request_id=request_id)
         self._scroll_to_bottom_after_layout_if_following()
 
     def _execute_inline_command(self, command):
+        if self._action_is_expired(command):
+            return
         name = command.get('name', '')
         node = command.get('node', '')
         jid = command.get('jid', '')

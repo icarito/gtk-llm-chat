@@ -3,7 +3,7 @@ import os
 import threading
 import json
 from typing import Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -52,6 +52,7 @@ class XmppHistory:
             self._thread_local.conn.execute("PRAGMA journal_mode=WAL")
             self._migrate_db()
             self.cleanup_mam_shadow_duplicates()
+            self.cleanup_expired_action_metadata()
         return self._thread_local.conn
 
     def close_connection(self):
@@ -248,6 +249,87 @@ class XmppHistory:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+    def cleanup_expired_action_metadata(self) -> int:
+        """Elimina metadata de acciones que ya no pueden resolverse.
+
+        Esto evita que caches viejas vuelvan a pintar approval cards muertas
+        cada vez que se reabre el chat. No borra los mensajes, sólo las listas
+        quick_responses/commands asociadas a ellos.
+        """
+        conn = self._thread_local.conn
+        rows = conn.execute(
+            "SELECT id, timestamp, quick_responses, commands FROM messages "
+            "WHERE quick_responses IS NOT NULL OR commands IS NOT NULL"
+        ).fetchall()
+        changed = 0
+        for row in rows:
+            quick = self._filter_live_actions(
+                self._decode_metadata(row["quick_responses"]),
+                row["timestamp"],
+                approval_fallback=False,
+            )
+            commands = self._filter_live_actions(
+                self._decode_metadata(row["commands"]),
+                row["timestamp"],
+                approval_fallback=True,
+            )
+            quick_json = self._encode_metadata(quick)
+            commands_json = self._encode_metadata(commands)
+            if quick_json == row["quick_responses"] and commands_json == row["commands"]:
+                continue
+            conn.execute(
+                "UPDATE messages SET quick_responses = ?, commands = ? WHERE id = ?",
+                (quick_json, commands_json, row["id"]),
+            )
+            changed += 1
+        if changed:
+            conn.commit()
+        return changed
+
+    @classmethod
+    def _filter_live_actions(cls, actions, timestamp: str, approval_fallback: bool):
+        if not actions:
+            return []
+        return [
+            action for action in actions
+            if not cls._action_metadata_is_expired(action, timestamp, approval_fallback)
+        ]
+
+    @classmethod
+    def _action_metadata_is_expired(cls, action, timestamp: str, approval_fallback: bool) -> bool:
+        if not isinstance(action, dict):
+            return True
+        raw_expiry = action.get("expires_at_ms")
+        if raw_expiry not in (None, ""):
+            try:
+                return int(raw_expiry) <= int(datetime.now(timezone.utc).timestamp() * 1000)
+            except (TypeError, ValueError):
+                return False
+        ts = cls._parse_timestamp(timestamp)
+        if ts is None:
+            return False
+        if ts.tzinfo is None:
+            ts = ts.astimezone()
+        age_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - int(ts.timestamp() * 1000)
+        fallback_ms = 60 * 1000 if approval_fallback and cls._actions_look_like_approval([action]) else 15 * 60 * 1000
+        return age_ms > fallback_ms
+
+    @staticmethod
+    def _actions_look_like_approval(actions) -> bool:
+        labels = {
+            str(action.get("label") or action.get("name") or "").strip().lower()
+            for action in actions or []
+            if isinstance(action, dict)
+        }
+        nodes = [
+            str(action.get("node") or "").lower()
+            for action in actions or []
+            if isinstance(action, dict)
+        ]
+        if {"allow once", "deny"}.intersection(labels):
+            return True
+        return any("approve" in node or "approval" in node for node in nodes)
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,
