@@ -36,6 +36,7 @@ from .xmpp_history import XmppHistory
 
 STATE_DISCONNECTED = 'disconnected'
 STATE_CONNECTING = 'connecting'
+STATE_SYNCING_ROSTER = 'syncing-roster'
 STATE_RECONNECTING = 'reconnecting'
 STATE_CONNECTED = 'connected'
 
@@ -420,6 +421,7 @@ class XmppSession(GObject.Object):
         # Orden RFC 6121: roster primero, luego presence inicial, y solo
         # entonces anunciar 'connected'. Si se envía un mensaje antes del
         # presence, el servidor nos considera offline y lo encola.
+        self._set_state(STATE_SYNCING_ROSTER)
         task = self._client.get_module('Roster').request_roster()
         task.add_done_callback(self._on_roster)
 

@@ -18,6 +18,7 @@ import llm
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from .db_operations import ChatHistory
+from .xmpp_lifecycle import XmppLifecycle
 
 _ = gettext.gettext
 
@@ -53,6 +54,8 @@ class LLMChatApplication(Adw.Application):
         # La restauración de la sesión de ventanas se hace una sola vez, en el
         # primer arranque; las reinvocaciones single-instance no re-restauran.
         self._session_restored = False
+        self.xmpp_lifecycle = XmppLifecycle()
+        self._xmpp_lifecycle_handler_ids = []
         
         debug_print("LLMChatApplication.__init__: Verificando si se necesita configuración inicial...")
         self._needs_initial_setup = self._check_initial_setup_needed()
@@ -152,6 +155,7 @@ class LLMChatApplication(Adw.Application):
         # XMPP pertenece al ciclo de vida de la aplicación, no al de una
         # ventana. Arrancarlo en idle permite presentar GTK primero y evita que
         # un estado de sesión sin ventanas deje el proceso vivo pero offline.
+        self.xmpp_lifecycle.account_loading()
         GLib.idle_add(self._start_configured_xmpp_session)
 
         APP_NAME = "gtk-llm-chat"
@@ -232,9 +236,12 @@ class LLMChatApplication(Adw.Application):
     def _start_configured_xmpp_session(self):
         """Start the persisted XMPP account without waiting for a window."""
         try:
-            self.get_xmpp_session_for_roster()
+            session = self.get_xmpp_session_for_roster()
+            if session is None:
+                self.xmpp_lifecycle.account_missing()
         except Exception as error:
             debug_print(f"XMPP startup failed: {error}")
+            self.xmpp_lifecycle.session_error(error)
         return GLib.SOURCE_REMOVE
 
     def OpenConversation(self, cid):
@@ -831,12 +838,14 @@ class LLMChatApplication(Adw.Application):
         """Reconecta la sesión XMPP activa sin recrear ventanas."""
         session = getattr(self, '_xmpp_session', None)
         if session is not None:
+            self.xmpp_lifecycle.user_reconnecting()
             session.reconnect_now()
 
     def on_xmpp_disconnect_activate(self, action, param):
         """Desconecta la sesión XMPP activa y cancela reconexiones pendientes."""
         session = getattr(self, '_xmpp_session', None)
         if session is not None:
+            self.xmpp_lifecycle.user_disconnected()
             session.disconnect_from_server()
 
     def on_xmpp_remove_account_activate(self, action, param):
@@ -862,6 +871,7 @@ class LLMChatApplication(Adw.Application):
                 session.shutdown()
                 self._xmpp_session = None
             delete_account()
+            self.xmpp_lifecycle.account_missing()
 
         dialog.connect("response", on_response)
         dialog.present()
@@ -894,12 +904,28 @@ class LLMChatApplication(Adw.Application):
             from .xmpp_client import XmppSession
             session = XmppSession(jid, password)
             self._xmpp_session = session
+            self._bind_xmpp_lifecycle(session)
             session.connect('message-received', self._on_xmpp_message_received)
             session.connect('subscription-request', self._on_xmpp_subscription_request)
             session.connect_to_server()
         elif not session.is_connected:
             session.reconnect_now()
         return session
+
+    def _bind_xmpp_lifecycle(self, session):
+        """Make the application lifecycle the single observer of the session."""
+        self._xmpp_lifecycle_handler_ids = [
+            session.connect(
+                'state-changed',
+                lambda _session, state:
+                    self.xmpp_lifecycle.observe_session_state(state)),
+            session.connect(
+                'session-error',
+                lambda _session, detail:
+                    self.xmpp_lifecycle.session_error(detail)),
+        ]
+        if session.state != 'disconnected':
+            self.xmpp_lifecycle.observe_session_state(session.state)
 
     def _on_xmpp_message_received(self, session, bare_jid, body):
         """Notifica un mensaje XMPP entrante si su ventana no está activa

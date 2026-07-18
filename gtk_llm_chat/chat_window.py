@@ -1309,6 +1309,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Refleja el estado de conexión del backend en la barra XMPP."""
         labels = {
             'connecting': _("Connecting…"),
+            'syncing-roster': _("Syncing contacts…"),
             'reconnecting': _("Reconnecting…"),
             'connected': _("Connected"),
             'disconnected': _("Disconnected"),

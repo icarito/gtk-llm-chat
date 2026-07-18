@@ -4,7 +4,7 @@
       of window restoration.
 - [x] Suppress duplicate approval transport acknowledgements from chat history;
       retain the single actionable approval card.
-- [ ] Introduce the application-scoped lifecycle state model and signals.
+- [x] Introduce the application-scoped lifecycle state model and signals.
 - [ ] Add immediate startup/splash surface with phase text and bounded timeout.
 - [ ] Replace ambiguous spinners with retry, offline-by-user and error actions.
 - [ ] Add self-presence editor and publish available/away/dnd/xa plus status.
