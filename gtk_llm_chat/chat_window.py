@@ -2782,9 +2782,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return text
         if re.match(r'(?i)^✅\s*aprobado\s*[—-]', text):
             return text
+        if re.match(r'(?i)^❌?\s*Failed to submit approval\b', text):
+            return text.lstrip("❌ ")
+        if re.search(r'(?i)\bapproval already pending for session\b', text):
+            return text
         return None
 
     def _show_toast(self, text):
+        debug_print(f"[toast] {text}")
         toast = Adw.Toast(title=str(text))
         toast.set_timeout(3)
         self.toast_overlay.add_toast(toast)
@@ -2867,6 +2872,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
         (no se pudo correlacionar, o ya se había limpiado), se degrada a
         actualizar sólo la burbuja más reciente como antes."""
         resolved_a_card = self._mark_sticky_response_resolved(request_id)
+        toast = self._approval_transport_toast(body)
+        if toast:
+            def show_transport_toast():
+                # The corrected stanza is the ephemeral progress seed. Once
+                # the command expires/fails it must disappear, leaving one
+                # toast instead of becoming another permanent chat bubble.
+                widget = self.current_message_widget
+                if widget is not None and widget.get_parent() == self.messages_box:
+                    self.messages_box.remove(widget)
+                self.current_message_widget = None
+                self._show_toast(toast)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(show_transport_toast,
+                          priority=GLib.PRIORITY_HIGH_IDLE)
+            return
         # The command handler's immediate acknowledgement is transport
         # metadata, not a second question. Showing “Approval allow-once
         # submitted for <uuid>” in the former approval bubble made it look as
