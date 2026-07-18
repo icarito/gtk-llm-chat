@@ -2226,7 +2226,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # servidor). Solo aplica a las que quedaron sin expires_at_ms tras el
         # filtro anterior.
         if (quick_responses or commands) and self._pending_actions_are_stale(
-                timestamp, quick_responses, commands):
+                timestamp, quick_responses, commands, body):
             return
         if quick_responses and not self._history_quick_response_was_answered(
                 timestamp, quick_responses):
@@ -2242,7 +2242,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 detail_text=Message.compact_blank_lines(body),
                 request_id=request_id)
 
-    def _pending_actions_are_stale(self, timestamp, quick_responses, commands):
+    def _pending_actions_are_stale(self, timestamp, quick_responses, commands,
+                                   body=None):
         """True si la tarjeta pendiente es demasiado vieja para restaurar.
 
         Solo se considera vieja cuando NINGUNA de sus acciones trae un
@@ -2260,7 +2261,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return False
         age_ms = int(time.time() * 1000) - int(request_dt.timestamp() * 1000)
         max_age_ms = self._PENDING_ACTION_MAX_AGE_MS
-        if self._actions_look_like_approval(commands):
+        all_actions = list(quick_responses or []) + list(commands or [])
+        if (self._actions_look_like_approval(all_actions)
+                or self._body_looks_like_approval(body)):
             max_age_ms = self._APPROVAL_ACTION_FALLBACK_MAX_AGE_MS
         return age_ms > max_age_ms
 
@@ -2276,9 +2279,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
             for action in actions or []
             if isinstance(action, dict)
         ]
-        if {'allow once', 'deny'}.issubset(labels):
+        approval_words = ('allow', 'approve', 'deny', 'reject', 'permitir',
+                          'aprobar', 'denegar', 'rechazar')
+        if any(any(word in label for word in approval_words)
+               for label in labels):
             return True
         return any('approve' in node or 'approval' in node for node in nodes)
+
+    @staticmethod
+    def _body_looks_like_approval(body):
+        text = str(body or '').lower()
+        return ('approval' in text or 'aprobación' in text
+                or 'aprobacion' in text or 'pending command' in text
+                or '🔒' in text)
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)
@@ -2355,14 +2368,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         GLib.timeout_add(max(1000, remaining_ms), expire_if_same_widget)
 
-    def _expire_sticky_response_item_from_actions(self, item_id, actions):
+    def _expire_sticky_response_item_from_actions(self, item_id, actions,
+                                                   approval=False):
         expiries = [
             remaining for remaining in (
                 self._action_remaining_ms(action) for action in (actions or [])
             )
             if remaining is not None
         ]
-        if not expiries and self._actions_look_like_approval(actions):
+        if not expiries and (approval or self._actions_look_like_approval(actions)):
             expiries = [self._APPROVAL_ACTION_FALLBACK_MAX_AGE_MS]
         if not expiries:
             return
@@ -3078,7 +3092,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         }
         self._sticky_response_next_id += 1
         self._sticky_response_items.insert(0, item)
-        self._expire_sticky_response_item_from_actions(item['id'], item['responses'])
+        self._expire_sticky_response_item_from_actions(
+            item['id'], item['responses'],
+            approval=self._body_looks_like_approval(detail_text))
         self._rebuild_sticky_response_box()
 
     def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000,

@@ -259,7 +259,7 @@ class XmppHistory:
         """
         conn = self._thread_local.conn
         rows = conn.execute(
-            "SELECT id, timestamp, quick_responses, commands FROM messages "
+            "SELECT id, body, timestamp, quick_responses, commands FROM messages "
             "WHERE quick_responses IS NOT NULL OR commands IS NOT NULL"
         ).fetchall()
         changed = 0
@@ -267,7 +267,7 @@ class XmppHistory:
             quick = self._filter_live_actions(
                 self._decode_metadata(row["quick_responses"]),
                 row["timestamp"],
-                approval_fallback=False,
+                approval_fallback=self._body_looks_like_approval(row["body"]),
             )
             commands = self._filter_live_actions(
                 self._decode_metadata(row["commands"]),
@@ -312,7 +312,8 @@ class XmppHistory:
         if ts.tzinfo is None:
             ts = ts.astimezone()
         age_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - int(ts.timestamp() * 1000)
-        fallback_ms = 60 * 1000 if approval_fallback and cls._actions_look_like_approval([action]) else 15 * 60 * 1000
+        is_approval = approval_fallback or cls._actions_look_like_approval([action])
+        fallback_ms = 60 * 1000 if is_approval else 15 * 60 * 1000
         return age_ms > fallback_ms
 
     @staticmethod
@@ -327,9 +328,19 @@ class XmppHistory:
             for action in actions or []
             if isinstance(action, dict)
         ]
-        if {"allow once", "deny"}.intersection(labels):
+        approval_words = ("allow", "approve", "deny", "reject", "permitir",
+                          "aprobar", "denegar", "rechazar")
+        if any(any(word in label for word in approval_words)
+               for label in labels):
             return True
         return any("approve" in node or "approval" in node for node in nodes)
+
+    @staticmethod
+    def _body_looks_like_approval(body) -> bool:
+        text = str(body or "").lower()
+        return ("approval" in text or "aprobación" in text
+                or "aprobacion" in text or "pending command" in text
+                or "🔒" in text)
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,
