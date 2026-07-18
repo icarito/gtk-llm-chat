@@ -153,6 +153,8 @@ def parse_telemetry(item):
         node = payload.getTag(tag)
         if node is not None and node.getData():
             out[tag] = node.getData()
+            if tag == 'tool' and node.getAttr('detail'):
+                out['tool_detail'] = node.getAttr('detail')
 
     return out or None
 LEGACY_QUICK_RESPONSE_NS = 'urn:xmpp:tmp:quick-response'
@@ -180,7 +182,10 @@ class XmppSession(GObject.Object):
         'session-error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'roster-updated': (GObject.SignalFlags.RUN_LAST, None, ()),
         # bare_jid, body — para mensajes sin conversación abierta (T6)
-        'message-received': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        'message-received': (GObject.SignalFlags.RUN_LAST, None,
+                             (str, str, GObject.TYPE_PYOBJECT, str)),
+        # bare_jid, body — una XEP-0308 editó el último mensaje notificable
+        'message-corrected': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # bare_jid, state ('online'/'offline') — presencia de un contacto (spec 002)
         'presence-changed': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # bare_jid — cambió el status/caps de un contacto agente (spec 005)
@@ -225,6 +230,9 @@ class XmppSession(GObject.Object):
         self._online_resources = {}
         self._conversations = {}
         self._pending_mam_queries: dict = {}
+        # Último stanza original por contacto. Permite actualizar la misma
+        # notificación GNOME sólo cuando una XEP-0308 apunta a ese mensaje.
+        self._latest_incoming_message_ids: dict[str, str] = {}
         self.history: XmppHistory | None = None
         # JID del componente XEP-0363 del server. None = sin descubrir aún;
         # '' = ya se buscó y el server no tiene uno (no reintentar en cada envío).
@@ -985,9 +993,53 @@ class XmppSession(GObject.Object):
             conversation.deliver(
                 body, quick_responses, commands,
                 correction=correction, request_id=stanza_id)
-        # Emitir siempre para que la app pueda notificar si la ventana de
-        # esa conversación no tiene foco (o no existe) — spec 002 T5.
-        self.emit('message-received', bare, body)
+        # Incluso un seed que no merece notificación debe ser el target
+        # conocido más reciente: su XEP-0308 final podrá entonces actualizar
+        # la UI y crear la notificación que el seed omitió.
+        if stanza_id and not replace_id:
+            self._latest_incoming_message_ids[bare] = stanza_id
+        # Una corrección no es un mensaje nuevo. Si edita precisamente el
+        # último original, la app reemplaza la notificación existente o crea
+        # una sola cuando el original era un seed deliberadamente silencioso.
+        latest_id = self._latest_incoming_message_ids.get(bare)
+        if self._should_update_notification(replace_id, latest_id):
+            self.emit('message-corrected', bare, body)
+        elif (self._should_notify_incoming(replace_id)
+              and self._should_notify_body(body, actions=(
+                  commands if commands else quick_responses))):
+            actions = commands if commands else quick_responses
+            self.emit('message-received', bare, body, actions, stanza_id or '')
+
+    @staticmethod
+    def _should_notify_incoming(replace_id: str | None) -> bool:
+        """Only original messages, never XEP-0308 edits, notify the desktop."""
+        return not bool(replace_id)
+
+    @staticmethod
+    def _should_update_notification(replace_id: str | None,
+                                    latest_id: str | None) -> bool:
+        """An edit may replace, never create, the latest notification."""
+        return bool(replace_id and latest_id and replace_id == latest_id)
+
+    @staticmethod
+    def _should_notify_body(body: str, actions=None) -> bool:
+        """Only user-facing inbound content reaches desktop notifications."""
+        # Action metadata makes an approval/question explicitly actionable,
+        # even when its textual body contains transport-oriented wording.
+        if actions:
+            return True
+        text = " ".join(str(body or "").strip().split())
+        if not text:
+            return False
+        noise = (
+            r'(?i)^Recibido\s*[·.-]\s*preparando…?$',
+            r'(?i)^Command (?:submitted|expired)\.?$',
+            r'(?i)^✅\s*Approval\s+(?:allow-once|allow-always|deny)\s+submitted\b',
+            r'(?i)^✅\s*aprobado\s*[—-]',
+            r'(?i)^Usage:\s*/approve\b',
+            r'(?i)^\s*(?:⚠️?|✅|❌)?\s*(?:🔧|🛠️?|Tool(?:\s|:)|Using tool|Herramienta:|Exec failed:)',
+        )
+        return not any(re.search(pattern, text) for pattern in noise)
 
     @staticmethod
     def _parse_oob_url(stanza, body) -> str | None:
@@ -1346,10 +1398,10 @@ class XmppConversation(ChatBackend):
         # por texto, como señal de sync más rápida que esperar la
         # corrección del servidor.
         self._pending_request_ids: dict[str, set[str]] = {}
-        # XEP-0308 Last Message Correction also applies to ordinary messages
-        # (not only interactive cards). Keep the stanza id of the most recent
-        # normal incoming body so progress/status corrections can replace its
-        # bubble instead of degrading into a new response.
+        # XEP-0308 corrections can arrive after newer messages. Keep a bounded
+        # set of recent stanza ids so an edit is correlated to its own bubble,
+        # not merely to whichever message happened to arrive last.
+        self._known_incoming_ids: dict[str, None] = {}
         self._last_incoming_id: str | None = None
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
@@ -1387,23 +1439,39 @@ class XmppConversation(ChatBackend):
         """Un mensaje del contacto: response + finished, cached.
 
         Si correction es una tupla (replace_id, stanza_id), se acepta cuando
-        apunta al último mensaje ordinario (XEP-0308) o a cualquier pregunta
-        interactiva todavía pendiente. Si no coincide, se trata como mensaje
-        normal para degradar de forma segura."""
+        apunta a cualquier mensaje reciente conocido (XEP-0308) o a una
+        pregunta interactiva todavía pendiente. Si no coincide, se trata
+        como mensaje normal para degradar de forma segura."""
         if correction is not None:
             replace_id, _stanza_id = correction
-            if replace_id and (
-                    replace_id == self._last_incoming_id
-                    or replace_id in self._pending_request_ids):
+            if replace_id and self._is_known_correction_target(replace_id):
                 self._deliver_correction(replace_id, body)
+                return
+            if replace_id:
+                # Puede ocurrir al abrir la app a mitad de un turno: el seed
+                # original quedó fuera del cache/MAM cargado, pero sus edits
+                # siguen llegando. Anclamos la primera versión observada al
+                # id ORIGINAL; las siguientes correcciones actualizarán esa
+                # única fila/widget en vez de crear un snapshot por edit.
+                from datetime import datetime, timezone
+                ts = datetime.now(timezone.utc).isoformat()
+                history = self.session.history
+                if history is not None:
+                    history.record_message(
+                        self.bare_jid, body, 'in', ts,
+                        request_id=replace_id)
+                self._track_incoming_id(replace_id)
+                self.emit('response-message', replace_id, body)
+                self.emit('finished', True)
                 return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
         history = self.session.history
         # El propio stanza_id de este mensaje es el request_id que una
-        # futura corrección usará en su <replace id=...> para apuntar aquí
-        # — sólo tiene sentido guardarlo si trae algo que luego pueda
-        # resolverse (quick_responses/commands).
+        # futura corrección usará en su <replace id=...> para apuntar aquí.
+        # También debe persistirse para seeds de streaming sin botones: si no,
+        # update_by_request_id no encuentra la fila y MAM/reload conserva para
+        # siempre "Recibido · preparando…" en vez de la respuesta final.
         if request_id is None and correction:
             request_id = correction[1]
         has_pending = bool(quick_responses) or bool(commands)
@@ -1411,11 +1479,11 @@ class XmppConversation(ChatBackend):
             history.record_message(
                 self.bare_jid, body, 'in', ts,
                 quick_responses=quick_responses, commands=commands,
-                request_id=request_id if has_pending else None)
+                request_id=request_id)
         if has_pending and request_id:
             self._track_pending_request(request_id, quick_responses)
         if request_id:
-            self._last_incoming_id = request_id
+            self._track_incoming_id(request_id)
         self.emit('response-message', request_id or '', body)
         # Preferir command-items (XEP-0050, responde por IQ off-band) sobre
         # quick-responses (texto en el body) cuando el mensaje trae ambos.
@@ -1428,6 +1496,20 @@ class XmppConversation(ChatBackend):
         elif quick_responses:
             self.emit('quick-responses', quick_responses, request_id)
         self.emit('finished', True)
+
+    def _track_incoming_id(self, request_id: str,
+                           max_tracked: int = 100):
+        """Remember recent stanza ids for out-of-order XEP-0308 edits."""
+        self._known_incoming_ids.pop(request_id, None)
+        self._known_incoming_ids[request_id] = None
+        self._last_incoming_id = request_id
+        while len(self._known_incoming_ids) > max_tracked:
+            oldest = next(iter(self._known_incoming_ids))
+            self._known_incoming_ids.pop(oldest, None)
+
+    def _is_known_correction_target(self, request_id: str) -> bool:
+        return (request_id in self._known_incoming_ids
+                or request_id in self._pending_request_ids)
 
     def _track_pending_request(self, request_id: str, quick_responses=None,
                                max_tracked: int = 50):
@@ -1610,6 +1692,8 @@ class XmppConversation(ChatBackend):
             return
         for msg in messages:
             self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+            if msg.get('request_id') and msg.get('direction') == 'in':
+                self._track_incoming_id(msg['request_id'])
             if msg.get('quick_responses') or msg.get('commands'):
                 self.emit(
                     'history-actions', msg['body'], msg['timestamp'],
@@ -1702,18 +1786,20 @@ class XmppConversation(ChatBackend):
             # MAM o en vivo) puede encontrarlo sin depender de ser el último.
             request_id = item[6] if len(item) > 6 else None
             has_pending = bool(quick_responses) or bool(commands)
+            if request_id and direction == 'in':
+                self._track_incoming_id(request_id)
             if (history is not None and
                     history.attach_mam_to_recent_message(
                         self.bare_jid, body, direction, timestamp, mam_id,
                         quick_responses=quick_responses, commands=commands,
-                        request_id=request_id if has_pending else None)):
+                        request_id=request_id)):
                 continue
             inserted = True
             if history is not None:
                 inserted = history.record_message(
                     self.bare_jid, body, direction, timestamp, mam_id,
                     quick_responses=quick_responses, commands=commands,
-                    request_id=request_id if has_pending else None)
+                    request_id=request_id)
             if has_pending and request_id and direction == 'in':
                 self._track_pending_request(request_id, quick_responses)
             if inserted:

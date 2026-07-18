@@ -58,6 +58,7 @@ class XmppHistory:
             self._migrate_db()
             self.cleanup_mam_shadow_duplicates()
             self.cleanup_expired_action_metadata()
+            self.cleanup_superseded_approval_metadata()
         return self._thread_local.conn
 
     def close_connection(self):
@@ -110,6 +111,9 @@ class XmppHistory:
         conn = self.get_connection()
         quick_json = self._encode_metadata(quick_responses)
         commands_json = self._encode_metadata(commands)
+        if direction == "in":
+            self._resolve_prior_approvals(
+                conn, bare_jid, body, quick_responses, commands)
         if mam_id:
             existing = conn.execute(
                 "SELECT id FROM messages WHERE bare_jid = ? AND mam_id = ?",
@@ -135,6 +139,81 @@ class XmppHistory:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+    def _resolve_prior_approvals(self, conn, bare_jid: str, body: str,
+                                 quick_responses=None, commands=None,
+                                 exclude_id=None) -> int:
+        """Clear older approval actions once a later inbound message exists.
+
+        OpenClaw allows only one pending exec approval per session. Therefore
+        a new approval supersedes the previous one, while any ordinary agent
+        reply proves the previous wait has completed. Messages stay intact;
+        only their obsolete interactive metadata is removed.
+        """
+        current_actions = list(quick_responses or []) + list(commands or [])
+        current_is_approval = (self._actions_look_like_approval(current_actions)
+                               or (bool(current_actions)
+                                   and self._body_looks_like_approval(body)))
+        rows = conn.execute(
+            "SELECT id, body, quick_responses, commands FROM messages "
+            "WHERE bare_jid = ? AND direction = 'in' "
+            "AND (quick_responses IS NOT NULL OR commands IS NOT NULL)",
+            (bare_jid,),
+        ).fetchall()
+        stale_ids = []
+        for row in rows:
+            if exclude_id is not None and row["id"] == exclude_id:
+                continue
+            actions = (self._decode_metadata(row["quick_responses"])
+                       + self._decode_metadata(row["commands"]))
+            if (self._actions_look_like_approval(actions)
+                    or (bool(actions)
+                        and self._body_looks_like_approval(row["body"]))):
+                stale_ids.append(row["id"])
+        # A later approval and a later ordinary response both resolve all
+        # earlier approvals. Empty protocol/status stanzas never reach here.
+        if not stale_ids or (not current_is_approval and not str(body or "").strip()):
+            return 0
+        placeholders = ",".join("?" for _ in stale_ids)
+        cursor = conn.execute(
+            f"UPDATE messages SET quick_responses = NULL, commands = NULL "
+            f"WHERE id IN ({placeholders})",
+            stale_ids,
+        )
+        return cursor.rowcount
+
+    def cleanup_superseded_approval_metadata(self) -> int:
+        """Reconcile cached/MAM cards with later messages in each chat."""
+        conn = self._thread_local.conn
+        rows = conn.execute(
+            "SELECT id, bare_jid, body, direction, quick_responses, commands "
+            "FROM messages ORDER BY bare_jid, timestamp, id"
+        ).fetchall()
+        pending_by_jid = {}
+        stale_ids = []
+        for row in rows:
+            if row["direction"] != "in" or not str(row["body"] or "").strip():
+                continue
+            actions = (self._decode_metadata(row["quick_responses"])
+                       + self._decode_metadata(row["commands"]))
+            is_approval = (self._actions_look_like_approval(actions)
+                           or (bool(actions)
+                               and self._body_looks_like_approval(row["body"])))
+            previous = pending_by_jid.pop(row["bare_jid"], None)
+            if previous is not None:
+                stale_ids.append(previous)
+            if is_approval:
+                pending_by_jid[row["bare_jid"]] = row["id"]
+        if not stale_ids:
+            return 0
+        placeholders = ",".join("?" for _ in stale_ids)
+        cursor = conn.execute(
+            f"UPDATE messages SET quick_responses = NULL, commands = NULL "
+            f"WHERE id IN ({placeholders})",
+            stale_ids,
+        )
+        conn.commit()
+        return cursor.rowcount
 
     def get_recent(self, bare_jid: str, limit: int = 50, verified_only: bool = False):
         conn = self.get_connection()
@@ -394,6 +473,10 @@ class XmppHistory:
                 continue
             if abs((target - candidate).total_seconds()) <= window_seconds:
                 try:
+                    if direction == "in":
+                        self._resolve_prior_approvals(
+                            conn, bare_jid, body, quick_responses, commands,
+                            exclude_id=row["id"])
                     conn.execute(
                         "UPDATE messages SET timestamp = ?, mam_id = ?, "
                         "quick_responses = COALESCE(?, quick_responses), "

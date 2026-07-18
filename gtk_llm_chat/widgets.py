@@ -385,7 +385,7 @@ class Message:
     @staticmethod
     def compact_blank_lines(content):
         text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
-        text = re.sub(r'\n[ \t]+\n', '\n\n', text)
+        text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
@@ -705,8 +705,14 @@ class MessageWidget(Gtk.Box):
         card.set_hexpand(True)
 
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_hexpand(True)
+        # Let short tables use their real height.  The previous row-count
+        # estimate reserved up to 200 px even when the rendered rows were much
+        # shorter, leaving a conspicuous blank band before following prose.
+        # Tall tables remain bounded and get their own vertical scrollbar.
+        scrolled.set_propagate_natural_height(True)
+        scrolled.set_max_content_height(300)
 
         headers = table.get('headers', [])
         rows = table.get('rows', [])
@@ -751,9 +757,6 @@ class MessageWidget(Gtk.Box):
                 grid.attach(label, col, row_idx + 1, 1, 1)
 
         scrolled.set_child(grid)
-        scrolled.set_min_content_height(
-            min(200, 30 * (len(rows) + (1 if headers else 0))))
-        scrolled.set_max_content_height(300)
         card.append(scrolled)
         return card
 
@@ -762,15 +765,19 @@ class MessageWidget(Gtk.Box):
         if not (content or '').strip():
             return
         parts = _split_code_fences(content)
-        from .pango_markdown import has_table, extract_tables
+        from .pango_markdown import has_table, split_table_blocks
         for kind, language, value in parts:
             if kind == 'code':
                 self.content_box.append(self._build_code_block(value, language))
             elif (value or '').strip():
                 if has_table(value):
-                    for table in extract_tables(value):
-                        self.content_box.append(
-                            self._build_table_widget(table))
+                    for block_kind, block_value in split_table_blocks(value):
+                        if block_kind == 'table':
+                            self.content_box.append(
+                                self._build_table_widget(block_value))
+                        elif block_value:
+                            self.content_box.append(
+                                self._build_text_label(block_value))
                 else:
                     self.content_box.append(self._build_text_label(value))
 

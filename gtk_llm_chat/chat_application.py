@@ -51,6 +51,7 @@ class LLMChatApplication(Adw.Application):
 
         self._shutting_down = False  # Bandera para controlar proceso de cierre
         self._window_by_cid = {}  # Mapa de CID -> ventana
+        self._opening_conversation_keys = set()
         # La restauración de la sesión de ventanas se hace una sola vez, en el
         # primer arranque; las reinvocaciones single-instance no re-restauran.
         self._session_restored = False
@@ -232,6 +233,12 @@ class LLMChatApplication(Adw.Application):
             "deny-xmpp-sub", GLib.VariantType.new('s'))
         deny_sub_action.connect("activate", self._on_deny_xmpp_sub)
         self.add_action(deny_sub_action)
+
+        approval_action = Gio.SimpleAction.new(
+            "xmpp-notification-action", GLib.VariantType.new('s'))
+        approval_action.connect(
+            "activate", self._on_xmpp_notification_action)
+        self.add_action(approval_action)
 
     def _start_configured_xmpp_session(self):
         """Start the persisted XMPP account without waiting for a window."""
@@ -619,29 +626,46 @@ class LLMChatApplication(Adw.Application):
             if existing is not None:
                 existing.present()
                 return existing
+            if descriptor.get('kind') == 'xmpp':
+                # Recover windows created through an older/unregistered path
+                # before opening a duplicate from a notification click.
+                for candidate in self.get_windows():
+                    backend = getattr(candidate, 'backend', None)
+                    if (getattr(backend, 'bare_jid', None)
+                            == descriptor.get('jid')):
+                        self._window_by_cid[key] = candidate
+                        candidate.present()
+                        return candidate
+            if key in self._opening_conversation_keys:
+                GLib.idle_add(lambda: (self.open_conversation(descriptor),
+                                       GLib.SOURCE_REMOVE)[1])
+                return None
+            self._opening_conversation_keys.add(key)
 
         chat_history = ChatHistory()
         try:
             backend = self.build_backend(descriptor, chat_history)
+            config = dict(descriptor.get('config') or {})
+            if descriptor.get('cid'):
+                config['cid'] = descriptor['cid']
+
+            window = self._create_new_window_with_config(
+                config, backend=backend,
+                xmpp_session=descriptor.get('session'),
+                chat_history=chat_history)
+
+            if key is not None:
+                self._window_by_cid[key] = window
+            elif descriptor.get('kind') != 'xmpp':
+                # LLM nueva: se registra cuando el backend anuncie su cid.
+                self._register_llm_window_when_ready(window, backend)
+            return window
         except Exception as err:
-            debug_print(f"open_conversation: no se pudo crear el backend: {err}")
+            debug_print(f"open_conversation: no se pudo crear la ventana: {err}")
             return None
-
-        config = dict(descriptor.get('config') or {})
-        if descriptor.get('cid'):
-            config['cid'] = descriptor['cid']
-
-        window = self._create_new_window_with_config(
-            config, backend=backend,
-            xmpp_session=descriptor.get('session'),
-            chat_history=chat_history)
-
-        if key is not None:
-            self._window_by_cid[key] = window
-        elif descriptor.get('kind') != 'xmpp':
-            # LLM nueva: se registra cuando el backend anuncie su cid.
-            self._register_llm_window_when_ready(window, backend)
-        return window
+        finally:
+            if key is not None:
+                self._opening_conversation_keys.discard(key)
 
     def _register_llm_window_when_ready(self, window, backend):
         """Una conversación LLM nueva no tiene cid hasta que el backend lo crea;
@@ -906,6 +930,7 @@ class LLMChatApplication(Adw.Application):
             self._xmpp_session = session
             self._bind_xmpp_lifecycle(session)
             session.connect('message-received', self._on_xmpp_message_received)
+            session.connect('message-corrected', self._on_xmpp_message_corrected)
             session.connect('subscription-request', self._on_xmpp_subscription_request)
             session.connect_to_server()
         elif not session.is_connected:
@@ -927,20 +952,137 @@ class LLMChatApplication(Adw.Application):
         if session.state != 'disconnected':
             self.xmpp_lifecycle.observe_session_state(session.state)
 
-    def _on_xmpp_message_received(self, session, bare_jid, body):
+    def _on_xmpp_message_received(self, session, bare_jid, body, actions,
+                                  request_id):
         """Notifica un mensaje XMPP entrante si su ventana no está activa
         (spec 002 T5). Si la ventana está enfocada, no molesta."""
         key = f"xmpp:{session.bare_jid}:{bare_jid}"
         window = self._window_by_cid.get(key)
         if window is not None and window.is_active():
             return  # la ve el usuario ahora mismo; no notificar
+        self._send_xmpp_message_notification(
+            session, bare_jid, body, actions, request_id)
+        notified = getattr(self, '_xmpp_notified_jids', None)
+        if notified is None:
+            notified = self._xmpp_notified_jids = set()
+        notified.add(bare_jid)
+
+    def _on_xmpp_message_corrected(self, session, bare_jid, body):
+        """Actualiza la notificación del seed o crea una para su final.
+
+        Los seeds de streaming se filtran deliberadamente. Su corrección final
+        sí es contenido entrante y debe notificar aunque no hubiera una
+        notificación inicial que reemplazar.
+        """
+        notified = getattr(self, '_xmpp_notified_jids', set())
+        if not session._should_notify_body(body):
+            if bare_jid in notified:
+                self._withdraw_xmpp_message_notification(bare_jid)
+            return
+        key = f"xmpp:{session.bare_jid}:{bare_jid}"
+        window = self._window_by_cid.get(key)
+        if window is not None and window.is_active():
+            self._withdraw_xmpp_message_notification(bare_jid)
+            return
+        self._send_xmpp_message_notification(session, bare_jid, body)
+        if not hasattr(self, '_xmpp_notified_jids'):
+            self._xmpp_notified_jids = set()
+        self._xmpp_notified_jids.add(bare_jid)
+
+    def _send_xmpp_message_notification(self, session, bare_jid, body,
+                                        actions=None, request_id=''):
         notification = Gio.Notification.new(session.get_contact_name(bare_jid))
-        notification.set_body(body)
+        notification.set_body(self._notification_body(body, actions))
         # 'default' action → abrir/enfocar esa conversación al hacer clic
         notification.set_default_action_and_target(
             "app.open-xmpp", GLib.Variant('s', bare_jid))
+        if actions:
+            for item in list(actions)[:3]:
+                label = item.get('name') or item.get('label') or ''
+                if not label:
+                    continue
+                payload = json.dumps({
+                    'bare_jid': bare_jid,
+                    'request_id': request_id,
+                    'jid': item.get('jid'),
+                    'node': item.get('node'),
+                    'value': item.get('value'),
+                    'label': label,
+                })
+                notification.add_button_with_target(
+                    label, "app.xmpp-notification-action",
+                    GLib.Variant('s', payload))
         # id = bare JID: mensajes repetidos reemplazan, no se apilan
         self.send_notification(f"xmpp-msg:{bare_jid}", notification)
+
+    @staticmethod
+    def _notification_body(body, actions=None):
+        if not actions:
+            return body
+        labels = " ".join(str(item.get('name') or item.get('label') or '')
+                          for item in actions if isinstance(item, dict)).lower()
+        if not any(word in labels for word in ('allow', 'deny', 'approve',
+                                                'permitir', 'denegar')):
+            return body
+        text = str(body or '')
+        lock = re.search(r'(?m)^\s*🔒\s*(.+?)\s*$', text)
+        if lock:
+            return _("Approval required") + "\n" + lock.group(1).strip()
+        pending = re.search(
+            r'(?is)Pending command:\s*```(?:\w+)?\s*\n(.*?)```', text)
+        if pending and pending.group(1).strip():
+            return _("Approval required") + "\n" + pending.group(1).strip()
+        return _("Approval required")
+
+    def _on_xmpp_notification_action(self, _action, param):
+        try:
+            payload = json.loads(param.get_string())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return
+        session = getattr(self, '_xmpp_session', None)
+        bare_jid = payload.get('bare_jid')
+        if session is None or not bare_jid:
+            return
+        node, jid = payload.get('node'), payload.get('jid')
+        if node and jid:
+            from .xmpp_commands import XmppCommandClient
+            from nbxmpp.structs import AdHocCommand
+            from nbxmpp.protocol import JID
+            client = XmppCommandClient(session, bare_jid)
+            clients = getattr(self, '_notification_command_clients', None)
+            if clients is None:
+                clients = self._notification_command_clients = set()
+            clients.add(client)
+
+            def done(result=None):
+                from .xmpp_commands import command_result_body
+                body = command_result_body(result)
+                accepted = bool(re.fullmatch(
+                    r'(?i)Command (?:submitted|expired)\.?', body.strip()))
+                clients.discard(client)
+                if not accepted:
+                    return
+                self._withdraw_xmpp_message_notification(bare_jid)
+                request_id = payload.get('request_id')
+                if request_id and session.history is not None:
+                    session.history.mark_resolved_by_request_id(
+                        bare_jid, request_id)
+
+            client.execute(
+                AdHocCommand(jid=JID.from_string(jid), node=node,
+                             name=payload.get('label') or ''),
+                done, lambda _error: clients.discard(client))
+            return
+        value = payload.get('value')
+        if value:
+            conversation = session.get_conversation(bare_jid)
+            conversation.send_quick_response(
+                value, payload.get('label') or value)
+            self._withdraw_xmpp_message_notification(bare_jid)
+
+    def _withdraw_xmpp_message_notification(self, bare_jid):
+        self.withdraw_notification(f"xmpp-msg:{bare_jid}")
+        getattr(self, '_xmpp_notified_jids', set()).discard(bare_jid)
 
     def _on_xmpp_subscription_request(self, session, bare_jid):
         """Alguien pide vernos: notificación con Aceptar/Rechazar (T6)."""
@@ -978,7 +1120,7 @@ class LLMChatApplication(Adw.Application):
         el roster sidebar."""
         # La conversación se está abriendo/enfocando: retirar cualquier
         # notificación de mensaje pendiente de ese contacto (fix review #1).
-        self.withdraw_notification(f"xmpp-msg:{bare_jid}")
+        self._withdraw_xmpp_message_notification(bare_jid)
         # Envoltorio del camino único (spec 009); el focus-or-open ya lo hace él.
         return self.open_conversation({
             'kind': 'xmpp',
@@ -1000,7 +1142,7 @@ class LLMChatApplication(Adw.Application):
         for key, window in list(self._window_by_cid.items()):
             if key.endswith(f":{bare_jid}") and key.startswith("xmpp:"):
                 window.present()
-                self.withdraw_notification(f"xmpp-msg:{bare_jid}")
+                self._withdraw_xmpp_message_notification(bare_jid)
                 return
         self.open_xmpp_conversation(session, bare_jid)
 

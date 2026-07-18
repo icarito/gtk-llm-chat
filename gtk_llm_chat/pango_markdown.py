@@ -199,3 +199,37 @@ def has_table(text):
         if token.type == 'table_open':
             return True
     return False
+
+
+_TABLE_DELIMITER_RE = re.compile(
+    r'^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$')
+
+
+def split_table_blocks(text):
+    """Return prose and parsed tables without dropping surrounding content."""
+    lines = str(text or '').splitlines(keepends=True)
+    result = []
+    prose_start = 0
+    index = 0
+    while index + 1 < len(lines):
+        if '|' not in lines[index] or not _TABLE_DELIMITER_RE.match(lines[index + 1]):
+            index += 1
+            continue
+        if index > prose_start:
+            prose = ''.join(lines[prose_start:index]).strip()
+            if prose:
+                result.append(('text', prose))
+        end = index + 2
+        while end < len(lines) and '|' in lines[end] and lines[end].strip():
+            end += 1
+        table_text = ''.join(lines[index:end])
+        parsed = extract_tables(table_text)
+        result.append(('table', parsed[0]) if parsed
+                      else ('text', table_text.strip()))
+        prose_start = end
+        index = end
+    if prose_start < len(lines):
+        prose = ''.join(lines[prose_start:]).strip()
+        if prose:
+            result.append(('text', prose))
+    return result or [('text', str(text or '').strip())]

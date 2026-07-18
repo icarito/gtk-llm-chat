@@ -125,6 +125,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._typing_row = None
         self._last_live_sender = None
         self._message_widgets_by_id = {}
+        # Approval bodies wait briefly for their command metadata and become
+        # one sticky panel instead of an assistant bubble plus a panel.
+        self._pending_action_bodies = {}
+        self._tool_output_request_ids = set()
+        self._restored_active_tool_panel = False
+        self._approval_toast_request_ids = set()
+        self._last_toast_signature = None
         self._sticky_response_cards = []
         self._sticky_response_items = []
         self._sticky_response_next_id = 0
@@ -258,6 +265,31 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # mira) y el bypass es un comando del menú de agente, así que esta barra
         # se quedó sólo con el estado de conexión.
         self.xmpp_toolbar.append(self.xmpp_status_bar)
+
+        # Tool activity lives outside the message list. Its bounded viewport
+        # updates independently, avoiding a full bubble/list reflow for every
+        # progress edit or long tool status line.
+        self.tool_output_label = Gtk.Label()
+        self.tool_output_label.set_xalign(0)
+        self.tool_output_label.set_yalign(0)
+        self.tool_output_label.set_wrap(True)
+        self.tool_output_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.tool_output_label.set_selectable(True)
+        self.tool_output_label.add_css_class('monospace')
+        self.tool_output_scroll = Gtk.ScrolledWindow()
+        self.tool_output_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.tool_output_scroll.set_max_content_height(144)
+        self.tool_output_scroll.set_propagate_natural_height(True)
+        self.tool_output_scroll.set_child(self.tool_output_label)
+        self.tool_output_panel = Adw.Bin()
+        self.tool_output_panel.add_css_class('card')
+        self.tool_output_panel.add_css_class('tool-output-panel')
+        self.tool_output_panel.set_margin_start(6)
+        self.tool_output_panel.set_margin_end(6)
+        self.tool_output_panel.set_margin_bottom(6)
+        self.tool_output_panel.set_child(self.tool_output_scroll)
+        self.tool_output_panel.set_visible(False)
 
         # --- Botones de la Header Bar ---
         # (El viejo toggle "brain" del sidebar de modelo ya no existe: ese panel
@@ -571,9 +603,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         input_box.append(input_actions)
 
+        # El toast vive sólo sobre la lista de mensajes. Las acciones
+        # pendientes quedan arriba y fuera del overlay, de modo que una
+        # notificación nunca tape el approval sticky.
+        self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_child(scroll)
+
         # Ensamblar la interfaz de chat
-        chat_content_box.append(scroll)
         chat_content_box.append(self.sticky_response_box)
+        chat_content_box.append(self.toast_overlay)
         chat_content_box.append(input_box)
 
         # El chat vive dentro del split de ajustes, y ése dentro del del roster:
@@ -593,16 +631,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root_box.append(self.header)
         root_box.append(self.xmpp_toolbar)
+        root_box.append(self.tool_output_panel)
         root_box.append(self.split_view) # Añadir el split_view aquí
 
-        # Los acuses breves del transporte (XEP-0050, approvals) no son turnos
-        # de conversación. El overlay permite mostrarlos como toasts sin
-        # contaminar el historial con una burbuja por cada transición.
-        self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_child(root_box)
-
         # Establecer el contenido de la ventana
-        self.set_content(self.toast_overlay)
+        self.set_content(root_box)
 
         # Agregar CSS provider
         self._setup_css()
@@ -1339,7 +1372,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             }
 
             .markdown-table {
-                margin: 4px 0;
+                margin: 0;
             }
 
             .table-header-cell {
@@ -1372,6 +1405,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             .tool-activity-line {
                 opacity: 0.72;
                 font-family: monospace;
+            }
+
+            .tool-output-panel {
+                padding: 8px;
+                border-left: 3px solid alpha(@accent_color, 0.75);
+                background-color: alpha(@theme_fg_color, 0.035);
             }
 
             .message textview {
@@ -1959,6 +1998,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
             details = self._format_agent_status_details(parsed)
             self.activity_label.set_label(activity or details)
             self.activity_label.set_tooltip_text(details or activity or "")
+            tool = str(parsed.get('tool') or '').strip()
+            if tool:
+                panel_text = str(telemetry.get('tool_detail') or activity)
+                if details and details != activity:
+                    panel_text = f"{panel_text}\n{details}" if panel_text else details
+                self.tool_output_label.set_label(panel_text or tool)
+                self.tool_output_panel.set_visible(True)
+            else:
+                # PEP can briefly report no current tool between the seed and
+                # the first toolCall. It must not erase XEP-0308 progress that
+                # is still active (or was just restored from history).
+                if (not self._tool_output_request_ids and
+                        not self._restored_active_tool_panel):
+                    self.tool_output_label.set_label("")
+                    self.tool_output_panel.set_visible(False)
             availability = str(telemetry.get('availability') or telemetry.get('activity') or '').lower()
             if availability in ('busy', 'processing', 'working'):
                 self._set_title_presence_state(XmppSession.PRESENCE_BUSY)
@@ -2217,7 +2271,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         text = str(activity or "").strip()
         lower = text.lower()
         if lower in ("processing", "busy", "working"):
-            return _("Trabajando")
+            return _("Analizando la solicitud…")
+        if lower == "thinking" or lower.startswith("analizando"):
+            return _("Analizando la solicitud…")
         if lower == "available":
             return _("Disponible")
         if lower in ("waiting", "queued"):
@@ -2446,16 +2502,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         from .xmpp_commands import command_result_body
         body = command_result_body(command)
         if self._approval_transport_toast(body):
-            self._show_toast(body)
+            self._show_toast(self._approval_transport_toast(body))
             return
-        message = Message(body, "assistant")
-        widget = MessageWidget(message)
-        widget.add_css_class("command-result-message")
-        self.messages_box.append(widget)
-        # El widget recién añadido todavía no tiene altura asignada, así que un
-        # solo scroll usaría el `upper` viejo y se quedaría corto: reintentar
-        # tras el layout es lo que ya hace la carga de historial.
-        self._scroll_to_bottom_after_layout()
+        self._show_tool_output(body)
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
@@ -2521,6 +2570,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._xmpp_backfill_remaining = 2
             self._xmpp_history_batch = []
             self._xmpp_history_actions_batch = []
+            self._xmpp_history_latest_incoming = None
+            self._xmpp_history_tool_candidate = None
             hid1 = backend.connect('history-message', self._on_xmpp_history_message)
             hid2 = backend.connect('history-complete', self._on_xmpp_history_complete)
             hid3 = backend.connect('history-actions', self._on_xmpp_history_actions)
@@ -2542,10 +2593,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_xmpp_history_message(self, backend, body, direction, timestamp):
         if self._xmpp_history_batch is None:
             return
+        if direction == 'in':
+            self._xmpp_history_latest_incoming = timestamp
+            if self._is_progress_snapshot(body) or self._is_tool_activity_message(body):
+                self._xmpp_history_tool_candidate = (body, timestamp)
         # Un toast sólo tiene sentido cuando el acuse llega en vivo. Al
         # restaurar MAM/cache se omiten estos estados efímeros por completo.
         if (self._approval_transport_toast(body) or
-                self._is_progress_seed(body) or
+                self._is_progress_snapshot(body) or
+                self._is_tool_activity_message(body) or
                 self._is_approval_transport_noise(body)):
             return
         self._xmpp_history_batch.append((body, direction, timestamp))
@@ -2560,17 +2616,32 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_xmpp_history_complete(self, backend, has_more):
         batch = self._xmpp_history_batch or []
         action_batch = self._xmpp_history_actions_batch or []
+        approval_message_keys = {
+            (Message.compact_blank_lines(body), timestamp)
+            for body, timestamp, quick, commands, _request_id in action_batch
+            if self._actions_look_like_approval(
+                list(quick or []) + list(commands or []))
+        }
         is_backfill = self._xmpp_backfill_remaining > 0
         if batch:
             # El lote se pinta por timestamp, no por su procedencia: de dónde
             # venga (carga inicial, backfill, scroll hacia arriba) no dice nada
             # sobre si es más nuevo o más viejo que lo que ya hay en pantalla.
             for body, direction, timestamp in batch:
+                if (direction == 'in' and
+                        (Message.compact_blank_lines(body), timestamp)
+                        in approval_message_keys):
+                    continue
                 self._add_history_bubble(body, direction, timestamp)
             self._history_displayed = True
         for body, timestamp, quick_responses, commands, request_id in action_batch:
             self._restore_history_actions(
                 body, timestamp, quick_responses, commands, request_id)
+        candidate = self._xmpp_history_tool_candidate
+        if (candidate is not None and
+                candidate[1] == self._xmpp_history_latest_incoming):
+            self._restored_active_tool_panel = True
+            self._show_tool_output(candidate[0])
         if is_backfill:
             self._xmpp_backfill_remaining -= 1
         self._xmpp_history_batch = []
@@ -2615,16 +2686,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         if quick_responses and not self._history_quick_response_was_answered(
                 timestamp, quick_responses):
+            detail = self._action_panel_detail(body, quick_responses)
             self._add_sticky_response_card(
                 quick_responses,
                 lambda response: self._send_restored_quick_response(response),
-                detail_text=Message.compact_blank_lines(body),
+                detail_text=detail,
                 request_id=request_id)
         if commands and not quick_responses:
+            detail = self._action_panel_detail(body, commands)
             self._add_sticky_response_card(
                 commands,
                 lambda command: self._execute_inline_command(command),
-                detail_text=Message.compact_blank_lines(body),
+                detail_text=detail,
                 request_id=request_id)
 
     def _pending_actions_are_stale(self, timestamp, quick_responses, commands,
@@ -3274,6 +3347,22 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         if self._is_approval_transport_noise(body):
             return
+        if self._is_progress_snapshot(body):
+            if request_id:
+                self._tool_output_request_ids.add(request_id)
+            self._show_tool_output(body)
+            return
+        if self._is_tool_activity_message(body):
+            # Legacy gateway compatibility: tool status is ephemeral and does
+            # not belong in chat, even when it arrives outside PEP.
+            self._show_tool_output(body)
+            return
+        if request_id and self._body_looks_like_approval(body):
+            self._pending_action_bodies[request_id] = body
+            return
+        if self._drop_sticky_approval_items():
+            self._rebuild_sticky_response_box()
+        self._restored_active_tool_panel = False
         if self._is_context_unavailable_response(body):
             self.current_message_widget = None
             self._display_context_unavailable(body)
@@ -3289,6 +3378,41 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return bool(re.fullmatch(
             r'(?i)Recibido\s*[·.-]\s*preparando…?', text))
 
+    @classmethod
+    def _is_progress_snapshot(cls, response):
+        """Seed solo o draft de tools que todavía termina en el seed.
+
+        OpenClaw compone las líneas parciales encima de ese marcador. Esos
+        drafts son una vista mutable del turno, nunca mensajes terminados.
+        """
+        text = str(response or '').strip()
+        if cls._is_progress_seed(text):
+            return True
+        return bool(re.search(
+            r'(?i)(?:^|\n)Recibido\s*[·.-]\s*preparando…?\s*$', text))
+
+    @staticmethod
+    def _is_tool_activity_message(response):
+        return bool(re.match(
+            r'^\s*(?:⚠️?|✅|❌)?\s*'
+            r'(?:🔧|🛠️?|Tool(?:\s|:)|Using tool|Herramienta:|Exec failed:)',
+            str(response or ''), re.IGNORECASE))
+
+    def _show_tool_output(self, body):
+        self.tool_output_label.set_label(Message.compact_blank_lines(body))
+        self.tool_output_panel.set_visible(True)
+
+    def _approval_toast_text(self, command, request_id=None):
+        decision = str(command.get('name', '')).lower()
+        headline = _("🚫 Denied") if 'deny' in decision else _("✅ Approved")
+        detail = ""
+        for item in self._sticky_response_items:
+            if item.get('request_id') == request_id:
+                detail = Message.compact_blank_lines(item.get('detail_text', ''))
+                break
+        command_line = detail.splitlines()[0].strip() if detail else ""
+        return f"{headline}\n{command_line}" if command_line else headline
+
     @staticmethod
     def _approval_transport_toast(response):
         """Return a concise toast for approval/XEP-0050 acknowledgements."""
@@ -3296,20 +3420,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not text:
             return None
         if re.fullmatch(r'(?i)Command (?:submitted|expired)\.?', text):
-            return text
+            return _("✅ Approved") if 'submitted' in text.lower() else _("⌛ Approval expired")
         if re.match(
                 r'(?i)^✅\s*Approval\s+(?:allow-once|allow-always|deny)\s+submitted\b',
                 text):
-            return text
+            return _("🚫 Denied") if re.search(r'(?i)\bdeny\b', text) else _("✅ Approved")
         if re.match(r'(?i)^✅\s*aprobado\s*[—-]', text):
-            return text
+            return _("✅ Approved")
         if re.match(r'(?i)^❌?\s*Failed to submit approval\b', text):
-            return text.lstrip("❌ ")
+            return _("❌ Approval failed")
         if re.search(r'(?i)\bapproval already pending for session\b', text):
-            return text
+            return _("⚠️ Approval already pending")
         return None
 
     def _show_toast(self, text):
+        now = time.monotonic()
+        signature = (str(text), now)
+        previous = self._last_toast_signature
+        if previous and previous[0] == signature[0] and now - previous[1] < 2.0:
+            return
+        self._last_toast_signature = signature
         debug_print(f"[toast] {text}")
         toast = Adw.Toast(title=str(text))
         toast.set_timeout(3)
@@ -3389,9 +3519,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
         (localizada por request_id, no necesariamente la burbuja más
         reciente — con varias preguntas abiertas a la vez, antes esto sólo
         tocaba current_message_widget) y atenúa su card de botones si
-        seguía visible. Si request_id no coincide con ninguna card conocida
-        (no se pudo correlacionar, o ya se había limpiado), se degrada a
-        actualizar sólo la burbuja más reciente como antes."""
+        seguía visible. Una corrección sin widget correlacionado se ignora:
+        nunca debe sobrescribir la burbuja más reciente por aproximación."""
+        if request_id in self._tool_output_request_ids:
+            if (self._is_progress_snapshot(body) or
+                    self._is_tool_activity_message(body)):
+                self._show_tool_output(body)
+            else:
+                self._tool_output_request_ids.discard(request_id)
+                self._restored_active_tool_panel = False
+                self.tool_output_panel.set_visible(False)
+                widget = self.display_message(body, sender='assistant')
+                self.current_message_widget = widget
+                self._message_widgets_by_id[request_id] = widget
+            return
         resolved_a_card = self._mark_sticky_response_resolved(
             request_id, resolution_text=body)
         toast = self._approval_transport_toast(body)
@@ -3400,14 +3541,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 # The corrected stanza is the ephemeral progress seed. Once
                 # the command expires/fails it must disappear, leaving one
                 # toast instead of becoming another permanent chat bubble.
-                widget = (self._message_widgets_by_id.get(request_id)
-                          or self.current_message_widget)
+                widget = self._message_widgets_by_id.get(request_id)
                 if widget is not None and widget.get_parent() == self.messages_box:
                     self.messages_box.remove(widget)
                 self._message_widgets_by_id.pop(request_id, None)
                 if widget is self.current_message_widget:
                     self.current_message_widget = None
-                self._show_toast(toast)
+                if request_id not in self._approval_toast_request_ids:
+                    self._show_toast(toast)
                 return GLib.SOURCE_REMOVE
 
             GLib.idle_add(show_transport_toast,
@@ -3422,8 +3563,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             body = _("Approved; running…")
         widget = self._message_widgets_by_id.get(request_id)
         if widget is None:
-            widget = self.current_message_widget
-        if widget is None:
+            debug_print(
+                f"chat_window: corrección ignorada sin burbuja correlacionada "
+                f"(request_id={request_id!r})")
             return
         widget.set_streaming(True)
         old_timeout = self._streaming_finalize_timeout_ids.pop(
@@ -3468,6 +3610,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return
             self._rendered_response_request_ids.add(request_id)
 
+        # OpenClaw permits one pending exec approval per conversation. A new
+        # approval panel is authoritative and replaces any older sticky one.
+        if self._actions_look_like_approval(responses):
+            self._drop_sticky_approval_items()
+
         item = {
             'id': self._sticky_response_next_id,
             'responses': list(responses),
@@ -3490,6 +3637,45 @@ class LLMChatWindow(Adw.ApplicationWindow):
             approval=self._body_looks_like_approval(detail_text),
             request_id=request_id)
         self._rebuild_sticky_response_box()
+
+    def _drop_sticky_approval_items(self):
+        before = len(self._sticky_response_items)
+        self._sticky_response_items = [
+            item for item in self._sticky_response_items
+            if not self._actions_look_like_approval(item.get('responses', []))
+        ]
+        return before - len(self._sticky_response_items)
+
+    @classmethod
+    def _action_panel_detail(cls, body, actions):
+        """Human context for a sticky action, without transport boilerplate."""
+        text = Message.compact_blank_lines(body)
+        if not cls._actions_look_like_approval(actions):
+            return text
+        command = ""
+        lock_line = re.search(r'(?m)^\s*🔒\s*(.+?)\s*$', text)
+        if lock_line:
+            command = lock_line.group(1).strip()
+        else:
+            pending = re.search(
+                r'(?is)Pending command:\s*```(?:\w+)?\s*\n(.*?)```', text)
+            if pending:
+                command = pending.group(1).strip()
+        metadata = []
+        for label in ("Host", "CWD", "Expires in"):
+            match = re.search(rf'(?im)^\s*{re.escape(label)}:\s*(.+?)\s*$', text)
+            if match:
+                shown = _("Expires") if label == "Expires in" else label
+                metadata.append(f"{shown}: {match.group(1).strip()}")
+        if not metadata:
+            compact_meta = re.search(
+                r'(?im)^\s*cwd\s+(.+?)(?:\s*[·•]\s*caduca en\s+(.+))?$', text)
+            if compact_meta:
+                metadata.append(f"CWD: {compact_meta.group(1).strip()}")
+                if compact_meta.group(2):
+                    metadata.append(
+                        f"{_('Expires')}: {compact_meta.group(2).strip()}")
+        return "\n".join(part for part in (command, " · ".join(metadata)) if part)
 
     def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000,
                                        resolution_text=None):
@@ -3847,7 +4033,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         if request_id and request_id in self._rendered_response_request_ids:
             return
-        if self.current_message_widget is None:
+        pending_body = self._pending_action_bodies.get(request_id, '')
+        is_approval = self._actions_look_like_approval(commands)
+        if self.current_message_widget is None and not (is_approval and pending_body):
             if self.is_messaging_backend and _defer_attempt < 8:
                 GLib.idle_add(
                     lambda: (
@@ -3866,10 +4054,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Los command-items de XEP-0050 se muestran sólo como sticky card. Si
         # también se agregan a la burbuja, una approval card aparece duplicada:
         # una vez en el flujo del mensaje y otra en la superficie fija.
+        if is_approval and pending_body:
+            detail_text = self._action_panel_detail(pending_body, commands)
+            self._pending_action_bodies.pop(request_id, None)
+        else:
+            detail_text = Message.compact_blank_lines(
+                self.current_message_widget.message.content)
         self._add_sticky_response_card(
             commands,
             on_selected,
-            detail_text=Message.compact_blank_lines(self.current_message_widget.message.content),
+            detail_text=detail_text,
             request_id=request_id,
             remove_on_select=False)
         self._scroll_to_bottom_after_layout_if_following()
@@ -3919,7 +4113,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return
             # Keep the disabled card until the authoritative resolved payload
             # arrives as XEP-0308. Submission acknowledgement is not resolution.
-            self._show_toast(body)
+            if request_id not in self._approval_toast_request_ids:
+                self._approval_toast_request_ids.add(request_id)
+                self._show_toast(
+                    self._approval_toast_text(command, request_id))
 
         client.execute(adhoc, on_success, on_error)
 
