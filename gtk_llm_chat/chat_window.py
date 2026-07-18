@@ -13,6 +13,7 @@ from gi.repository import Gtk, Adw, Gio, Gdk, GLib, GObject, Pango
 from .llm_client import LLMClient, DEFAULT_CONVERSATION_NAME
 from .widgets import Message, MessageWidget, ErrorWidget
 from .db_operations import ChatHistory
+from .voice_recorder import VoiceRecorder
 from .chat_application import _
 from llm import get_default_model
 from .style_manager import style_manager
@@ -27,6 +28,13 @@ DEBUG = os.environ.get('DEBUG') or False
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
+
+
+class VoiceRecordState:
+    IDLE = 0
+    RECORDING_HELD = 1
+    RECORDING_LOCKED = 2
+    CANCELLED = 3
 
 
 class LLMChatWindow(Adw.ApplicationWindow):
@@ -432,7 +440,65 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_scroll.set_hexpand(True)
         self.input_scroll.set_child(self.input_text)
 
-        input_box.append(self.input_scroll)
+        # Contenedor Overlay para superponer la barra de grabación estilo Telegram
+        self.input_overlay = Gtk.Overlay()
+        self.input_overlay.set_child(self.input_scroll)
+        self.input_overlay.set_hexpand(True)
+
+        # --- Capa de Grabación (Telegram Style) ---
+        self.recording_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        style_manager.apply_to_widget(self.recording_box, "recording-panel")
+        self.recording_box.set_valign(Gtk.Align.CENTER)
+        self.recording_box.set_margin_start(6)
+        self.recording_box.set_margin_end(6)
+
+        # Botón Papelera/Descartar (detiene y limpia)
+        self.discard_button = Gtk.Button()
+        self.discard_button.add_css_class('flat')
+        self.discard_button.add_css_class('destructive-action')
+        resource_manager.set_widget_icon_name(
+            self.discard_button, "user-trash-symbolic", fallback="edit-delete-symbolic")
+        self.discard_button.set_tooltip_text(_("Discard recording"))
+        self.discard_button.connect('clicked', self._on_discard_clicked)
+        self.recording_box.append(self.discard_button)
+
+        # Punto rojo parpadeante
+        self.recording_dot = Gtk.Label(label="●")
+        style_manager.apply_to_widget(self.recording_dot, "recording-dot")
+        self.recording_box.append(self.recording_dot)
+
+        # Cronómetro/Duración
+        self.recording_timer_label = Gtk.Label(label="00:00")
+        style_manager.apply_to_widget(self.recording_timer_label, "recording-timer")
+        self.recording_box.append(self.recording_timer_label)
+
+        # Instrucciones dinámicas
+        self.recording_instructions_label = Gtk.Label(
+            label=_("Slide left to cancel, up to lock"))
+        self.recording_instructions_label.set_hexpand(True)
+        self.recording_instructions_label.set_halign(Gtk.Align.CENTER)
+        style_manager.apply_to_widget(
+            self.recording_instructions_label, "recording-instructions")
+        self.recording_box.append(self.recording_instructions_label)
+
+        # Icono de candado para bloqueo de manos libres
+        self.lock_image = Gtk.Image()
+        resource_manager.set_widget_icon_name(
+            self.lock_image, "changes-prevent-symbolic", fallback="lock-symbolic")
+        self.recording_box.append(self.lock_image)
+
+        # Contenedor Gtk.Revealer para revelar/ocultar el panel de grabación
+        self.recording_revealer = Gtk.Revealer()
+        self.recording_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_LEFT)
+        self.recording_revealer.set_child(self.recording_box)
+
+        # Añadir revealer como overlay sobre el campo de texto
+        self.input_overlay.add_overlay(self.recording_revealer)
+
+        # Agregamos el overlay en vez de la scrolled window al input_box
+        input_box.append(self.input_overlay)
 
         # Fila inferior: modelo activo (izquierda) · actividad · acción (derecha)
         input_actions = Gtk.Box(
@@ -497,6 +563,29 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.action_stack.set_visible_child_name('send')
         input_actions.append(self.action_stack)
 
+        # Botón de micrófono para grabación estilo Telegram
+        self.mic_button = Gtk.Button()
+        self.mic_button.add_css_class('flat')
+        resource_manager.set_widget_icon_name(
+            self.mic_button, "audio-input-microphone-symbolic", fallback="microphone-symbolic")
+        self.mic_button.set_tooltip_text(_("Hold to record voice message"))
+        self.mic_button.connect('clicked', self._on_mic_clicked)
+
+        # Gtk.GestureLongPress: Detectar pulsación larga para iniciar captura
+        self.long_press_gesture = Gtk.GestureLongPress.new()
+        self.long_press_gesture.connect("pressed", self._on_mic_long_pressed)
+        self.long_press_gesture.connect("cancelled", self._on_mic_long_press_cancelled)
+        self.mic_button.add_controller(self.long_press_gesture)
+
+        # Gtk.GestureDrag: Detectar deslizamientos lateral y vertical
+        self.drag_gesture = Gtk.GestureDrag.new()
+        self.drag_gesture.connect("drag-begin", self._on_mic_drag_begin)
+        self.drag_gesture.connect("drag-update", self._on_mic_drag_update)
+        self.drag_gesture.connect("drag-end", self._on_mic_drag_end)
+        self.mic_button.add_controller(self.drag_gesture)
+
+        input_actions.append(self.mic_button)
+
         input_box.append(input_actions)
 
         # Ensamblar la interfaz de chat
@@ -540,6 +629,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         self._xmpp_history_batch = None
         self._xmpp_history_actions_batch = None
+
+        # Inicialización de variables para grabación de voz estilo Telegram
+        self._voice_state = VoiceRecordState.IDLE
+        self._voice_duration = 0
+        self._voice_timer_id = None
+        self._voice_blink_id = None
+        self._voice_blink_visible = True
+        self._voice_recorder = VoiceRecorder()
+        self._drag_start_x = 0.0
+        self._drag_start_y = 0.0
 
 
     def _unbind_backend(self):
@@ -3663,3 +3762,211 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Solo poner el foco si el sidebar no está visible
         if not self.split_view.get_show_sidebar():
             self.input_text.grab_focus()
+
+    # === SISTEMA DE MENSAJES DE VOZ (ESTILO TELEGRAM) ===
+
+    def _update_voice_state(self, new_state):
+        """Actualiza el estado de grabación de voz y ajusta la UI de forma acorde."""
+        debug_print(f"[VoiceRecorder] Transición de estado: {self._voice_state} -> {new_state}")
+        self._voice_state = new_state
+
+        if new_state == VoiceRecordState.IDLE:
+            self.recording_revealer.set_reveal_child(False)
+            self.input_text.set_sensitive(True)
+            self.send_button.set_sensitive(True)
+            self.attach_button.set_sensitive(True)
+            self.model_badge.set_sensitive(True)
+            # Restaurar el botón de micrófono al estado inicial
+            resource_manager.set_widget_icon_name(
+                self.mic_button, "audio-input-microphone-symbolic", fallback="microphone-symbolic")
+            self.mic_button.set_tooltip_text(_("Hold to record voice message"))
+            self._stop_voice_timers()
+
+        elif new_state == VoiceRecordState.RECORDING_HELD:
+            # Ocultar teclado/caja de texto mostrando el revealer
+            self.recording_revealer.set_reveal_child(True)
+            self.input_text.set_sensitive(False)
+            self.attach_button.set_sensitive(False)
+            self.model_badge.set_sensitive(False)
+
+            # Mostrar instrucciones de arrastrar
+            self.recording_instructions_label.set_text(_("Slide left to cancel, up to lock"))
+            self.discard_button.set_visible(False)
+            self.lock_image.set_visible(True)
+
+            # Reiniciar cronómetro
+            self._voice_duration = 0
+            self.recording_timer_label.set_text("00:00")
+
+            # Iniciar grabación física
+            self._voice_recorder.start()
+
+            # Iniciar temporizadores de UI (cronómetro y parpadeo)
+            self._start_voice_timers()
+
+        elif new_state == VoiceRecordState.RECORDING_LOCKED:
+            self.recording_revealer.set_reveal_child(True)
+            self.input_text.set_sensitive(False)
+            self.attach_button.set_sensitive(False)
+            self.model_badge.set_sensitive(False)
+
+            # Cambiar instrucciones a modo manos libres
+            self.recording_instructions_label.set_text(_("Hands-free recording..."))
+            self.discard_button.set_visible(True)
+            self.lock_image.set_visible(False)
+
+            # Cambiar botón de micrófono a botón de enviar
+            resource_manager.set_widget_icon_name(
+                self.mic_button, "mail-send-symbolic", fallback="document-send-symbolic")
+            self.mic_button.set_tooltip_text(_("Send voice message"))
+
+        elif new_state == VoiceRecordState.CANCELLED:
+            # Detener grabación descartando el audio
+            self._voice_recorder.stop(discard=True)
+            self._update_voice_state(VoiceRecordState.IDLE)
+
+    def _start_voice_timers(self):
+        self._stop_voice_timers()
+        # Temporizador del cronómetro (cada 1 segundo)
+        self._voice_timer_id = GLib.timeout_add_seconds(1, self._on_voice_timer_tick)
+        # Temporizador del parpadeo del punto rojo (cada 500ms)
+        self._voice_blink_visible = True
+        self._voice_blink_id = GLib.timeout_add(500, self._on_voice_blink_tick)
+
+    def _stop_voice_timers(self):
+        if self._voice_timer_id is not None:
+            GLib.source_remove(self._voice_timer_id)
+            self._voice_timer_id = None
+        if self._voice_blink_id is not None:
+            GLib.source_remove(self._voice_blink_id)
+            self._voice_blink_id = None
+
+    def _on_voice_timer_tick(self):
+        if self._voice_state not in (VoiceRecordState.RECORDING_HELD, VoiceRecordState.RECORDING_LOCKED):
+            return False
+        self._voice_duration += 1
+        minutes = self._voice_duration // 60
+        seconds = self._voice_duration % 60
+        self.recording_timer_label.set_text(f"{minutes:02d}:{seconds:02d}")
+        return True
+
+    def _on_voice_blink_tick(self):
+        if self._voice_state not in (VoiceRecordState.RECORDING_HELD, VoiceRecordState.RECORDING_LOCKED):
+            return False
+        self._voice_blink_visible = not self._voice_blink_visible
+        self.recording_dot.set_opacity(1.0 if self._voice_blink_visible else 0.0)
+        return True
+
+    def _on_discard_clicked(self, button):
+        """Cancela la grabación desde el estado bloqueado (clic en la papelera)."""
+        self._update_voice_state(VoiceRecordState.CANCELLED)
+
+    # --- Controladores de Gestos de Micrófono ---
+
+    def _on_mic_long_pressed(self, gesture, x, y):
+        """Se activa al mantener presionado el botón del micrófono."""
+        if self._voice_state == VoiceRecordState.IDLE:
+            self._update_voice_state(VoiceRecordState.RECORDING_HELD)
+
+    def _on_mic_long_press_cancelled(self, gesture):
+        """Se activa si el long press se cancela antes de tiempo."""
+        pass
+
+    def _on_mic_drag_begin(self, gesture, start_x, start_y):
+        self._drag_start_x = start_x
+        self._drag_start_y = start_y
+
+    def _on_mic_drag_update(self, gesture, offset_x, offset_y):
+        """Evalúa los deslizamientos de cancelación o bloqueo."""
+        if self._voice_state != VoiceRecordState.RECORDING_HELD:
+            return
+
+        # Deslizar a la izquierda (offset_x < -50px) -> Cancelar
+        if offset_x < -50:
+            self._update_voice_state(VoiceRecordState.CANCELLED)
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        # Deslizar hacia arriba (offset_y < -50px) -> Bloquear/Manos libres
+        elif offset_y < -50:
+            self._update_voice_state(VoiceRecordState.RECORDING_LOCKED)
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def _on_mic_drag_end(self, gesture, offset_x, offset_y):
+        """Se activa al soltar el botón después de arrastrar o pulsar."""
+        if self._voice_state == VoiceRecordState.RECORDING_HELD:
+            # Salida rápida: Soltar antes de alcanzar umbrales envía el audio
+            self._stop_and_process_voice_recording()
+
+    def _on_mic_clicked(self, button):
+        """Maneja el clic simple en el botón de micrófono."""
+        if self._voice_state == VoiceRecordState.RECORDING_LOCKED:
+            # Enviar la grabación de manos libres
+            self._stop_and_process_voice_recording()
+        elif self._voice_state == VoiceRecordState.IDLE:
+            # Mostrar ayuda amistosa
+            self.mic_button.set_tooltip_text(_("Hold to record, slide left to cancel, up to lock"))
+
+    def _stop_and_process_voice_recording(self):
+        """Detiene la grabación física e inicia la transcripción asíncrona."""
+        if self._voice_state not in (VoiceRecordState.RECORDING_HELD, VoiceRecordState.RECORDING_LOCKED):
+            return
+
+        # Detener grabación y obtener ruta de archivo
+        res = self._voice_recorder.stop(discard=False)
+        self._update_voice_state(VoiceRecordState.IDLE)
+
+        if not res:
+            return
+
+        file_path, duration = res
+
+        # Descartar si el mensaje es ridículamente corto (menos de 1 segundo)
+        if duration < 1:
+            debug_print("[VoiceRecorder] Descartando grabación por ser menor de 1 segundo.")
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+            return
+
+        # Procesar transcripción de forma asíncrona en un hilo de fondo
+        import threading
+        def run_transcription():
+            # Actualizar estado de UI (Transcribiendo...) de forma segura en el bucle principal
+            GLib.idle_add(self._set_transcribing_status, True)
+
+            # Simular un pequeño retardo de procesamiento para que la UI se sienta pulida y natural
+            time.sleep(0.8)
+
+            try:
+                text = self._voice_recorder.transcribe(file_path, duration)
+            except Exception as e:
+                debug_print(f"[VoiceRecorder] Error al transcribir: {e}")
+                text = f"[Error de transcripción del mensaje de voz de {duration}s]"
+            finally:
+                # Eliminar archivo temporal de forma segura
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+
+            # Completar envío en el hilo principal de GTK
+            GLib.idle_add(self._on_transcription_complete, text)
+
+        threading.Thread(target=run_transcription, daemon=True).start()
+
+    def _set_transcribing_status(self, active):
+        if active:
+            self.activity_label.set_text(_("Transcribing voice message..."))
+        else:
+            self.activity_label.set_text("")
+
+    def _on_transcription_complete(self, text):
+        self._set_transcribing_status(False)
+        if text:
+            # Insertar texto en el campo de entrada y simular clic en Enviar
+            buffer = self.input_text.get_buffer()
+            buffer.set_text(text)
+            self._on_send_clicked(None)

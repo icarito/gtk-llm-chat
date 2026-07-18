@@ -467,6 +467,28 @@ class StyleManager:
             background-color: #F44336;
         }
         
+        /* === INTERFAZ DE GRABACIÓN DE VOZ (ESTILO TELEGRAM) === */
+        .recording-panel {
+            background-color: @theme_bg_color;
+            border-radius: 8px;
+            padding: 6px 12px;
+        }
+        .recording-dot {
+            color: #e01b24; /* Rojo de GNOME */
+            font-size: 1.2em;
+            margin-right: 6px;
+        }
+        .recording-timer {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: @theme_fg_color;
+            margin-right: 12px;
+        }
+        .recording-instructions {
+            color: alpha(@theme_fg_color, 0.6);
+            font-size: 0.95em;
+        }
+
         """
     
     def get_platform_styles(self) -> str:
