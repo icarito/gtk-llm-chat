@@ -523,8 +523,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         root_box.append(self.xmpp_toolbar)
         root_box.append(self.split_view) # Añadir el split_view aquí
 
+        # Los acuses breves del transporte (XEP-0050, approvals) no son turnos
+        # de conversación. El overlay permite mostrarlos como toasts sin
+        # contaminar el historial con una burbuja por cada transición.
+        self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_child(root_box)
+
         # Establecer el contenido de la ventana
-        self.set_content(root_box) # El root_box es el nuevo contenido
+        self.set_content(self.toast_overlay)
 
         # Agregar CSS provider
         self._setup_css()
@@ -1957,7 +1963,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Sin encabezado: el usuario acaba de elegir el comando del menú, así
         # que repetir su nombre sobre la respuesta no aporta nada.
         from .xmpp_commands import command_result_body
-        message = Message(command_result_body(command), "assistant")
+        body = command_result_body(command)
+        if self._approval_transport_toast(body):
+            self._show_toast(body)
+            return
+        message = Message(body, "assistant")
         widget = MessageWidget(message)
         widget.add_css_class("command-result-message")
         self.messages_box.append(widget)
@@ -2050,6 +2060,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
     def _on_xmpp_history_message(self, backend, body, direction, timestamp):
         if self._xmpp_history_batch is None:
+            return
+        # Un toast sólo tiene sentido cuando el acuse llega en vivo. Al
+        # restaurar MAM/cache se omiten estos estados efímeros por completo.
+        if (self._approval_transport_toast(body) or
+                self._is_approval_transport_noise(body)):
             return
         self._xmpp_history_batch.append((body, direction, timestamp))
 
@@ -2694,6 +2709,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self.is_messaging_backend:
             def apply_response_on_ui_thread():
                 self.accumulated_response = ""
+                toast = self._approval_transport_toast(response)
+                if toast:
+                    self._show_toast(toast)
+                    self.current_message_widget = None
+                    return GLib.SOURCE_REMOVE
                 if self._is_approval_transport_noise(response):
                     self.current_message_widget = None
                     return GLib.SOURCE_REMOVE
@@ -2741,6 +2761,27 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
         self._scroll_to_bottom_after_layout_if_following()
+
+    @staticmethod
+    def _approval_transport_toast(response):
+        """Return a concise toast for approval/XEP-0050 acknowledgements."""
+        text = " ".join(str(response or "").strip().split())
+        if not text:
+            return None
+        if re.fullmatch(r'(?i)Command (?:submitted|expired)\.?', text):
+            return text
+        if re.match(
+                r'(?i)^✅\s*Approval\s+(?:allow-once|allow-always|deny)\s+submitted\b',
+                text):
+            return text
+        if re.match(r'(?i)^✅\s*aprobado\s*[—-]', text):
+            return text
+        return None
+
+    def _show_toast(self, text):
+        toast = Adw.Toast(title=str(text))
+        toast.set_timeout(3)
+        self.toast_overlay.add_toast(toast)
 
     @staticmethod
     def _is_approval_transport_noise(response):
