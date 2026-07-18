@@ -2065,6 +2065,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Un toast sólo tiene sentido cuando el acuse llega en vivo. Al
         # restaurar MAM/cache se omiten estos estados efímeros por completo.
         if (self._approval_transport_toast(body) or
+                self._is_progress_seed(body) or
                 self._is_approval_transport_noise(body)):
             return
         self._xmpp_history_batch.append((body, direction, timestamp))
@@ -2713,10 +2714,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 toast = self._approval_transport_toast(response)
                 if toast:
                     self._show_toast(toast)
-                    self.current_message_widget = None
                     return GLib.SOURCE_REMOVE
                 if self._is_approval_transport_noise(response):
-                    self.current_message_widget = None
                     return GLib.SOURCE_REMOVE
                 if self._is_context_unavailable_response(response):
                     self.current_message_widget = None
@@ -2764,6 +2763,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._scroll_to_bottom_after_layout_if_following()
 
     @staticmethod
+    def _is_progress_seed(response):
+        text = " ".join(str(response or "").strip().split())
+        return bool(re.fullmatch(
+            r'(?i)Recibido\s*[·.-]\s*preparando…?', text))
+
+    @staticmethod
     def _approval_transport_toast(response):
         """Return a concise toast for approval/XEP-0050 acknowledgements."""
         text = " ".join(str(response or "").strip().split())
@@ -2797,8 +2802,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return False
         if re.fullmatch(r'(?i)Command submitted\.?', text):
             return True
-        if re.fullmatch(r'(?i)Recibido\s*[·.-]\s*preparando…?', text):
-            return True
+        # "Recibido · preparando…" is the seed of the single XEP-0308
+        # progress bubble. It must remain visible: subsequent tool/partial
+        # corrections target that stanza and update this widget in place.
         if re.fullmatch(r'(?i)Turno completado sin respuesta visible\.?', text):
             return True
         if re.match(r'(?i)^✅\s*Approval\s+(?:allow-once|allow-always|deny)\s+submitted\b', text):
