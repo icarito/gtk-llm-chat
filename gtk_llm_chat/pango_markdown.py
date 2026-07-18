@@ -16,7 +16,7 @@ import re
 from gi.repository import GLib
 from markdown_it import MarkdownIt
 
-_md = MarkdownIt().enable('strikethrough')
+_md = MarkdownIt().enable(['strikethrough', 'table'])
 
 _HEADING_PT = {'1': 24, '2': 20, '3': 16, '4': 12, '5': 10, '6': 10}
 
@@ -151,3 +151,51 @@ def markdown_to_pango(text):
     out = ''.join(parts)
     out = re.sub(r'\n{3,}', '\n\n', out)
     return out.strip('\n')
+
+
+def extract_tables(text):
+    tokens = _md.parse(text)
+    tables = []
+    current_table = None
+    current_row = None
+    in_header = False
+
+    for token in tokens:
+        ttype = token.type
+        if ttype == 'table_open':
+            current_table = {'headers': [], 'rows': [], 'align': []}
+        elif ttype == 'thead_open':
+            in_header = True
+        elif ttype == 'tbody_open':
+            in_header = False
+        elif ttype == 'tr_open':
+            current_row = []
+        elif ttype == 'tr_close' and current_table and current_row:
+            if in_header:
+                current_table['headers'] = current_row
+            else:
+                current_table['rows'].append(current_row)
+            current_row = None
+        elif ttype in ('th_open', 'td_open'):
+            style = token.attrs.get('style', '')
+            if 'text-align:right' in style:
+                current_table['align'].append(1.0)
+            elif 'text-align:center' in style:
+                current_table['align'].append(0.5)
+            else:
+                current_table['align'].append(0.0)
+        elif ttype == 'inline' and current_row is not None:
+            current_row.append(_render_inline(token.children or []))
+        elif ttype == 'table_close' and current_table:
+            tables.append(current_table)
+            current_table = None
+
+    return tables
+
+
+def has_table(text):
+    tokens = _md.parse(text)
+    for token in tokens:
+        if token.type == 'table_open':
+            return True
+    return False

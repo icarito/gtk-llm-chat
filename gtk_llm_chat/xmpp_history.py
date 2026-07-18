@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS messages (
     quick_responses TEXT,
     commands TEXT,
     request_id TEXT,
+    attachment_url TEXT,
+    attachment_mime_type TEXT,
+    attachment_duration REAL,
+    attachment_local_path TEXT,
+    attachment_state TEXT,
     UNIQUE(bare_jid, mam_id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_jid_ts ON messages(bare_jid, timestamp);
@@ -76,22 +81,32 @@ class XmppHistory:
                 "CREATE INDEX IF NOT EXISTS idx_messages_jid_request "
                 "ON messages(bare_jid, request_id)"
             )
-            # Filas de antes de esta migración con quick_responses/commands
-            # pendientes no tienen request_id para correlacionar con una
-            # futura corrección XEP-0308 — darlas por resueltas de una vez
-            # en lugar de dejarlas convivir indefinidamente con el
-            # heurístico de texto+tiempo viejo.
             conn.execute(
                 "UPDATE messages SET quick_responses = NULL, commands = NULL "
                 "WHERE request_id IS NULL "
                 "AND (quick_responses IS NOT NULL OR commands IS NOT NULL)"
             )
+        if "attachment_url" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachment_url TEXT")
+        if "attachment_mime_type" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachment_mime_type TEXT")
+        if "attachment_duration" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachment_duration REAL")
+        if "attachment_local_path" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachment_local_path TEXT")
+        if "attachment_state" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachment_state TEXT")
         conn.commit()
 
     def record_message(self, bare_jid: str, body: str, direction: str,
                        timestamp: str, mam_id: Optional[str] = None,
                        quick_responses=None, commands=None,
-                       request_id: Optional[str] = None):
+                       request_id: Optional[str] = None,
+                       attachment_url: Optional[str] = None,
+                       attachment_mime_type: Optional[str] = None,
+                       attachment_duration: Optional[float] = None,
+                       attachment_local_path: Optional[str] = None,
+                       attachment_state: Optional[str] = None):
         conn = self.get_connection()
         quick_json = self._encode_metadata(quick_responses)
         commands_json = self._encode_metadata(commands)
@@ -112,9 +127,11 @@ class XmppHistory:
                 return False
         cursor = conn.execute(
             "INSERT OR IGNORE INTO messages "
-            "(bare_jid, body, direction, timestamp, mam_id, quick_responses, commands, request_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (bare_jid, body, direction, timestamp, mam_id, quick_json, commands_json, request_id),
+            "(bare_jid, body, direction, timestamp, mam_id, quick_responses, commands, request_id, "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (bare_jid, body, direction, timestamp, mam_id, quick_json, commands_json, request_id,
+             attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -123,8 +140,10 @@ class XmppHistory:
         conn = self.get_connection()
         verified_clause = "AND mam_id IS NOT NULL " if verified_only else ""
         cursor = conn.execute(
-            "SELECT body, direction, timestamp, quick_responses, commands, request_id FROM ("
-            "SELECT body, direction, timestamp, quick_responses, commands, request_id FROM messages "
+            "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM ("
+            "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM messages "
             f"WHERE bare_jid = ? {verified_clause}ORDER BY timestamp DESC LIMIT ?"
             ") ORDER BY timestamp ASC",
             (bare_jid, limit),
@@ -134,8 +153,10 @@ class XmppHistory:
     def get_before(self, bare_jid: str, before_timestamp: str, limit: int = 50):
         conn = self.get_connection()
         cursor = conn.execute(
-            "SELECT body, direction, timestamp, quick_responses, commands, request_id FROM ("
-            "SELECT body, direction, timestamp, quick_responses, commands, request_id FROM messages "
+            "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM ("
+            "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM messages "
             "WHERE bare_jid = ? AND timestamp < ? "
             "ORDER BY timestamp DESC LIMIT ?"
             ") ORDER BY timestamp ASC",
@@ -313,7 +334,9 @@ class XmppHistory:
             ts = ts.astimezone()
         age_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - int(ts.timestamp() * 1000)
         is_approval = approval_fallback or cls._actions_look_like_approval([action])
-        fallback_ms = 60 * 1000 if is_approval else 15 * 60 * 1000
+        # OpenClaw exec.approval.waitDecision vive 30 minutos. Caducar la UI
+        # antes no resuelve el pending remoto y hace imposible contestarlo.
+        fallback_ms = 30 * 60 * 1000 if is_approval else 15 * 60 * 1000
         return age_ms > fallback_ms
 
     @staticmethod
@@ -448,3 +471,33 @@ class XmppHistory:
         item["quick_responses"] = cls._decode_metadata(item.get("quick_responses"))
         item["commands"] = cls._decode_metadata(item.get("commands"))
         return item
+
+    def update_attachment_state(self, bare_jid: str, body: str,
+                                direction: str, attachment_state: str,
+                                attachment_url: Optional[str] = None):
+        conn = self.get_connection()
+        conn.execute(
+            "UPDATE messages SET attachment_state = ?"
+            + (", attachment_url = ?" if attachment_url else "")
+            + " WHERE bare_jid = ? AND body = ? AND direction = ? AND id = ("
+            "SELECT id FROM messages WHERE bare_jid = ? AND body = ? AND direction = ? "
+            "ORDER BY timestamp DESC LIMIT 1)",
+            tuple(filter(None, [
+                attachment_state,
+                attachment_url,
+                bare_jid, body, direction,
+                bare_jid, body, direction,
+            ])),
+        )
+        conn.commit()
+
+    def get_failed_attachments(self, bare_jid: str):
+        conn = self.get_connection()
+        cursor = conn.execute(
+            "SELECT body, direction, timestamp, attachment_url, attachment_mime_type, "
+            "attachment_duration, attachment_local_path, attachment_state FROM messages "
+            "WHERE bare_jid = ? AND attachment_state = 'failed' "
+            "ORDER BY timestamp DESC",
+            (bare_jid,),
+        )
+        return [dict(row) for row in cursor.fetchall()]

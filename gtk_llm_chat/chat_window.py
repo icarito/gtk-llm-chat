@@ -19,6 +19,8 @@ from .style_manager import style_manager
 from .resource_manager import resource_manager
 from .debug_utils import debug_print
 from .xmpp_client import XmppSession
+from .voice_recorder import VoiceRecorder, VoiceRecorderError
+from .audio_utils import audio_mime_for_file
 import traceback
 
 DEBUG = os.environ.get('DEBUG') or False
@@ -27,6 +29,16 @@ DEBUG = os.environ.get('DEBUG') or False
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
+
+
+class VoiceRecordState:
+    IDLE = 0
+    HOLDING = 1
+    LOCKED = 2
+    CANCELLING = 3
+    CAPTURED = 4
+    UPLOADING = 5
+    FAILED = 6
 
 
 class LLMChatWindow(Adw.ApplicationWindow):
@@ -116,6 +128,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._sticky_response_cards = []
         self._sticky_response_items = []
         self._sticky_response_next_id = 0
+        self._voice_state = VoiceRecordState.IDLE
+        self._voice_recorder: VoiceRecorder | None = None
+        self._voice_file_path: str | None = None
+        self._voice_duration: float = 0.0
+        self._voice_timer_id: int | None = None
+        self._voice_blink_id: int | None = None
+        self._voice_bubble: object | None = None
+        self._voice_retry_path: str | None = None
         self._rendered_response_request_ids = set()
         self._is_agent_contact = False
         self.roster_sidebar = None
@@ -347,6 +367,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # scroll" de "el contenido creció bajo sus pies" — ver
         # _on_vadj_value_changed: confundirlos dejaba el scroll a media burbuja.
         self._scroll_last_upper = 0.0
+        self._content_added_pending = False
         # Seguir el fondo mientras el usuario no se haya ido hacia arriba. Es
         # una *intención*, no una posición: se decide cuando el usuario mueve
         # el scroll y se aplica después de cada layout, ya con el `upper` real.
@@ -359,6 +380,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         vadj.connect("changed", self._on_vadj_changed)
         vadj.connect("notify::upper", self._on_vadj_range_notify)
         vadj.connect("notify::page-size", self._on_vadj_range_notify)
+        self._scroll_last_value = vadj.get_value()
+        user_scroll = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL)
+        user_scroll.connect("scroll", self._on_user_scroll_intent)
+        scroll.add_controller(user_scroll)
         
         # Contenedor para mensajes
         self.messages_box = Gtk.Box(
@@ -422,9 +448,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         style_manager.apply_to_widget(self.input_text, "input-text")
         buffer = self.input_text.get_buffer()
         buffer.connect('changed', self._on_text_changed)
-        key_controller_input = Gtk.EventControllerKey()
-        key_controller_input.connect('key-pressed', self._on_key_pressed)
-        self.input_text.add_controller(key_controller_input)
+        # Un EventControllerKey sobre el TextView intercepta también las dead
+        # keys antes de que lleguen al IM context. Los shortcuts declarativos
+        # sólo observan Enter y dejan acentos/composición enteramente a GTK.
+        input_shortcuts = Gtk.ShortcutController()
+        for enter_key in (
+                Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter):
+            trigger = Gtk.KeyvalTrigger.new(
+                enter_key, Gdk.ModifierType(0))
+            action = Gtk.CallbackAction.new(self._send_from_input_shortcut)
+            input_shortcuts.add_shortcut(Gtk.Shortcut.new(trigger, action))
+        self.input_text.add_controller(input_shortcuts)
 
         # El TextView crece con el texto envuelto y no se recorta solo: el tope
         # lo pone el ScrolledWindow, que a partir de max_content_height empieza
@@ -438,7 +472,18 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_scroll.set_hexpand(True)
         self.input_scroll.set_child(self.input_text)
 
-        input_box.append(self.input_scroll)
+        self.recording_revealer = Gtk.Revealer()
+        self.recording_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_LEFT)
+        self.recording_revealer.set_child(self._build_recording_panel())
+        self.recording_revealer.set_reveal_child(False)
+
+        self.input_overlay = Gtk.Overlay()
+        self.input_overlay.set_child(self.input_scroll)
+        self.input_overlay.add_overlay(self.recording_revealer)
+        self.input_overlay.set_hexpand(True)
+
+        input_box.append(self.input_overlay)
 
         # Fila inferior: modelo activo (izquierda) · actividad · acción (derecha)
         input_actions = Gtk.Box(
@@ -502,6 +547,27 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.action_stack.add_named(self.busy_box, 'busy')
         self.action_stack.set_visible_child_name('send')
         input_actions.append(self.action_stack)
+
+        self.mic_button = Gtk.Button()
+        self.mic_button.add_css_class('flat')
+        resource_manager.set_widget_icon_name(
+            self.mic_button, 'audio-input-microphone-symbolic',
+            fallback='microphone-symbolic')
+        self.mic_button.set_tooltip_text(_('Hold to record voice message'))
+        self.mic_button.set_visible(False)
+
+        long_press = Gtk.GestureLongPress.new()
+        long_press.connect('pressed', self._on_mic_pressed)
+        long_press.connect('cancelled', self._on_mic_cancelled)
+        self.mic_button.add_controller(long_press)
+
+        drag = Gtk.GestureDrag.new()
+        drag.connect('drag-begin', self._on_mic_drag_begin)
+        drag.connect('drag-update', self._on_mic_drag_update)
+        drag.connect('drag-end', self._on_mic_drag_end)
+        self.mic_button.add_controller(drag)
+
+        input_actions.append(self.mic_button)
 
         input_box.append(input_actions)
 
@@ -606,6 +672,281 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._xmpp_history_loaded = False
         self._xmpp_backfill_remaining = 0
         self._rendered_response_request_ids = set()
+
+    def _build_recording_panel(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        style_manager.apply_to_widget(box, 'recording-panel')
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+
+        self.discard_button = Gtk.Button()
+        self.discard_button.add_css_class('flat')
+        self.discard_button.add_css_class('destructive-action')
+        resource_manager.set_widget_icon_name(
+            self.discard_button, 'user-trash-symbolic',
+            fallback='edit-delete-symbolic')
+        self.discard_button.set_tooltip_text(_('Discard recording'))
+        self.discard_button.connect('clicked', lambda *_: self._discard_recording())
+        box.append(self.discard_button)
+
+        self.recording_dot = Gtk.Label(label='\u25cf')
+        style_manager.apply_to_widget(self.recording_dot, 'recording-dot')
+        self.recording_dot.add_css_class('recording-dot')
+        box.append(self.recording_dot)
+
+        self.recording_timer_label = Gtk.Label(label='00:00')
+        style_manager.apply_to_widget(
+            self.recording_timer_label, 'recording-timer')
+        box.append(self.recording_timer_label)
+
+        self.recording_instructions_label = Gtk.Label(
+            label=_('Slide left to cancel, up to lock'))
+        self.recording_instructions_label.set_hexpand(True)
+        self.recording_instructions_label.set_halign(Gtk.Align.CENTER)
+        style_manager.apply_to_widget(
+            self.recording_instructions_label, 'recording-instructions')
+        box.append(self.recording_instructions_label)
+
+        self.lock_image = Gtk.Image()
+        resource_manager.set_widget_icon_name(
+            self.lock_image, 'changes-prevent-symbolic',
+            fallback='lock-symbolic')
+        box.append(self.lock_image)
+
+        return box
+
+    def _on_mic_pressed(self, _gesture, _x, _y):
+        if self._voice_state != VoiceRecordState.IDLE:
+            return
+        self._begin_recording()
+
+    def _on_mic_cancelled(self, _gesture):
+        if self._voice_state in (VoiceRecordState.HOLDING,):
+            self._cancel_recording()
+
+    def _on_mic_drag_begin(self, _gesture, start_x, start_y):
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            return
+        self._drag_start_x = start_x
+        self._drag_start_y = start_y
+
+    def _on_mic_drag_update(self, gesture, _offset_x, offset_y):
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            return
+        ok, start_x, start_y = gesture.get_start_point()
+        if not ok:
+            return
+        if offset_y - start_y < -50 and self._voice_state == VoiceRecordState.HOLDING:
+            self._voice_state = VoiceRecordState.LOCKED
+            self.recording_instructions_label.set_label(
+                _('Locked — tap to stop'))
+
+    def _on_mic_drag_end(self, gesture, offset_x, offset_y):
+        ok, start_x, start_y = gesture.get_start_point()
+        if ok and offset_x - start_x < -80 and self._voice_state in (
+                VoiceRecordState.HOLDING, VoiceRecordState.LOCKED):
+            self._cancel_recording()
+            return
+        if self._voice_state == VoiceRecordState.LOCKED:
+            return
+        if self._voice_state == VoiceRecordState.HOLDING:
+            self._finish_recording()
+
+    def _begin_recording(self):
+        if self._voice_state != VoiceRecordState.IDLE:
+            return
+        try:
+            self._voice_recorder = VoiceRecorder()
+            self._voice_file_path = self._voice_recorder.start()
+            self._voice_duration = 0.0
+            self._voice_state = VoiceRecordState.HOLDING
+            if hasattr(self.input_text, 'set_editable'):
+                self.input_text.set_editable(False)
+            self.mic_button.add_css_class('suggested-action')
+            self.recording_revealer.set_reveal_child(True)
+            self.recording_timer_label.set_label('00:00')
+            self.recording_instructions_label.set_label(
+                _('Slide left to cancel, up to lock'))
+            self._voice_timer_id = GLib.timeout_add(
+                100, self._update_recording_timer)
+            self._voice_blink_id = GLib.timeout_add(
+                500, self._blink_recording_dot)
+        except VoiceRecorderError as exc:
+            self._voice_state = VoiceRecordState.FAILED
+            self._show_recording_error(str(exc))
+            self._reset_recording_ui()
+            self._cleanup_recording()
+
+    def _finish_recording(self):
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            return
+        file_path, duration = self._voice_recorder.stop()
+        if duration < 3.0:
+            self._voice_recorder._delete_file()
+            self._voice_state = VoiceRecordState.IDLE
+            self._voice_file_path = None
+            self._voice_duration = 0.0
+            self._reset_recording_ui()
+            error_dialog = Gtk.AlertDialog()
+            error_dialog.set_message(
+                _('Recording too short — at least 3 seconds required'))
+            error_dialog.show(self)
+            return
+        self._voice_duration = duration
+        self._voice_file_path = file_path
+        self._voice_state = VoiceRecordState.CAPTURED
+        self._reset_recording_ui()
+        self._show_voice_bubble()
+        self._upload_voice_note()
+
+    def _show_voice_bubble(self):
+        if not self._voice_file_path:
+            return
+        body = self._voice_file_path or ''
+        widget = self.display_message(body, sender='user')
+        widget.set_delivery_state('pending')
+        self._voice_bubble = widget
+        self._voice_retry_path = self._voice_file_path
+
+    def _cancel_recording(self):
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            return
+        self._voice_recorder.cancel()
+        self._voice_state = VoiceRecordState.IDLE
+        self._voice_file_path = None
+        self._voice_duration = 0.0
+        self._reset_recording_ui()
+
+    def _discard_recording(self):
+        if self._voice_state in (VoiceRecordState.HOLDING,
+                                 VoiceRecordState.LOCKED):
+            self._cancel_recording()
+        elif self._voice_state == VoiceRecordState.CAPTURED:
+            self._cleanup_recording()
+            self._voice_state = VoiceRecordState.IDLE
+
+    def _reset_recording_ui(self):
+        self.mic_button.remove_css_class('suggested-action')
+        self.recording_revealer.set_reveal_child(False)
+        if hasattr(self.input_text, 'set_editable'):
+            self.input_text.set_editable(True)
+        if self._voice_timer_id:
+            GLib.source_remove(self._voice_timer_id)
+            self._voice_timer_id = None
+        if self._voice_blink_id:
+            GLib.source_remove(self._voice_blink_id)
+            self._voice_blink_id = None
+
+    def _cleanup_recording(self):
+        if self._voice_recorder:
+            self._voice_recorder.cancel()
+            self._voice_recorder = None
+        self._voice_file_path = None
+        self._voice_duration = 0.0
+
+    def _update_recording_timer(self) -> bool:
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            self._voice_timer_id = None
+            return GLib.SOURCE_REMOVE
+        elapsed = self._voice_recorder._start_time
+        if elapsed:
+            secs = int(time.monotonic() - elapsed)
+            minutes, seconds = divmod(secs, 60)
+            self.recording_timer_label.set_label(f'{minutes:02d}:{seconds:02d}')
+        return GLib.SOURCE_CONTINUE
+
+    def _blink_recording_dot(self) -> bool:
+        if self._voice_state not in (VoiceRecordState.HOLDING,
+                                     VoiceRecordState.LOCKED):
+            self._voice_blink_id = None
+            return GLib.SOURCE_REMOVE
+        self.recording_dot.set_visible(
+            not self.recording_dot.get_visible())
+        return GLib.SOURCE_CONTINUE
+
+    def _show_recording_error(self, message):
+        error_label = Gtk.Label(label=message)
+        error_label.add_css_class('error')
+        self.input_overlay.add_overlay(error_label)
+        GLib.timeout_add(3000, lambda: (
+            self.input_overlay.remove_overlay(error_label),
+            GLib.SOURCE_REMOVE)[1])
+
+    def _upload_voice_note(self):
+        if not self.is_messaging_backend or not self._voice_file_path:
+            self._voice_state = VoiceRecordState.IDLE
+            self._cleanup_recording()
+            return
+        self._voice_state = VoiceRecordState.UPLOADING
+        mime = audio_mime_for_file(self._voice_file_path)
+        self._record_send_attempt()
+
+        def on_done(ok, detail):
+            GLib.idle_add(lambda: self._on_voice_upload_done(ok, detail))
+
+        session = getattr(self.backend, 'session', None)
+        if session is None:
+            self._voice_state = VoiceRecordState.FAILED
+            return
+        session.send_file(
+            self.backend.bare_jid, self._voice_file_path, on_done)
+
+    def _record_send_attempt(self):
+        history = getattr(
+            getattr(self.backend, 'session', None), 'history', None)
+        if history is None:
+            return
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        body = self._voice_file_path or ''
+        mime = audio_mime_for_file(self._voice_file_path)
+        history.record_message(
+            self.backend.bare_jid, body, 'out', ts,
+            attachment_url=None,
+            attachment_mime_type=mime or RECORDING_MIME,
+            attachment_duration=self._voice_duration,
+            attachment_local_path=self._voice_file_path,
+            attachment_state='uploading')
+
+    def _on_voice_upload_done(self, ok, detail):
+        if self._voice_state != VoiceRecordState.UPLOADING:
+            return GLib.SOURCE_REMOVE
+        history = getattr(
+            getattr(self.backend, 'session', None), 'history', None)
+        if self._voice_bubble:
+            if ok:
+                self._voice_bubble.set_delivery_state('sent')
+                self._voice_bubble.update_content(detail)
+                self._voice_state = VoiceRecordState.IDLE
+            else:
+                self._voice_bubble.set_delivery_state('failed')
+                self._voice_state = VoiceRecordState.FAILED
+                self._voice_retry_path = self._voice_file_path
+        else:
+            if ok:
+                self._voice_state = VoiceRecordState.IDLE
+            else:
+                self._voice_state = VoiceRecordState.FAILED
+                self._voice_retry_path = self._voice_file_path
+        if ok:
+            if history and self._voice_file_path:
+                history.update_attachment_state(
+                    self.backend.bare_jid, self._voice_file_path, 'out',
+                    'sent', attachment_url=detail)
+            self._cleanup_recording()
+        else:
+            if history and self._voice_file_path:
+                history.update_attachment_state(
+                    self.backend.bare_jid, self._voice_file_path, 'out',
+                    'failed')
+        self._voice_bubble = None
+        return GLib.SOURCE_REMOVE
         # Identidad de cada burbuja ya pintada, para que el solape del catch-up
         # no la repinte. Se vacía con las burbujas: si no, al reabrir la
         # conversación el historial se descartaría entero por "ya visto".
@@ -696,6 +1037,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # Adjuntar sólo se ofrece si el backend sabe subir archivos
             # (XMPP vía XEP-0363); el backend LLM local no.
             self.attach_button.set_visible(hasattr(backend, 'send_file'))
+            self.mic_button.set_visible(hasattr(backend, 'send_file'))
             # El cid sale de la config, no del backend: LLMClient.get_conversation_id()
             # fuerza la carga del modelo y, si aún no hay conversación, se INVENTA
             # una nueva — con lo que la ventana acababa apuntando a una conversación
@@ -715,6 +1057,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
             ]
             self._last_connection_state = session.state
             self._update_connection_status(self._last_connection_state)
+
+        # XmppConversation se cachea por bare JID y puede haber emitido `ready`
+        # antes de que esta ventana conectara sus handlers. Una señal describe
+        # una transición, no el estado actual: al enlazar una conversación a una
+        # sesión que YA está conectada hay que reconciliar ese estado ahora.
+        # _load_xmpp_history es idempotente, así que el idle propio de una
+        # conversación recién creada puede llegar después sin duplicar nada.
+        if backend is not None and is_xmpp and session.is_connected:
+            GLib.idle_add(
+                self._on_backend_ready, backend, backend.get_display_name())
 
         # El historial NO se pide aquí. Lo carga _on_backend_ready, que es
         # cuando el backend está de verdad listo: en XMPP eso significa sesión
@@ -961,6 +1313,51 @@ class LLMChatWindow(Adw.ApplicationWindow):
             .streaming-message .message-content {
                 border-color: alpha(@accent_color, 0.72);
                 background-color: alpha(@accent_color, 0.06);
+            }
+
+            .recording-panel {
+                background-color: alpha(@theme_bg_color, 0.95);
+                border: 1px solid alpha(@theme_fg_color, 0.14);
+                border-radius: 8px;
+                padding: 6px;
+            }
+
+            .recording-dot {
+                color: @destructive_color;
+                font-weight: bold;
+                font-size: 18px;
+            }
+
+            .recording-timer {
+                font-family: monospace;
+                font-size: 14px;
+            }
+
+            .recording-instructions {
+                font-size: 12px;
+                opacity: 0.75;
+            }
+
+            .markdown-table {
+                margin: 4px 0;
+            }
+
+            .table-header-cell {
+                font-weight: bold;
+                background-color: alpha(@theme_fg_color, 0.08);
+                border-bottom: 1px solid alpha(@theme_fg_color, 0.14);
+            }
+
+            .audio-message {
+                margin: 6px 0;
+            }
+
+            .audio-bubble {
+                margin: 8px 0;
+                padding: 8px;
+                border: 1px solid alpha(@theme_fg_color, 0.12);
+                border-radius: 8px;
+                background-color: alpha(@theme_fg_color, 0.04);
             }
 
             .delivery-failed .message-content {
@@ -1235,23 +1632,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.backend.notify_composing(False)
         return GLib.SOURCE_REMOVE
 
-    def _on_key_pressed(self, controller, keyval, keycode, state):
-        if self._is_composition_key(keyval, state):
-            return False
-        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter):
-            # Permitir Shift+Enter para nuevas líneas
-            if not (state & Gdk.ModifierType.SHIFT_MASK):
-                self._on_send_clicked(None)
-                return True
-        return False
-
-    @staticmethod
-    def _is_composition_key(keyval, state):
-        key_name = Gdk.keyval_name(keyval) or ""
-        return (
-            key_name.startswith("dead_") or
-            keyval in (Gdk.KEY_Multi_key, Gdk.KEY_ISO_Level3_Shift)
-        )
+    def _send_from_input_shortcut(self, _widget, _args):
+        self._on_send_clicked(None)
+        return True
 
     def display_message(self, content, sender="user"):
         """
@@ -2211,10 +2594,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
     # debe re-renderizarse al reabrir el cliente. Las que sí traen expires_at_ms
     # se filtran por ese valor exacto en _filter_unexpired_actions.
     _PENDING_ACTION_MAX_AGE_MS = 15 * 60 * 1000
-    # Las approval cards son más estrictas: si una approval antigua no trae
-    # expiry explícito, viene de una caché previa al soporte de expires-at-ms o
-    # de un gateway viejo. No debe reaparecer como pendiente al reabrir.
-    _APPROVAL_ACTION_FALLBACK_MAX_AGE_MS = 60 * 1000
+    # OpenClaw mantiene waitDecision abierto durante 30 minutos. Si un gateway
+    # viejo omite expires-at-ms, el cliente debe conservar la única superficie
+    # desde la que el usuario puede resolverla durante ese mismo intervalo.
+    # Un fallback más corto sólo oculta la card: NO cancela el pending del
+    # gateway y deja la sesión bloqueada con “approval already pending”.
+    _APPROVAL_ACTION_FALLBACK_MAX_AGE_MS = 30 * 60 * 1000
 
     def _restore_history_actions(self, body, timestamp, quick_responses,
                                  commands, request_id=None):
@@ -2347,13 +2732,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
         remaining = cls._action_remaining_ms(action)
         return remaining is not None and remaining <= 0
 
-    def _expire_quick_responses_from_actions(self, widget, actions):
+    def _expire_quick_responses_from_actions(self, widget, actions,
+                                             approval=False):
         expiries = [
             remaining for remaining in (
                 self._action_remaining_ms(action) for action in (actions or [])
             )
             if remaining is not None
         ]
+        if not expiries and (approval or self._actions_look_like_approval(actions)):
+            expiries = [self._APPROVAL_ACTION_FALLBACK_MAX_AGE_MS]
         if not expiries:
             return
         remaining_ms = min(expiries)
@@ -2369,7 +2757,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.timeout_add(max(1000, remaining_ms), expire_if_same_widget)
 
     def _expire_sticky_response_item_from_actions(self, item_id, actions,
-                                                   approval=False):
+                                                   approval=False,
+                                                   request_id=None):
         expiries = [
             remaining for remaining in (
                 self._action_remaining_ms(action) for action in (actions or [])
@@ -2387,6 +2776,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         def expire_if_still_pending():
             self._remove_sticky_response_item(item_id)
+            if request_id and hasattr(self.backend, 'expire_pending_actions'):
+                self.backend.expire_pending_actions(request_id)
             return GLib.SOURCE_REMOVE
 
         GLib.timeout_add(max(1000, remaining_ms), expire_if_still_pending)
@@ -3069,7 +3460,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.display_message(body, sender="user")
 
     def _add_sticky_response_card(self, responses, on_selected, detail_text=None,
-                                   request_id=None):
+                                   request_id=None, remove_on_select=True):
         if not responses:
             return
         if request_id:
@@ -3089,12 +3480,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # reciente, rompiendo el caso de varias preguntas abiertas.
             'request_id': request_id,
             'resolved': False,
+            'submitted': False,
+            'remove_on_select': remove_on_select,
         }
         self._sticky_response_next_id += 1
         self._sticky_response_items.insert(0, item)
         self._expire_sticky_response_item_from_actions(
             item['id'], item['responses'],
-            approval=self._body_looks_like_approval(detail_text))
+            approval=self._body_looks_like_approval(detail_text),
+            request_id=request_id)
         self._rebuild_sticky_response_box()
 
     def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000,
@@ -3148,11 +3542,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         detail_text = item.get('detail_text') or ""
         count = len(self._sticky_response_items)
         resolved = bool(item.get('resolved'))
+        submitted = bool(item.get('submitted'))
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
         card.add_css_class("sticky-response-card")
-        if resolved:
+        if resolved or submitted:
             # Otro dispositivo (o el propio agente vía corrección XEP-0308)
             # ya resolvió esta pregunta — se deja un rastro atenuado en vez
             # de retirarla al instante, útil cuando había varias abiertas.
@@ -3172,6 +3567,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         title_text = _("Approval required") if is_approval else _("Response needed")
         if resolved:
             title_text = _("Resolved")
+        elif submitted:
+            title_text = _("Decision submitted…")
         if count > 1:
             title_text += f" ({count})"
         title = Gtk.Label(label=title_text)
@@ -3242,7 +3639,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 return
             for btn in buttons:
                 btn.set_sensitive(False)
-            self._remove_sticky_response_item(item['id'])
+            if item.get('remove_on_select', True):
+                self._remove_sticky_response_item(item['id'])
+            else:
+                item['submitted'] = True
+                self._rebuild_sticky_response_box()
             item['on_selected'](response)
 
         for response in responses:
@@ -3251,7 +3652,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 continue
             button = Gtk.Button(label=label)
             button.add_css_class("pill")
-            button.set_sensitive(not resolved)
+            button.set_sensitive(not resolved and not submitted)
             button.connect("clicked", handle_click, response)
             flow.append(button)
             buttons.append(button)
@@ -3270,9 +3671,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
         box.set_margin_end(6)
         for index, item in enumerate(self._sticky_response_items, start=1):
             resolved = bool(item.get('resolved'))
+            submitted = bool(item.get('submitted'))
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             row.add_css_class("sticky-response-popover-row")
-            if resolved:
+            if resolved or submitted:
                 row.set_opacity(0.5)
             title = Gtk.Label(label=_("Pending response") + f" {index}")
             title.add_css_class("caption-heading")
@@ -3301,7 +3703,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     return
                 for btn in current_buttons:
                     btn.set_sensitive(False)
-                self._remove_sticky_response_item(current_item['id'])
+                if current_item.get('remove_on_select', True):
+                    self._remove_sticky_response_item(current_item['id'])
+                else:
+                    current_item['submitted'] = True
+                    self._rebuild_sticky_response_box()
                 current_item['on_selected'](response)
 
             for response in item['responses']:
@@ -3310,7 +3716,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     continue
                 button = Gtk.Button(label=label)
                 button.add_css_class("pill")
-                button.set_sensitive(not resolved)
+                button.set_sensitive(not resolved and not submitted)
                 button.connect("clicked", handle_click, response)
                 flow.append(button)
                 buttons.append(button)
@@ -3429,7 +3835,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             detail_text=Message.compact_blank_lines(self.current_message_widget.message.content),
             request_id=request_id)
         self._expire_quick_responses_from_actions(
-            self.current_message_widget, responses)
+            self.current_message_widget, responses,
+            approval=self._body_looks_like_approval(
+                self.current_message_widget.message.content))
         self._scroll_to_bottom_after_layout_if_following()
 
     def _on_commands(self, backend, commands, request_id=None,
@@ -3452,7 +3860,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
 
         def on_selected(command):
-            self._execute_inline_command(command)
+            self._execute_inline_command(
+                command, request_id=request_id)
 
         # Los command-items de XEP-0050 se muestran sólo como sticky card. Si
         # también se agregan a la burbuja, una approval card aparece duplicada:
@@ -3461,10 +3870,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
             commands,
             on_selected,
             detail_text=Message.compact_blank_lines(self.current_message_widget.message.content),
-            request_id=request_id)
+            request_id=request_id,
+            remove_on_select=False)
         self._scroll_to_bottom_after_layout_if_following()
 
-    def _execute_inline_command(self, command):
+    def _execute_inline_command(self, command, request_id=None):
         if self._action_is_expired(command):
             return
         name = command.get('name', '')
@@ -3488,7 +3898,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # pendientes y no debe recolectarse antes de que llegue la respuesta.
         self._agent_command_client = client
         adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
-        self._execute_agent_command(client, adhoc)
+        def on_error(message):
+            for item in self._sticky_response_items:
+                if item.get('request_id') == request_id:
+                    item['submitted'] = False
+            self._rebuild_sticky_response_box()
+            self._on_llm_error(self.backend, message)
+
+        def on_success(result):
+            from .xmpp_commands import command_result_body
+            body = command_result_body(result)
+            if re.fullmatch(r'(?i)Command expired\.?', body.strip()):
+                self._remove_sticky_response_item(None, request_id)
+                if request_id and hasattr(self.backend, 'expire_pending_actions'):
+                    self.backend.expire_pending_actions(request_id)
+                self._show_toast(body)
+                return
+            if not re.fullmatch(r'(?i)Command submitted\.?', body.strip()):
+                on_error(body or _("Approval command was not accepted"))
+                return
+            # Keep the disabled card until the authoritative resolved payload
+            # arrives as XEP-0308. Submission acknowledgement is not resolution.
+            self._show_toast(body)
+
+        client.execute(adhoc, on_success, on_error)
 
     # Margen (px) dentro del cual se considera que el usuario está "al fondo".
     # Un par de píxeles de holgura: GTK no siempre deja el valor exacto.
@@ -3524,6 +3957,32 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return (adj.get_upper() - (adj.get_value() + adj.get_page_size())
                 <= self._SCROLL_BOTTOM_EPSILON)
 
+    def _cancel_scroll_follow_for_user(self, adj=None):
+        """User intent always wins over a pending layout auto-scroll."""
+        if adj is None:
+            adj = self.message_scroll.get_vadjustment()
+        self._stick_to_bottom = False
+        self._post_layout_scroll_force = False
+        self._post_layout_scroll_pending = False
+        if self._post_layout_scroll_watch_id is not None:
+            GLib.source_remove(self._post_layout_scroll_watch_id)
+            self._post_layout_scroll_watch_id = None
+        if self._post_layout_scroll_settle_id is not None:
+            GLib.source_remove(self._post_layout_scroll_settle_id)
+            self._post_layout_scroll_settle_id = None
+        self._cancel_scroll_animation()
+        self._scroll_bottom_distance = max(
+            0.0, adj.get_upper() - (adj.get_value() + adj.get_page_size()))
+        self._log_scroll_state("cancel follow (user)", adj)
+
+    def _on_user_scroll_intent(self, _controller, _dx, dy):
+        # Negative dy is an upward wheel/touchpad gesture. Cancel before GTK
+        # updates the adjustment, so the post-layout watcher cannot race it and
+        # throw the viewport back to the bottom.
+        if dy < 0:
+            self._cancel_scroll_follow_for_user()
+        return False
+
     def _on_vadj_value_changed(self, adj):
         """El usuario movió el scroll: decide si seguimos anclados al fondo.
         Se ignora cuando el movimiento lo provocamos nosotros, que si no cada
@@ -3537,16 +3996,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
         scroll se quedaba A MEDIA BURBUJA. Un `upper` que crece nunca es intención
         del usuario: sólo se desancla si el contenido NO creció."""
         if self._restoring_scroll:
+            self._scroll_last_value = adj.get_value()
             self._log_scroll_state("value-changed(skip restoring)", adj)
             return
 
         upper = adj.get_upper()
+        value = adj.get_value()
+        moved_up = value < self._scroll_last_value - 0.5
+        self._scroll_last_value = value
+        if moved_up:
+            self._cancel_scroll_follow_for_user(adj)
+            return
         grew = upper > self._scroll_last_upper + 0.5
         self._scroll_last_upper = upper
 
         if grew:
             if self._stick_to_bottom:
-                self._animate_value_silently(
+                self._set_value_silently(
                     adj, max(0.0, upper - adj.get_page_size()))
                 self._log_scroll_state("value-changed(grew -> stick)", adj)
             else:

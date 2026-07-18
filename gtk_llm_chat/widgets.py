@@ -1,13 +1,14 @@
 import gi
 import os
-import sys
 import re
+import sys
 import urllib.parse
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango
+gi.require_version('Gst', '1.0')
+from gi.repository import Adw, Gdk, GLib, Gst, Gtk, Pango
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +20,38 @@ DEBUG = os.environ.get('DEBUG') or False
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
+
+
+def _copy_label_selection(label):
+    """Copy a Gtk.Label selection without relying on GTK focus timing."""
+    bounds = label.get_selection_bounds()
+    if not bounds or not bounds[0]:
+        return False
+    start, end = bounds[1], bounds[2]
+    if start == end:
+        return False
+    text = label.get_text() or ''
+    display = label.get_display()
+    if display is None:
+        return False
+    display.get_clipboard().set(text[min(start, end):max(start, end)])
+    return True
+
+
+def _make_selectable_label(label):
+    """Make selection copy reliably on the first Ctrl-C press."""
+    label.set_selectable(True)
+    keys = Gtk.EventControllerKey()
+
+    def on_key_pressed(_controller, keyval, _keycode, state):
+        control = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        if control and keyval in (Gdk.KEY_c, Gdk.KEY_C):
+            return _copy_label_selection(label)
+        return False
+
+    keys.connect('key-pressed', on_key_pressed)
+    label.add_controller(keys)
+    return label
 
 
 # URL suelta en el texto (para autoenlazar y para detectar adjuntos).
@@ -36,6 +69,18 @@ def _first_image_url(content):
     for match in URL_RE.finditer(content or ''):
         url = match.group(0).rstrip(TRAILING_URL_PUNCT)
         if IMAGE_EXT_RE.search(url):
+            return url
+    return None
+
+
+AUDIO_URL_RE = re.compile(
+    r'\.(ogg|oga|opus|m4a|mp3|wav)(\?|#|$)', re.IGNORECASE)
+
+
+def _first_audio_url(content):
+    for match in URL_RE.finditer(content or ''):
+        url = match.group(0).rstrip(TRAILING_URL_PUNCT)
+        if AUDIO_URL_RE.search(url):
             return url
     return None
 
@@ -438,10 +483,18 @@ class MessageWidget(Gtk.Box):
         self._attachment_texture = None
         self._attachment_data = None
         self._attachment_url = None
+        self._audio_widget = None
         image_url = _first_image_url(content)
+        audio_url = _first_audio_url(content) if not image_url else None
         if image_url:
             self._ensure_attachment_preview(message_box, image_url)
-        visible_content = _content_without_attachment_url(content, image_url)
+        elif audio_url:
+            self._audio_widget = AudioMessageWidget(
+                audio_url, duration=0.0)
+            self._audio_widget.add_css_class('audio-bubble')
+            message_box.prepend(self._audio_widget)
+        visible_content = _content_without_attachment_url(
+            content, image_url or audio_url)
 
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.content_box.set_hexpand(True)
@@ -561,7 +614,7 @@ class MessageWidget(Gtk.Box):
         label.set_wrap(True)
         label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         label.set_xalign(0.0)
-        label.set_selectable(True)
+        _make_selectable_label(label)
         label.set_hexpand(True)
         label.connect('activate-link', _on_activate_link)
         if re.match(r'^\s*(?:🔧|🛠|Tool(?:\s|:)|Using tool|Herramienta:)',
@@ -646,15 +699,80 @@ class MessageWidget(Gtk.Box):
         card.append(scrolled)
         return card
 
+    def _build_table_widget(self, table):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.add_css_class('markdown-table')
+        card.set_hexpand(True)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scrolled.set_hexpand(True)
+
+        headers = table.get('headers', [])
+        rows = table.get('rows', [])
+        align = table.get('align', [])
+        max_cols = max(
+            [len(headers)] + [len(r) for r in rows] + [1])
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(2)
+        grid.set_hexpand(True)
+
+        CELL_PADDING = 6
+        MAX_CELL_WIDTH = 280
+
+        for col, header in enumerate(headers[:max_cols]):
+            label = Gtk.Label(label=GLib.markup_escape_text(
+                header or ''))
+            label.set_wrap(True)
+            label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            label.set_max_width_chars(40)
+            label.set_xalign(align[col] if col < len(align) else 0.0)
+            label.set_margin_start(CELL_PADDING)
+            label.set_margin_end(CELL_PADDING)
+            label.set_margin_top(4)
+            label.set_margin_bottom(4)
+            label.add_css_class('table-header-cell')
+            grid.attach(label, col, 0, 1, 1)
+
+        for row_idx, row in enumerate(rows):
+            for col, cell in enumerate(row[:max_cols]):
+                label = Gtk.Label(label=GLib.markup_escape_text(
+                    cell or ''))
+                label.set_wrap(True)
+                label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                label.set_max_width_chars(40)
+                label.set_xalign(align[col] if col < len(align) else 0.0)
+                label.set_margin_start(CELL_PADDING)
+                label.set_margin_end(CELL_PADDING)
+                label.set_margin_top(2)
+                label.set_margin_bottom(2)
+                _make_selectable_label(label)
+                grid.attach(label, col, row_idx + 1, 1, 1)
+
+        scrolled.set_child(grid)
+        scrolled.set_min_content_height(
+            min(200, 30 * (len(rows) + (1 if headers else 0))))
+        scrolled.set_max_content_height(300)
+        card.append(scrolled)
+        return card
+
     def _set_message_content(self, content):
         self._clear_content_box()
         if not (content or '').strip():
             return
-        for kind, language, value in _split_code_fences(content):
+        parts = _split_code_fences(content)
+        from .pango_markdown import has_table, extract_tables
+        for kind, language, value in parts:
             if kind == 'code':
                 self.content_box.append(self._build_code_block(value, language))
             elif (value or '').strip():
-                self.content_box.append(self._build_text_label(value))
+                if has_table(value):
+                    for table in extract_tables(value):
+                        self.content_box.append(
+                            self._build_table_widget(table))
+                else:
+                    self.content_box.append(self._build_text_label(value))
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
@@ -720,3 +838,147 @@ class MessageWidget(Gtk.Box):
         if self._quick_response_row is not None:
             self.message_box.remove(self._quick_response_row)
             self._quick_response_row = None
+
+
+def format_duration(seconds):
+    m, s = divmod(int(seconds or 0), 60)
+    return f'{m:01d}:{s:02d}'
+
+
+class AudioMessageWidget(Gtk.Box):
+    def __init__(self, url, mime_type=None, duration=0.0,
+                 on_retry=None):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        from .audio_player import (
+            AudioPlayer,
+            PLAY_STATE_PLAYING, PLAY_STATE_PAUSED,
+            PLAY_STATE_STOPPED, PLAY_STATE_ERROR)
+        from .audio_utils import is_audio_url
+        self._player = AudioPlayer()
+        self._url = url
+        self._duration = duration
+        self._on_retry = on_retry
+        self._loading = True
+        self._error_message = None
+        self.add_css_class('audio-message')
+
+        controls = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        controls.set_valign(Gtk.Align.CENTER)
+
+        self.play_button = Gtk.Button()
+        self.play_button.add_css_class('flat')
+        self.play_button.set_icon_name('media-playback-start-symbolic')
+        self.play_button.connect('clicked', self._on_play_clicked)
+        controls.append(self.play_button)
+
+        self.progress = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0.0, max(duration, 1.0), 0.1)
+        self.progress.set_draw_value(False)
+        self.progress.set_hexpand(True)
+        self.progress.set_sensitive(False)
+        self.progress.connect('change-value', self._on_seek)
+        controls.append(self.progress)
+
+        self.time_label = Gtk.Label(
+            label=format_duration(duration))
+        self.time_label.add_css_class('caption')
+        controls.append(self.time_label)
+
+        self.append(controls)
+
+        self.status_label = Gtk.Label()
+        self.status_label.add_css_class('caption')
+        self.status_label.add_css_class('dim-label')
+        self.status_label.set_xalign(0)
+        self.status_label.set_visible(False)
+        self.append(self.status_label)
+
+        self._player.set_update_callback(self._on_player_update)
+
+        if is_audio_url(url):
+            self._player.load(url)
+            self._loading = False
+        else:
+            self._show_error('Unsupported audio format')
+
+    def _on_play_clicked(self, _button):
+        state = self._player.state
+        from .audio_player import (
+            PLAY_STATE_PLAYING, PLAY_STATE_PAUSED, PLAY_STATE_STOPPED, PLAY_STATE_ERROR)
+        if state == PLAY_STATE_PLAYING:
+            self._player.pause()
+        elif state == PLAY_STATE_PAUSED:
+            self._player.play()
+        elif state in (PLAY_STATE_STOPPED, PLAY_STATE_ERROR):
+            self._player.load(self._url)
+            self._loading = True
+            self._show_status('Loading\u2026')
+            self._player.play()
+
+    def _on_seek(self, scale, _scroll, value):
+        self._player._position = value
+        if self._player._pipeline:
+            self._player._pipeline.seek_simple(
+                Gst.Format.TIME, Gst.SeekFlags.FLUSH,
+                int(value * Gst.SECOND))
+
+    def _on_player_update(self, state, position, duration, error):
+        from .audio_player import (
+            PLAY_STATE_PLAYING, PLAY_STATE_PAUSED,
+            PLAY_STATE_STOPPED, PLAY_STATE_ERROR)
+
+        def apply():
+            if error:
+                self._show_error(error)
+                return GLib.SOURCE_REMOVE
+            if duration > 0 and self._duration == 0.0:
+                self._duration = duration
+                self.progress.set_range(0.0, max(duration, 1.0))
+            self.progress.set_value(position)
+            elapsed = format_duration(position)
+            if duration > 0.0:
+                self.time_label.set_label(
+                    f'{elapsed} / {format_duration(duration)}')
+            else:
+                self.time_label.set_label(elapsed)
+
+            if state == PLAY_STATE_PLAYING:
+                self.play_button.set_icon_name(
+                    'media-playback-pause-symbolic')
+                self.progress.set_sensitive(True)
+                self._show_status(None)
+            elif state == PLAY_STATE_PAUSED:
+                self.play_button.set_icon_name(
+                    'media-playback-start-symbolic')
+                self.progress.set_sensitive(True)
+                self._show_status(None)
+            elif state == PLAY_STATE_STOPPED:
+                self.play_button.set_icon_name(
+                    'media-playback-start-symbolic')
+                self.progress.set_sensitive(False)
+                self._show_status(None)
+            elif state == PLAY_STATE_ERROR:
+                self.play_button.set_icon_name(
+                    'view-refresh-symbolic')
+                self.progress.set_sensitive(False)
+                if self._on_retry:
+                    self._show_status(
+                        'Playback failed \u2014 retry available')
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(apply)
+
+    def _show_status(self, text):
+        self.status_label.set_label(text or '')
+        self.status_label.set_visible(bool(text))
+
+    def _show_error(self, message):
+        self._error_message = message
+        self._loading = False
+        self.play_button.set_icon_name('view-refresh-symbolic')
+        self.progress.set_sensitive(False)
+        self._show_status(message)
+
+    def cleanup(self):
+        self._player.stop()

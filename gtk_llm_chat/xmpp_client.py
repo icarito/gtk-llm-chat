@@ -1582,6 +1582,18 @@ class XmppConversation(ChatBackend):
             return False
         return history.has_outgoing_after(self.bare_jid, timestamp, values)
 
+    def expire_pending_actions(self, request_id: str) -> bool:
+        """Retira metadata de una acción que ya venció en el cliente.
+
+        La expiración visual no basta: si se deja quick_responses/commands en
+        SQLite, una reapertura puede intentar reconstruir la misma card.
+        """
+        history = self.session.history
+        if history is None or not request_id:
+            return False
+        self._pending_request_ids.pop(request_id, None)
+        return history.mark_resolved_by_request_id(self.bare_jid, request_id)
+
     # --- History (spec 004) ---
 
     def load_history_from_cache(self):

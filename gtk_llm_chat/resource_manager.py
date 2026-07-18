@@ -207,11 +207,17 @@ class ResourceManager:
         self.setup_icon_theme()
         display = Gdk.Display.get_default()
         icon_theme = Gtk.IconTheme.get_for_display(display) if display else None
-        if icon_theme and icon_theme.has_icon(icon_name):
-            widget.set_icon_name(icon_name)
-        else:
+        selected = icon_name if icon_theme and icon_theme.has_icon(icon_name) else fallback
+        if selected == fallback:
             debug_print(f"[WARN] Icono '{icon_name}' no encontrado, usando fallback '{fallback}'")
-            widget.set_icon_name(fallback)
+        if hasattr(widget, 'set_icon_name'):
+            widget.set_icon_name(selected)
+        elif hasattr(widget, 'set_from_icon_name'):
+            # Gtk.Image exposes set_from_icon_name in GTK4, while Gtk.Button
+            # and other icon-name widgets use set_icon_name.
+            widget.set_from_icon_name(selected)
+        else:
+            raise TypeError(f"{type(widget).__name__} does not support named icons")
 
     def create_icon_widget(self, icon_name: str, size: int = 48) -> Gtk.Image:
         """
