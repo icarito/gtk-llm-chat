@@ -149,6 +149,11 @@ class LLMChatApplication(Adw.Application):
 
         self.hold()  # Asegura que la aplicación no termine prematuramente
 
+        # XMPP pertenece al ciclo de vida de la aplicación, no al de una
+        # ventana. Arrancarlo en idle permite presentar GTK primero y evita que
+        # un estado de sesión sin ventanas deje el proceso vivo pero offline.
+        GLib.idle_add(self._start_configured_xmpp_session)
+
         APP_NAME = "gtk-llm-chat"
         if getattr(sys, 'frozen', False):
             base_path = os.path.join(
@@ -223,6 +228,14 @@ class LLMChatApplication(Adw.Application):
             "deny-xmpp-sub", GLib.VariantType.new('s'))
         deny_sub_action.connect("activate", self._on_deny_xmpp_sub)
         self.add_action(deny_sub_action)
+
+    def _start_configured_xmpp_session(self):
+        """Start the persisted XMPP account without waiting for a window."""
+        try:
+            self.get_xmpp_session_for_roster()
+        except Exception as error:
+            debug_print(f"XMPP startup failed: {error}")
+        return GLib.SOURCE_REMOVE
 
     def OpenConversation(self, cid):
         """Abrir (o enfocar) una conversación dado un CID.

@@ -2694,6 +2694,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self.is_messaging_backend:
             def apply_response_on_ui_thread():
                 self.accumulated_response = ""
+                if self._is_approval_transport_noise(response):
+                    self.current_message_widget = None
+                    return GLib.SOURCE_REMOVE
                 if self._is_context_unavailable_response(response):
                     self.current_message_widget = None
                     self._display_context_unavailable(response)
@@ -2738,6 +2741,33 @@ class LLMChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self.current_message_widget.update_content,
                       self.accumulated_response)
         self._scroll_to_bottom_after_layout_if_following()
+
+    @staticmethod
+    def _is_approval_transport_noise(response):
+        """Hide protocol acknowledgements already represented by the card.
+
+        OpenClaw may emit these as independent chat messages around the XEP-0050
+        correction. They are useful in logs, but rendering each one makes a
+        single approval look like several conversational turns.
+        """
+        text = " ".join(str(response or "").strip().split())
+        if not text:
+            return False
+        if re.fullmatch(r'(?i)Command submitted\.?', text):
+            return True
+        if re.fullmatch(r'(?i)Recibido\s*[·.-]\s*preparando…?', text):
+            return True
+        if re.fullmatch(r'(?i)Turno completado sin respuesta visible\.?', text):
+            return True
+        if re.match(r'(?i)^✅\s*Approval\s+(?:allow-once|allow-always|deny)\s+submitted\b', text):
+            return True
+        if re.match(r'(?i)^✅\s*aprobado\s*[—-]', text):
+            return True
+        # Some agent wrappers echo the command and “approval requested” before
+        # the actual interactive stanza. The card already contains both.
+        if 'Command approval requested' in text and 'Approval:' in text:
+            return True
+        return False
 
     @staticmethod
     def _is_context_unavailable_response(response):
