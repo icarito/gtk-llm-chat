@@ -1,6 +1,10 @@
 # Specs — spec-driven change flow
 
-Lightweight adaptation of the specboot/OpenSpec cycle
+> **Historical tree.** New changes start in `openspec/changes/` and use the
+> shared `opsx:*` workflow. `specs/archive/` remains intact as project history.
+> Spec 006 moved to the `gtk-llm-chat-android` repository.
+
+The material below documents the previous lightweight adaptation of the cycle
 (*enrich → new → artifacts → apply → verify → review → archive*)
 for a solo-maintained desktop app.
 

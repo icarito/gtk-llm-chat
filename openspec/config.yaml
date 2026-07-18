@@ -1,0 +1,9 @@
+schema: spec-driven
+
+context: |
+  Desktop chat client built with GTK4, Libadwaita and Python, packaged through
+  pyproject.toml. `docs/` is the architectural and engineering source of truth.
+  New changes live in `openspec/changes/`; the legacy `specs/` tree is retained
+  as historical material. Keep the GTK main loop non-blocking and follow the
+  verification commands documented in CLAUDE.md and docs/development-guide.md.
+

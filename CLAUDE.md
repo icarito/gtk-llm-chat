@@ -14,8 +14,10 @@ All standards and specifications live in `docs/` — read before making changes:
 - [docs/data-model.md](docs/data-model.md) — the `llm` SQLite database this app shares
 - [docs/roadmap.md](docs/roadmap.md) — current direction and pending work
 
-Feature work follows the spec-driven flow described in [specs/README.md](specs/README.md):
-spec first, then tasks, then implementation in small verifiable steps.
+Feature work follows OpenSpec. New proposals and task contracts live in
+`openspec/changes/`; use the shared `opsx:explore`, `opsx:propose`,
+`opsx:apply`, `opsx:archive`, and `opsx:sync` commands. The old `specs/` tree
+is historical, and `docs/` remains the source of truth for architecture.
 
 ## Quick facts
 
