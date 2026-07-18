@@ -204,7 +204,8 @@ class AgentCommandsSidebar(Gtk.Box):
         dialog = XmppCommandFormDialog(
             self.get_root(), command,
             lambda dataform: self._execute(
-                command, dataform=dataform, action=next_action_for(command)))
+                command, dataform=dataform, action=next_action_for(command)),
+            on_cancel=lambda: self.stack.set_visible_child_name("list"))
         dialog.present()
 
     def _show_result_text(self, text):

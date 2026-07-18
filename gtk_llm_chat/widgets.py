@@ -81,7 +81,10 @@ def _split_code_fences(content):
     for match in CODE_FENCE_RE.finditer(content or ''):
         if match.start() > pos:
             parts.append(('text', '', content[pos:match.start()]))
-        language = (match.group(1) or '').strip().split()[0]
+        # El info-string puede venir vacío (``` sin lenguaje): split() da []
+        # y [0] reventaba. Tomamos el primer token si lo hay, si no ''.
+        language_tokens = (match.group(1) or '').strip().split()
+        language = language_tokens[0] if language_tokens else ''
         code = match.group(2) or ''
         parts.append(('code', language, code.rstrip('\n')))
         pos = match.end()

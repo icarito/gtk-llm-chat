@@ -832,13 +832,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         self.split_view.set_show_sidebar(False)
 
+        # Si ya existe una ventana registrada para esta conversación, es la
+        # dueña: enfocarla y no duplicar. Sin este chequeo, convertir el picker
+        # (backend is None) reescribía su clave en el registro, dejando dos
+        # ventanas para el mismo JID y huérfana la original.
+        key = app.conversation_key(descriptor)
+        if key is not None:
+            existing = app._window_by_cid.get(key)
+            if existing is not None and existing is not self:
+                existing.present()
+                return
+
         if self.backend is None:
             backend = app.build_backend(descriptor, self.chat_history)
             self.config['cid'] = descriptor.get('cid') or self.config.get('cid')
             self.cid = descriptor.get('cid')
             self._bind_backend(backend=backend,
                                xmpp_session=descriptor.get('session'))
-            key = app.conversation_key(descriptor)
             if key:
                 app._window_by_cid[key] = self
             return
@@ -2779,6 +2789,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         (no se pudo correlacionar, o ya se había limpiado), se degrada a
         actualizar sólo la burbuja más reciente como antes."""
         resolved_a_card = self._mark_sticky_response_resolved(request_id)
+        # The command handler's immediate acknowledgement is transport
+        # metadata, not a second question. Showing “Approval allow-once
+        # submitted for <uuid>” in the former approval bubble made it look as
+        # if the user now had to approve “allow-once” itself.
+        if re.search(r'(?i)\bApproval\s+(?:allow-once|allow-always|deny)\s+submitted\b',
+                     str(body or '')):
+            body = _("Approved; running…")
         if self.current_message_widget is None:
             return
         GLib.idle_add(self.current_message_widget.update_content, body)
@@ -2830,11 +2847,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._expire_sticky_response_item_from_actions(item['id'], item['responses'])
         self._rebuild_sticky_response_box()
 
-    def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000):
-        """Atenúa (no retira de inmediato) la card cuyo request_id coincide
-        con una corrección XEP-0308 entrante — decisión de UX: dejar rastro
-        visible unos segundos cuando había varias preguntas abiertas, en vez
-        de hacerla desaparecer al instante."""
+    def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=0):
+        """Retira la card cuyo request_id coincide con una corrección XEP-0308.
+
+        Una aprobación resuelta ya no requiere respuesta. Mantenerla atenuada
+        con sus botones deshabilitados se interpretaba como un nuevo permiso
+        pendiente, especialmente junto al acuse técnico “allow-once”.
+        """
         if not request_id:
             return False
         found = False
@@ -2843,10 +2862,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 item['resolved'] = True
                 found = True
         if found:
-            self._rebuild_sticky_response_box()
-            GLib.timeout_add(
-                resolved_timeout_ms, self._remove_sticky_response_item, None,
-                request_id)
+            if resolved_timeout_ms > 0:
+                self._rebuild_sticky_response_box()
+                GLib.timeout_add(
+                    resolved_timeout_ms, self._remove_sticky_response_item,
+                    None, request_id)
+            else:
+                self._remove_sticky_response_item(None, request_id)
         return found
 
     def _rebuild_sticky_response_box(self):
@@ -2890,9 +2912,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header.set_halign(Gtk.Align.FILL)
-        title_text = _("Response needed")
+        is_approval = self._actions_look_like_approval(responses)
+        title_text = _("Approval required") if is_approval else _("Response needed")
         if count > 1:
-            title_text = _("Response needed") + f" ({count})"
+            title_text += f" ({count})"
         title = Gtk.Label(label=title_text)
         title.add_css_class("caption-heading")
         title.set_xalign(0)
@@ -2930,7 +2953,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             header.append(info_button)
         card.append(header)
         if detail_text:
-            preview = Gtk.Label(label=self._sticky_detail_preview(detail_text))
+            preview = Gtk.Label(label=self._sticky_detail_preview(
+                detail_text, approval=is_approval))
             preview.add_css_class("sticky-response-detail")
             preview.set_xalign(0)
             preview.set_wrap(True)
@@ -2992,7 +3016,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             row.append(title)
             detail_text = item.get('detail_text') or ""
             if detail_text:
-                preview = Gtk.Label(label=self._sticky_detail_preview(detail_text, max_chars=220))
+                preview = Gtk.Label(label=self._sticky_detail_preview(
+                    detail_text, max_chars=220,
+                    approval=self._actions_look_like_approval(item['responses'])))
                 preview.set_xalign(0)
                 preview.set_wrap(True)
                 preview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -3030,8 +3056,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return box
 
     @staticmethod
-    def _sticky_detail_preview(detail_text, max_chars=160):
-        text = Message.compact_blank_lines(detail_text).replace("\n", " ")
+    def _sticky_detail_preview(detail_text, max_chars=160, approval=False):
+        text = Message.compact_blank_lines(detail_text)
+        if approval:
+            # New XMPP approval bodies put the useful summary on the lock line.
+            # Keep compatibility with cached/older verbose payloads by pulling
+            # the command out of the fenced "Pending command" section.
+            lock_line = re.search(r'(?m)^\s*🔒\s*(.+?)\s*$', text)
+            if lock_line:
+                text = lock_line.group(1).strip()
+            else:
+                pending = re.search(
+                    r'(?is)Pending command:\s*```(?:\w+)?\s*\n(.*?)```', text)
+                if pending and pending.group(1).strip():
+                    text = pending.group(1).strip()
+                else:
+                    # Empty warning fences and approval metadata are never a
+                    # useful sticky summary.
+                    text = re.sub(r'```(?:txt)?\s*```', '', text,
+                                  flags=re.IGNORECASE)
+        text = Message.compact_blank_lines(text).replace("\n", " ")
         if len(text) <= max_chars:
             return text
         return f"{text[:max_chars].rstrip()}..."

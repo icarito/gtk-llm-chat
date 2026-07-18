@@ -1259,6 +1259,11 @@ class XmppConversation(ChatBackend):
         # por texto, como señal de sync más rápida que esperar la
         # corrección del servidor.
         self._pending_request_ids: dict[str, set[str]] = {}
+        # XEP-0308 Last Message Correction also applies to ordinary messages
+        # (not only interactive cards). Keep the stanza id of the most recent
+        # normal incoming body so progress/status corrections can replace its
+        # bubble instead of degrading into a new response.
+        self._last_incoming_id: str | None = None
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
@@ -1290,16 +1295,15 @@ class XmppConversation(ChatBackend):
                 correction=None, request_id=None):
         """Un mensaje del contacto: response + finished, cached.
 
-        Si correction es una tupla (replace_id, stanza_id) se busca
-        replace_id entre CUALQUIER pregunta pendiente reciente (no sólo la
-        última — con varias preguntas abiertas a la vez, una corrección
-        para cualquiera de ellas debe reconocerse, no sólo la más nueva;
-        antes esto sólo comparaba contra self.last_incoming_id, un único
-        valor). Si no coincide con ninguna, se trata como mensaje normal
-        (degradación elegante)."""
+        Si correction es una tupla (replace_id, stanza_id), se acepta cuando
+        apunta al último mensaje ordinario (XEP-0308) o a cualquier pregunta
+        interactiva todavía pendiente. Si no coincide, se trata como mensaje
+        normal para degradar de forma segura."""
         if correction is not None:
             replace_id, _stanza_id = correction
-            if replace_id and replace_id in self._pending_request_ids:
+            if replace_id and (
+                    replace_id == self._last_incoming_id
+                    or replace_id in self._pending_request_ids):
                 self._deliver_correction(replace_id, body)
                 return
         from datetime import datetime, timezone
@@ -1319,6 +1323,8 @@ class XmppConversation(ChatBackend):
                 request_id=request_id if has_pending else None)
         if has_pending and request_id:
             self._track_pending_request(request_id, quick_responses)
+        if request_id:
+            self._last_incoming_id = request_id
         self.emit('response', body)
         # Preferir command-items (XEP-0050, responde por IQ off-band) sobre
         # quick-responses (texto en el body) cuando el mensaje trae ambos.
@@ -1358,6 +1364,9 @@ class XmppConversation(ChatBackend):
         if history is not None:
             history.update_by_request_id(self.bare_jid, request_id, body)
         self._pending_request_ids.pop(request_id, None)
+        # Correcciones sucesivas siguen referenciando el id ORIGINAL según
+        # XEP-0308, por eso conservamos _last_incoming_id en vez de cambiarlo
+        # al stanza id de la corrección.
         self.emit('response-correction', request_id, body)
         self.emit('finished', True)
 

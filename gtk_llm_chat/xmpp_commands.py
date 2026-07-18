@@ -58,10 +58,12 @@ class XmppCommandClient:
 
 
 class XmppCommandFormDialog(Adw.Window):
-    def __init__(self, parent, command, on_submit):
+    def __init__(self, parent, command, on_submit, on_cancel=None):
         super().__init__(modal=True, transient_for=parent)
         self.command = command
         self._on_submit = on_submit
+        self._on_cancel = on_cancel
+        self._submitted = False
         self._field_widgets = {}
         self._fixed_fields = []
         self._hidden_fields = []
@@ -82,7 +84,7 @@ class XmppCommandFormDialog(Adw.Window):
             self._add_field(group, field)
 
         cancel_button = Gtk.Button(label=_("Cancel"))
-        cancel_button.connect("clicked", lambda _b: self.close())
+        cancel_button.connect("clicked", self._cancel)
         submit_button = Gtk.Button(label=_("Submit"))
         submit_button.add_css_class("suggested-action")
         submit_button.connect("clicked", self._submit)
@@ -104,6 +106,16 @@ class XmppCommandFormDialog(Adw.Window):
         toolbar_view.add_top_bar(header)
         toolbar_view.set_content(content)
         self.set_content(toolbar_view)
+        self.connect("close-request", self._on_close_request)
+
+    def _cancel(self, _button=None):
+        self.close()
+
+    def _on_close_request(self, _window):
+        if not self._submitted and self._on_cancel is not None:
+            callback, self._on_cancel = self._on_cancel, None
+            callback()
+        return False
 
     def _add_field(self, group, field):
         typ = field.type_
@@ -197,6 +209,7 @@ class XmppCommandFormDialog(Adw.Window):
                 value = entry[1].get_text()
             fields.append(create_field(typ, var=var, value=value))
 
+        self._submitted = True
         self._on_submit(SimpleDataForm(type_='submit', fields=fields))
         self.close()
 
