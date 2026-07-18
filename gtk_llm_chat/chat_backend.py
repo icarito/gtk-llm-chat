@@ -35,6 +35,7 @@ class ChatBackend(GObject.Object):
 
     __gsignals__ = {
         'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        'response-message': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # (request_id, body) — request_id identifica la pregunta original
         # que esta corrección resuelve (XEP-0308 <replace id=request_id>),
         # None si el backend no pudo correlacionarla (degradación: se trata
@@ -55,6 +56,10 @@ class ChatBackend(GObject.Object):
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'state-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'typing': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
+        # (stanza_id, state, body) para mensajes propios XMPP. state es
+        # pending|sent|failed; body permite correlacionar la burbuja creada
+        # por la UI antes de que el backend asigne el stanza id.
+        'delivery-state': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
         # (options, request_id) — request_id es el stanza id propio del
         # mensaje que trajo estas opciones; None si no se pudo capturar.
         'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object, object)),

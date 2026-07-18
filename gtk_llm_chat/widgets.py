@@ -7,7 +7,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gdk, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -378,10 +378,14 @@ class ErrorWidget(Gtk.Box):
 class MessageWidget(Gtk.Box):
     """Widget para mostrar un mensaje individual"""
 
-    def __init__(self, message, use_markdown=True):
+    def __init__(self, message, use_markdown=True, avatar_path=None,
+                 avatar_anchor=False, on_retry=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.message = message
         self.use_markdown = use_markdown
+        self._on_retry = on_retry
+        self._streaming = False
+        self._avatar_anchor = avatar_anchor
 
         # Configurar el estilo según el remitente
         is_user = message.sender == "user"
@@ -406,8 +410,16 @@ class MessageWidget(Gtk.Box):
             # Espaciador derecho pequeño
             margin_box.append(Gtk.Box(hexpand=False))
         else:
-            # Espaciador izquierdo pequeño
-            margin_box.append(Gtk.Box(hexpand=False))
+            self.avatar = Adw.Avatar(size=32, text='', show_initials=True)
+            self.avatar.set_valign(Gtk.Align.START)
+            self.avatar.set_margin_end(6)
+            if avatar_path:
+                try:
+                    self.avatar.set_custom_image(Gdk.Texture.new_from_filename(avatar_path))
+                except GLib.Error:
+                    pass
+            self.avatar.set_visible(bool(avatar_path))
+            margin_box.append(self.avatar)
             margin_box.append(message_box)
             margin_box.append(Gtk.Box(hexpand=True))  # Espaciador derecho
 
@@ -436,18 +448,74 @@ class MessageWidget(Gtk.Box):
         self._set_message_content(visible_content)
         message_box.append(self.content_box)
 
-        # Agregar timestamp
+        # Estado de progreso/entrega en una cabecera de altura estable. Se
+        # mantiene montada al finalizar para evitar un salto de reflow.
+        self.status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.status_row.set_halign(Gtk.Align.END)
+        self.stream_spinner = Gtk.Spinner()
+        self.stream_spinner.set_size_request(14, 14)
+        self.stream_spinner.set_visible(False)
+        self.status_row.append(self.stream_spinner)
+
         time_label = Gtk.Label(
             label=message.timestamp.strftime("%H:%M"),
             css_classes=['timestamp']
         )
         time_label.set_halign(Gtk.Align.END)
         time_label.set_size_request(60, -1)
-        message_box.append(time_label)
+        self.status_label = Gtk.Label(css_classes=['timestamp'])
+        self.status_label.set_visible(False)
+        self.status_row.append(self.status_label)
+        self.retry_button = Gtk.Button(icon_name='view-refresh-symbolic')
+        self.retry_button.add_css_class('flat')
+        self.retry_button.set_tooltip_text('Retry')
+        self.retry_button.set_visible(False)
+        self.retry_button.connect('clicked', self._retry)
+        self.status_row.append(self.retry_button)
+        self.status_row.append(time_label)
+        message_box.append(self.status_row)
         self.message_box = message_box
         self._quick_response_row = None
 
         self.append(margin_box)
+
+    def _retry(self, _button):
+        if self._on_retry is not None:
+            self._on_retry(self.message.content)
+
+    def set_streaming(self, streaming):
+        self._streaming = bool(streaming)
+        if self._streaming:
+            self.add_css_class('streaming-message')
+            self.stream_spinner.set_visible(True)
+            self.stream_spinner.start()
+            self.status_label.set_label('Working…')
+            self.status_label.set_visible(True)
+        else:
+            self.remove_css_class('streaming-message')
+            self.stream_spinner.stop()
+            self.stream_spinner.set_visible(False)
+            if self.status_label.get_label() == 'Working…':
+                self.status_label.set_visible(False)
+
+    def set_delivery_state(self, state):
+        labels = {'pending': 'Sending…', 'sent': 'Sent', 'failed': 'Failed'}
+        self.status_label.set_label(labels.get(state, ''))
+        self.status_label.set_visible(state in labels)
+        self.retry_button.set_visible(state == 'failed')
+        self.remove_css_class('delivery-failed')
+        if state == 'failed':
+            self.add_css_class('delivery-failed')
+
+    def set_avatar(self, avatar_path):
+        avatar = getattr(self, 'avatar', None)
+        if avatar is None or not self._avatar_anchor:
+            return
+        try:
+            avatar.set_custom_image(Gdk.Texture.new_from_filename(avatar_path))
+            avatar.set_visible(True)
+        except GLib.Error:
+            pass
 
     def _ensure_attachment_preview(self, message_box, image_url):
         if self._attachment_url == image_url and self._attachment_picture is not None:
@@ -496,6 +564,9 @@ class MessageWidget(Gtk.Box):
         label.set_selectable(True)
         label.set_hexpand(True)
         label.connect('activate-link', _on_activate_link)
+        if re.match(r'^\s*(?:🔧|🛠|Tool(?:\s|:)|Using tool|Herramienta:)',
+                    str(content or ''), re.IGNORECASE):
+            label.add_css_class('tool-activity-line')
         self._set_label_content(label, content)
         return label
 

@@ -107,6 +107,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._session_handler_ids = []
         self._xmpp_session = None
         self._composing_timeout_id = None
+        self._streaming_finalize_timeout_ids = {}
+        self._delivery_widgets = {}
+        self._pending_delivery_widgets = {}
+        self._typing_row = None
+        self._last_live_sender = None
+        self._message_widgets_by_id = {}
         self._sticky_response_cards = []
         self._sticky_response_items = []
         self._sticky_response_next_id = 0
@@ -538,6 +544,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Agregar soporte para cancelación
         self.current_message_widget = None
         self.accumulated_response = ""
+        self._delivery_widgets = {}
+        self._pending_delivery_widgets = {}
+        self._message_widgets_by_id = {}
+        self._typing_row = None
+        self._last_live_sender = None
 
         # Add a focus controller to the window
         focus_controller_window = Gtk.EventControllerFocus.new()
@@ -557,6 +568,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._composing_timeout_id:
             GLib.source_remove(self._composing_timeout_id)
             self._composing_timeout_id = None
+        for timeout_id in self._streaming_finalize_timeout_ids.values():
+            GLib.source_remove(timeout_id)
+        self._streaming_finalize_timeout_ids = {}
         if self.backend is not None:
             # Desconectar las señales explícitamente antes de soltar la
             # referencia: shutdown()/cancel() no garantiza que el backend
@@ -665,6 +679,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._backend_handler_ids = [
                 backend.connect('ready', self._on_backend_ready),
                 backend.connect('response', self._on_llm_response),
+                backend.connect('response-message', self._on_response_message),
                 backend.connect('response-correction',
                                 self._on_llm_response_correction),
                 backend.connect('own-carbon-resolved',
@@ -674,6 +689,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.connect('finished', self._on_llm_finished),
                 backend.connect('state-changed', self._on_backend_state_changed),
                 backend.connect('typing', self._on_backend_typing),
+                backend.connect('delivery-state', self._on_delivery_state),
                 backend.connect('quick-responses', self._on_quick_responses),
                 backend.connect('commands', self._on_commands),
             ]
@@ -695,6 +711,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                                 self._on_contact_presence_changed),
                 session.connect('agent-telemetry-changed',
                                 self._on_agent_telemetry_changed),
+                session.connect('avatar-changed', self._on_avatar_changed),
             ]
             self._last_connection_state = session.state
             self._update_connection_status(self._last_connection_state)
@@ -941,6 +958,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 margin-right: 60px;
             }
 
+            .streaming-message .message-content {
+                border-color: alpha(@accent_color, 0.72);
+                background-color: alpha(@accent_color, 0.06);
+            }
+
+            .delivery-failed .message-content {
+                border: 1px solid alpha(@error_color, 0.75);
+            }
+
+            .typing-row {
+                margin-left: 42px;
+                padding: 4px 8px;
+            }
+
+            .tool-activity-line {
+                opacity: 0.72;
+                font-family: monospace;
+            }
+
             .message textview {
                 background: transparent;
                 color: inherit;
@@ -984,7 +1020,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             .sticky-response-card {
                 padding: 8px;
-                border: 1px solid alpha(@theme_fg_color, 0.14);
+                border: 1px solid alpha(@accent_color, 0.70);
+                border-left-width: 4px;
                 background-color: @theme_base_color;
             }
 
@@ -1234,7 +1271,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # con MarkdownView (default de MessageWidget) — texto plano en vivo
         # dejaba el render inconsistente entre sesión y recarga.
         use_markdown = True
-        message_widget = MessageWidget(message, use_markdown=use_markdown)
+        avatar_path = None
+        avatar_anchor = (sender == 'assistant' and self.is_messaging_backend
+                         and self._last_live_sender != 'assistant')
+        if avatar_anchor:
+            session = getattr(self.backend, 'session', None)
+            bare_jid = getattr(self.backend, 'bare_jid', None)
+            if session is not None and bare_jid is not None:
+                avatar_path = session.avatar_paths.get(bare_jid)
+                session.fetch_avatar(bare_jid)
+        message_widget = MessageWidget(
+            message, use_markdown=use_markdown, avatar_path=avatar_path,
+            avatar_anchor=avatar_anchor,
+            on_retry=self._retry_message if sender == 'user' else None)
+        self._last_live_sender = sender
         if DEBUG:
             debug_print(f"[send] display_message sender={sender} len={len(str(content or ''))}")
 
@@ -1274,6 +1324,26 @@ class LLMChatWindow(Adw.ApplicationWindow):
             debug_print(f"[send] display_message done sender={sender}")
 
         return message_widget
+
+    def _retry_message(self, body):
+        if self.backend is None or not self.is_messaging_backend:
+            return
+        widget = self.display_message(body, sender='user')
+        widget.set_delivery_state('pending')
+        self._pending_delivery_widgets.setdefault(body, []).append(widget)
+        self.backend.send_message(body)
+
+    def _on_delivery_state(self, _backend, stanza_id, state, body):
+        widget = self._delivery_widgets.get(stanza_id)
+        if widget is None:
+            pending = self._pending_delivery_widgets.get(body, [])
+            if pending:
+                widget = pending.pop(0)
+                self._delivery_widgets[stanza_id] = widget
+            if not pending:
+                self._pending_delivery_widgets.pop(body, None)
+        if widget is not None:
+            widget.set_delivery_state(state)
 
     def _scroll_to_bottom_messaging(self, force=True):
         """Scroll para XMPP (mensajes discretos, sin streaming).
@@ -1360,8 +1430,35 @@ class LLMChatWindow(Adw.ApplicationWindow):
             bare_jid = getattr(self.backend, 'bare_jid', None)
             self.contact_status_label.set_label(
                 f"{bare_jid} - {_('Typing…')}" if bare_jid else _("Typing…"))
+            if self._typing_row is None:
+                self._typing_row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                self._typing_row.add_css_class('typing-row')
+                spinner = Gtk.Spinner()
+                spinner.start()
+                label = Gtk.Label(label=_("Typing…"))
+                label.add_css_class('dim-label')
+                self._typing_row.append(spinner)
+                self._typing_row.append(label)
+                self.messages_box.append(self._typing_row)
+                self._scroll_to_bottom_after_layout_if_following()
         else:
+            if self._typing_row is not None:
+                self.messages_box.remove(self._typing_row)
+                self._typing_row = None
             self._update_xmpp_title_status()
+
+    def _on_avatar_changed(self, session, bare_jid):
+        if bare_jid != getattr(self.backend, 'bare_jid', None):
+            return
+        path = session.avatar_paths.get(bare_jid)
+        if not path:
+            return
+        for child in list(self.messages_box):
+            message = getattr(child, 'message', None)
+            if (message is not None and message.sender == 'assistant'
+                    and getattr(child, '_avatar_anchor', False)):
+                child.set_avatar(path)
 
     def _on_contact_status_changed(self, session, bare_jid):
         active_bare = getattr(self.backend, 'bare_jid', None)
@@ -2529,8 +2626,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # notificar composing aquí evita trabajo de red en este mismo tick.
             self._clear_input_buffer_silently()
             # Display user message
-            self.display_message(text, sender="user")
+            own_widget = self.display_message(text, sender="user")
             if self.is_messaging_backend:
+                own_widget.set_delivery_state('pending')
+                self._pending_delivery_widgets.setdefault(text, []).append(own_widget)
                 # XMPP: no bloquear la UI ni cambiar al estado busy; hacerlo
                 # aquí añade relayout extra y retrasa el primer frame del
                 # mensaje propio.
@@ -2762,6 +2861,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
                       self.accumulated_response)
         self._scroll_to_bottom_after_layout_if_following()
 
+    def _on_response_message(self, _backend, request_id, body):
+        """Mensaje discreto XMPP con identidad estable para correcciones."""
+        toast = self._approval_transport_toast(body)
+        if toast:
+            self._show_toast(toast)
+            return
+        if self._is_approval_transport_noise(body):
+            return
+        if self._is_context_unavailable_response(body):
+            self.current_message_widget = None
+            self._display_context_unavailable(body)
+            return
+        widget = self.display_message(body, sender='assistant')
+        self.current_message_widget = widget
+        if request_id:
+            self._message_widgets_by_id[request_id] = widget
+
     @staticmethod
     def _is_progress_seed(response):
         text = " ".join(str(response or "").strip().split())
@@ -2871,17 +2987,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
         seguía visible. Si request_id no coincide con ninguna card conocida
         (no se pudo correlacionar, o ya se había limpiado), se degrada a
         actualizar sólo la burbuja más reciente como antes."""
-        resolved_a_card = self._mark_sticky_response_resolved(request_id)
+        resolved_a_card = self._mark_sticky_response_resolved(
+            request_id, resolution_text=body)
         toast = self._approval_transport_toast(body)
         if toast:
             def show_transport_toast():
                 # The corrected stanza is the ephemeral progress seed. Once
                 # the command expires/fails it must disappear, leaving one
                 # toast instead of becoming another permanent chat bubble.
-                widget = self.current_message_widget
+                widget = (self._message_widgets_by_id.get(request_id)
+                          or self.current_message_widget)
                 if widget is not None and widget.get_parent() == self.messages_box:
                     self.messages_box.remove(widget)
-                self.current_message_widget = None
+                self._message_widgets_by_id.pop(request_id, None)
+                if widget is self.current_message_widget:
+                    self.current_message_widget = None
                 self._show_toast(toast)
                 return GLib.SOURCE_REMOVE
 
@@ -2895,14 +3015,29 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if re.search(r'(?i)\bApproval\s+(?:allow-once|allow-always|deny)\s+submitted\b',
                      str(body or '')):
             body = _("Approved; running…")
-        if self.current_message_widget is None:
+        widget = self._message_widgets_by_id.get(request_id)
+        if widget is None:
+            widget = self.current_message_widget
+        if widget is None:
             return
-        GLib.idle_add(self.current_message_widget.update_content, body)
+        widget.set_streaming(True)
+        old_timeout = self._streaming_finalize_timeout_ids.pop(
+            request_id, None)
+        if old_timeout:
+            GLib.source_remove(old_timeout)
+        self._streaming_finalize_timeout_ids[request_id] = GLib.timeout_add(
+            2500, self._finalize_streaming_widget, request_id, widget)
+        GLib.idle_add(widget.update_content, body)
         self._scroll_to_bottom_after_layout_if_following()
         if not resolved_a_card:
             debug_print(
                 f"chat_window: corrección sin card correlacionada "
                 f"(request_id={request_id!r}) — sólo se actualizó la burbuja")
+
+    def _finalize_streaming_widget(self, request_id, widget):
+        self._streaming_finalize_timeout_ids.pop(request_id, None)
+        widget.set_streaming(False)
+        return GLib.SOURCE_REMOVE
 
     def _on_own_carbon_resolved(self, backend, request_id):
         """Carbon de la propia respuesta enviada desde otro dispositivo:
@@ -2946,7 +3081,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._expire_sticky_response_item_from_actions(item['id'], item['responses'])
         self._rebuild_sticky_response_box()
 
-    def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=0):
+    def _mark_sticky_response_resolved(self, request_id, resolved_timeout_ms=4000,
+                                       resolution_text=None):
         """Retira la card cuyo request_id coincide con una corrección XEP-0308.
 
         Una aprobación resuelta ya no requiere respuesta. Mantenerla atenuada
@@ -2959,6 +3095,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         for item in self._sticky_response_items:
             if item.get('request_id') == request_id and not item.get('resolved'):
                 item['resolved'] = True
+                item['resolution_text'] = Message.compact_blank_lines(
+                    resolution_text or _("Resolved"))
                 found = True
         if found:
             if resolved_timeout_ms > 0:
@@ -3012,7 +3150,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header.set_halign(Gtk.Align.FILL)
         is_approval = self._actions_look_like_approval(responses)
+        if is_approval:
+            header.append(resource_manager.create_icon_widget(
+                "changes-prevent-symbolic"))
         title_text = _("Approval required") if is_approval else _("Response needed")
+        if resolved:
+            title_text = _("Resolved")
         if count > 1:
             title_text += f" ({count})"
         title = Gtk.Label(label=title_text)
@@ -3051,6 +3194,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
             info_button.set_popover(popover)
             header.append(info_button)
         card.append(header)
+        if resolved and item.get('resolution_text'):
+            resolution = Gtk.Label(label=item['resolution_text'])
+            resolution.add_css_class('success')
+            resolution.set_xalign(0)
+            resolution.set_wrap(True)
+            card.append(resolution)
         if detail_text:
             preview = Gtk.Label(label=self._sticky_detail_preview(
                 detail_text, approval=is_approval))

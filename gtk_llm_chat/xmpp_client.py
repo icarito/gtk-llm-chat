@@ -86,6 +86,8 @@ LEGACY_TELEMETRY_NODE = 'urn:nanoclaw:telemetry:0'
 # metadata y sirve los bytes (base64) en el de data, pedidos a demanda.
 AVATAR_METADATA_NODE = 'urn:xmpp:avatar:metadata'
 AVATAR_DATA_NODE = 'urn:xmpp:avatar:data'
+VCARD_AVATAR_UPDATE_NS = 'vcard-temp:x:update'
+VCARD_TEMP_NS = 'vcard-temp'
 
 
 def parse_telemetry(item):
@@ -189,6 +191,8 @@ class XmppSession(GObject.Object):
         'agent-telemetry-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # bare_jid — el avatar del contacto cambió y ya está cacheado en disco
         'avatar-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # stanza_id, state, body para mensajes propios.
+        'delivery-state': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
     }
 
     PRESENCE_ONLINE = 'online'
@@ -216,6 +220,7 @@ class XmppSession(GObject.Object):
         self.agent_telemetry = {}
         # bare_jid -> ruta local del avatar cacheado (XEP-0084)
         self.avatar_paths = {}
+        self._pending_delivery = {}
         self._roster_loaded = False
         self._online_resources = {}
         self._conversations = {}
@@ -287,6 +292,9 @@ class XmppSession(GObject.Object):
             StanzaHandler(name='message', callback=self._on_message))
         client.register_handler(
             StanzaHandler(name='presence', callback=self._on_presence))
+        client.register_handler(
+            StanzaHandler(name='a', callback=self._on_sm_ack,
+                          xmlns=Namespace.STREAM_MGMT, priority=60))
 
         # Telemetría del agente: llega por PEP (XEP-0163), no en el <status>.
         # El servidor sólo nos la entrega si nuestras caps piden el nodo con
@@ -375,6 +383,39 @@ class XmppSession(GObject.Object):
                 self.emit('avatar-changed', bare_jid)
             except Exception as exc:  # noqa: BLE001 - un avatar no tumba el chat
                 debug_print(f"[avatar] no se pudo leer el de {bare_jid}: {exc}")
+
+        self._client.send_stanza(iq, callback=on_result)
+
+    def _request_vcard_avatar(self, bare_jid, expected_sha=None):
+        """Fallback XEP-0153/vCard-temp para contactos sin avatar PEP."""
+        if self._client is None:
+            return
+        iq = Iq(typ='get', to=bare_jid)
+        iq.addChild('vCard', namespace=VCARD_TEMP_NS)
+
+        def on_result(_client, response):
+            try:
+                if response.getType() != 'result':
+                    return
+                card = response.getTag('vCard', namespace=VCARD_TEMP_NS)
+                photo = card.getTag('PHOTO') if card is not None else None
+                encoded = photo.getTagData('BINVAL') if photo is not None else None
+                if not encoded:
+                    return
+                import base64
+                import hashlib
+                raw = base64.b64decode(encoded)
+                sha = hashlib.sha1(raw).hexdigest()
+                if expected_sha and sha.lower() != expected_sha.lower():
+                    debug_print(f"[avatar] hash vCard inesperado para {bare_jid}")
+                    return
+                path = self._avatar_cache_path(sha)
+                with open(path, 'wb') as handle:
+                    handle.write(raw)
+                self.avatar_paths[bare_jid] = path
+                self.emit('avatar-changed', bare_jid)
+            except Exception as exc:  # noqa: BLE001
+                debug_print(f"[avatar] fallback vCard falló para {bare_jid}: {exc}")
 
         self._client.send_stanza(iq, callback=on_result)
 
@@ -556,6 +597,7 @@ class XmppSession(GObject.Object):
                 items = t.finish()
             except Exception as exc:  # noqa: BLE001 - sin avatar no pasa nada
                 debug_print(f"[avatar] {bare_jid} no tiene avatar publicado: {exc}")
+                self._request_vcard_avatar(bare_jid)
                 return
             for item in items or []:
                 metadata = item.getTag('metadata', namespace=AVATAR_METADATA_NODE)
@@ -572,6 +614,7 @@ class XmppSession(GObject.Object):
                 else:
                     self._request_avatar_data(bare_jid, sha)
                 return
+            self._request_vcard_avatar(bare_jid)
 
         # weak=False, por lo mismo que en fetch_agent_telemetry: por defecto la
         # referencia es DÉBIL y este callback local moriría al retornar — el IQ
@@ -697,6 +740,16 @@ class XmppSession(GObject.Object):
             return
         ptype = properties.type
         bare = str(properties.jid.bare)
+        avatar_update = _stanza.getTag('x', namespace=VCARD_AVATAR_UPDATE_NS)
+        if avatar_update is not None:
+            sha = (avatar_update.getTagData('photo') or '').strip()
+            if sha:
+                cached = self._avatar_cache_path(sha)
+                if os.path.exists(cached):
+                    self.avatar_paths[bare] = cached
+                    self.emit('avatar-changed', bare)
+                else:
+                    self._request_vcard_avatar(bare, sha)
         # Solicitud de suscripción entrante (spec 002 T6): alguien quiere
         # ver nuestra presencia. La app decide aceptar/rechazar.
         if ptype.value == 'subscribe':
@@ -862,6 +915,12 @@ class XmppSession(GObject.Object):
             return
         bare = str(properties.jid.bare)
         conversation = self._conversations.get(bare)
+        if _stanza.getType() == 'error':
+            stanza_id = _stanza.getAttr('id') or ''
+            pending = self._pending_delivery.pop(stanza_id, None)
+            if pending is not None:
+                self.emit('delivery-state', stanza_id, 'failed', pending['body'])
+            return
         if getattr(properties, 'is_carbon_message', False) \
                 and properties.carbon.is_sent:
             # Copia de una respuesta que YO envié desde otro recurso
@@ -1036,7 +1095,33 @@ class XmppSession(GObject.Object):
         chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
         msg = Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate])
         debug_print(f"XmppSession: enviando mensaje a {to_bare_jid}: {text[:60]!r}")
-        self._client.send_stanza(msg)
+        stanza_id = self._client.send_stanza(msg)
+        smacks = getattr(self._client, '_smacks', None)
+        sequence = getattr(smacks, '_out_h', None) if smacks is not None else None
+        self._pending_delivery[stanza_id] = {
+            'body': text, 'sequence': sequence,
+        }
+        self.emit('delivery-state', stanza_id, 'pending', text)
+        # Sin SM no existe un ack de transporte que esperar: el write local es
+        # el máximo nivel de confirmación disponible.
+        if smacks is None or not getattr(smacks, 'enabled', False):
+            self._mark_delivery_sent(stanza_id)
+        return stanza_id
+
+    def _on_sm_ack(self, _client, stanza, _properties):
+        try:
+            handled = int(stanza.getAttr('h'))
+        except (TypeError, ValueError):
+            return
+        for stanza_id, pending in list(self._pending_delivery.items()):
+            sequence = pending.get('sequence')
+            if sequence is not None and sequence <= handled:
+                self._mark_delivery_sent(stanza_id)
+
+    def _mark_delivery_sent(self, stanza_id):
+        pending = self._pending_delivery.pop(stanza_id, None)
+        if pending is not None:
+            self.emit('delivery-state', stanza_id, 'sent', pending['body'])
 
     # --- Adjuntos: XEP-0363 (HTTP File Upload) + XEP-0066 (OOB) ---
 
@@ -1272,6 +1357,7 @@ class XmppConversation(ChatBackend):
         self._session_handlers = [
             session.connect('state-changed', self._on_session_state),
             session.connect('session-error', self._on_session_error),
+            session.connect('delivery-state', self._on_delivery_state),
         ]
         self._history_shown_from: str | None = None
         self._pending_mam_queryid: str | None = None
@@ -1290,6 +1376,9 @@ class XmppConversation(ChatBackend):
 
     def _on_session_error(self, _session, message):
         self.emit('error', message)
+
+    def _on_delivery_state(self, _session, stanza_id, state, body):
+        self.emit('delivery-state', stanza_id, state, body)
 
     # --- Entrantes (llamados por la sesión) ---
 
@@ -1327,7 +1416,7 @@ class XmppConversation(ChatBackend):
             self._track_pending_request(request_id, quick_responses)
         if request_id:
             self._last_incoming_id = request_id
-        self.emit('response', body)
+        self.emit('response-message', request_id or '', body)
         # Preferir command-items (XEP-0050, responde por IQ off-band) sobre
         # quick-responses (texto en el body) cuando el mensaje trae ambos.
         # El plugin XMPP de OpenClaw manda ambos en el mismo <message> por
