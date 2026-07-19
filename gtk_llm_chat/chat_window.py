@@ -129,6 +129,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # one sticky panel instead of an assistant bubble plus a panel.
         self._pending_action_bodies = {}
         self._tool_output_request_ids = set()
+        self._tool_history_request_ids = set()
+        self._telemetry_tool_widget = None
+        self._telemetry_tool_name = None
         self._restored_active_tool_panel = False
         self._approval_toast_request_ids = set()
         self._last_toast_signature = None
@@ -680,7 +683,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # (self.cid, self.accumulated_response, current_message_widget).
             for handler_id in self._backend_handler_ids:
                 self.backend.disconnect(handler_id)
-            self.backend.shutdown()
+            # XmppConversation is owned and canonicalized by the shared
+            # XmppSession, not by an individual window. Shutting it down here
+            # removes it from session._conversations; the window then binds
+            # the now-orphaned object while incoming stanzas are delivered to
+            # a newly-created instance. GNOME notifications still fire at the
+            # session level, but this window never receives the message.
+            # Disconnecting the window's signal handlers above is sufficient;
+            # the session itself disposes conversations on account shutdown.
+            if getattr(self.backend, 'session', None) is None:
+                self.backend.shutdown()
         self._backend_handler_ids = []
         if self._xmpp_session is not None:
             for handler_id in self._session_handler_ids:
@@ -1087,6 +1099,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 session.connect('agent-telemetry-changed',
                                 self._on_agent_telemetry_changed),
                 session.connect('avatar-changed', self._on_avatar_changed),
+                session.connect('chat-message-delivered',
+                                self._on_session_chat_message_delivered),
             ]
             self._last_connection_state = session.state
             self._update_connection_status(self._last_connection_state)
@@ -1139,6 +1153,40 @@ class LLMChatWindow(Adw.ApplicationWindow):
         "el backend me lo dieron construido" — algo que ahora es siempre cierto
         (spec 009) y que además nunca fue la pregunta que se quería hacer."""
         return self._xmpp_session is not None
+
+    def _on_session_chat_message_delivered(self, _session, bare_jid, body,
+                                           actions, request_id, replace_id):
+        """Reconcile session delivery when a stale backend lost its signal.
+
+        The canonical XmppConversation normally emits synchronously before
+        this hook, so request_id deduplication makes the common path a no-op.
+        This path exists for lifecycle races: notification and persistence
+        succeeded, but the open window was still bound to an older backend.
+        """
+        if getattr(self.backend, 'bare_jid', None) != bare_jid:
+            return
+        stable_id = replace_id or request_id
+        if replace_id:
+            if (replace_id in self._message_widgets_by_id or
+                    replace_id in self._pending_action_bodies):
+                self._on_llm_response_correction(
+                    self.backend, replace_id, body)
+            else:
+                self._on_response_message(self.backend, replace_id, body)
+            return
+        if (stable_id and (
+                stable_id in self._message_widgets_by_id or
+                stable_id in self._pending_action_bodies or
+                stable_id in self._rendered_response_request_ids)):
+            return
+        self._on_response_message(self.backend, request_id, body)
+        action_list = list(actions or [])
+        if not action_list:
+            return
+        if any(item.get('node') and item.get('jid') for item in action_list):
+            self._on_commands(self.backend, action_list, request_id)
+        else:
+            self._on_quick_responses(self.backend, action_list, request_id)
 
     def _update_settings_panel(self):
         """Puebla el sidebar derecho con lo que el backend actual ofrezca.
@@ -1710,6 +1758,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if DEBUG:
             debug_print(f"[send] display_message sender={sender} len={len(str(content or ''))}")
 
+        # Reconciliar intención con posición REAL antes de que append cambie
+        # upper. El flag puede quedar stale tras un relayout; si físicamente
+        # estábamos al fondo, una respuesta nueva debe seguirse suavemente.
+        adj = self.message_scroll.get_vadjustment()
+        if self._at_bottom(adj):
+            self._stick_to_bottom = True
+
         # Enviar un mensaje propio es intención explícita de volver al fondo;
         # la llegada de uno del asistente no, así que ahí se respeta que el
         # usuario pueda estar leyendo más arriba.
@@ -2000,11 +2055,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.activity_label.set_tooltip_text(details or activity or "")
             tool = str(parsed.get('tool') or '').strip()
             if tool:
-                panel_text = str(telemetry.get('tool_detail') or activity)
-                if details and details != activity:
-                    panel_text = f"{panel_text}\n{details}" if panel_text else details
-                self.tool_output_label.set_label(panel_text or tool)
-                self.tool_output_panel.set_visible(True)
+                self.tool_output_panel.set_visible(False)
+                tool_text = str(telemetry.get('tool_detail') or '').strip()
+                if not tool_text:
+                    tool_text = _("🛠️ Usando herramienta: ") + tool
+                widget = self._telemetry_tool_widget
+                if (widget is None or widget.get_parent() != self.messages_box):
+                    current = self.current_message_widget
+                    current_body = getattr(
+                        getattr(current, 'message', None), 'content', '')
+                    if (current is not None and
+                            current.get_parent() == self.messages_box and
+                            (self._is_progress_snapshot(current_body) or
+                             self._is_progress_seed(current_body))):
+                        widget = current
+                        widget.update_content(tool_text)
+                    else:
+                        widget = self.display_message(
+                            tool_text, sender='assistant')
+                    self._telemetry_tool_widget = widget
+                elif self._telemetry_tool_name != tool:
+                    widget.update_content(tool_text)
+                    self._scroll_to_bottom_after_layout_if_following()
+                widget.set_streaming(True)
+                self._telemetry_tool_name = tool
             else:
                 # PEP can briefly report no current tool between the seed and
                 # the first toolCall. It must not erase XEP-0308 progress that
@@ -2020,6 +2094,34 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._set_title_presence_state(XmppSession.PRESENCE_AWAY)
             elif availability == 'available':
                 self._set_title_presence_state(XmppSession.PRESENCE_ONLINE)
+                if self._telemetry_tool_widget is not None:
+                    self._telemetry_tool_widget.set_streaming(False)
+                self._telemetry_tool_widget = None
+                self._telemetry_tool_name = None
+                # PEP is authoritative for the end of a turn. A missing final
+                # XEP-0308 correction must not leave “Recibido · preparando…”
+                # (or the last tool name) pinned forever in the tool panel.
+                self._tool_output_request_ids.clear()
+                self._tool_history_request_ids.clear()
+                self._restored_active_tool_panel = False
+                self.tool_output_label.set_label("")
+                self.tool_output_panel.set_visible(False)
+                self._remove_orphaned_progress_seeds()
+
+    def _remove_orphaned_progress_seeds(self):
+        """Retira seeds sin corrección cuando PEP confirma que terminó el turno."""
+        for request_id, widget in list(self._message_widgets_by_id.items()):
+            message = getattr(widget, 'message', None)
+            body = getattr(message, 'content', '') if message is not None else ''
+            if not self._is_progress_seed(body):
+                continue
+            if widget.get_parent() == self.messages_box:
+                self.messages_box.remove(widget)
+            self._message_widgets_by_id.pop(request_id, None)
+            self._tool_output_request_ids.discard(request_id)
+            self._tool_history_request_ids.discard(request_id)
+            if widget is self.current_message_widget:
+                self.current_message_widget = None
 
     def _update_context_level(self, telemetry):
         used = telemetry.get('context_used')
@@ -2505,6 +2607,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._show_toast(self._approval_transport_toast(body))
             return
         self._show_tool_output(body)
+        self.display_message(self._tool_activity_history_text(body), sender="assistant")
 
     def _on_backend_ready(self, backend, display_name):
         """Maneja la señal 'ready' del backend (modelo cargado / sesión lista)."""
@@ -2601,10 +2704,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # restaurar MAM/cache se omiten estos estados efímeros por completo.
         if (self._approval_transport_toast(body) or
                 self._is_progress_snapshot(body) or
-                self._is_tool_activity_message(body) or
                 self._is_approval_transport_noise(body)):
             return
-        self._xmpp_history_batch.append((body, direction, timestamp))
+        shown_body = (self._tool_activity_history_text(body)
+                      if self._is_tool_activity_message(body) else body)
+        self._xmpp_history_batch.append((shown_body, direction, timestamp))
 
     def _on_xmpp_history_actions(self, backend, body, timestamp,
                                  quick_responses, commands, request_id=None):
@@ -3343,19 +3447,30 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Mensaje discreto XMPP con identidad estable para correcciones."""
         toast = self._approval_transport_toast(body)
         if toast:
+            # Los acuses exitosos pueden llegar como un stanza nuevo, no como
+            # corrección XEP-0308 del request original. En ese caso no existe
+            # un request_id correlacionable, pero la decisión igualmente hace
+            # que toda approval visible deje de ser accionable.
+            if not re.search(r'(?i)failed|already pending', str(body or '')):
+                if self._drop_sticky_approval_items():
+                    self._rebuild_sticky_response_box()
             self._show_toast(toast)
             return
         if self._is_approval_transport_noise(body):
             return
         if self._is_progress_snapshot(body):
+            widget = self.display_message(body, sender='assistant')
+            widget.set_streaming(True)
+            self.current_message_widget = widget
             if request_id:
-                self._tool_output_request_ids.add(request_id)
-            self._show_tool_output(body)
+                self._message_widgets_by_id[request_id] = widget
             return
         if self._is_tool_activity_message(body):
-            # Legacy gateway compatibility: tool status is ephemeral and does
-            # not belong in chat, even when it arrives outside PEP.
-            self._show_tool_output(body)
+            widget = self.display_message(body, sender="assistant")
+            widget.set_streaming(True)
+            self.current_message_widget = widget
+            if request_id:
+                self._message_widgets_by_id[request_id] = widget
             return
         if request_id and self._body_looks_like_approval(body):
             self._pending_action_bodies[request_id] = body
@@ -3401,6 +3516,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _show_tool_output(self, body):
         self.tool_output_label.set_label(Message.compact_blank_lines(body))
         self.tool_output_panel.set_visible(True)
+
+    @staticmethod
+    def _tool_activity_history_text(body, max_chars=280):
+        """Compact, stable chat record for a tool/command panel update."""
+        text = Message.compact_blank_lines(body).strip()
+        first = next((line.strip() for line in text.splitlines()
+                      if line.strip()), _("Tool command"))
+        if len(first) > max_chars:
+            first = first[:max_chars].rstrip() + "…"
+        return first
+
+    @classmethod
+    def _progress_history_text(cls, body):
+        """One stable chat line for a mutable progress/tool stanza."""
+        lines = [line.strip() for line in str(body or '').splitlines()
+                 if line.strip() and not cls._is_progress_seed(line)]
+        if not lines:
+            return ""
+        return cls._tool_activity_history_text("\n".join(lines))
 
     def _approval_toast_text(self, command, request_id=None):
         decision = str(command.get('name', '')).lower()
@@ -3525,8 +3659,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if (self._is_progress_snapshot(body) or
                     self._is_tool_activity_message(body)):
                 self._show_tool_output(body)
+                history_text = self._progress_history_text(body)
+                if (history_text and
+                        request_id not in self._tool_history_request_ids):
+                    self._tool_history_request_ids.add(request_id)
+                    self.display_message(history_text, sender='assistant')
             else:
                 self._tool_output_request_ids.discard(request_id)
+                self._tool_history_request_ids.discard(request_id)
                 self._restored_active_tool_panel = False
                 self.tool_output_panel.set_visible(False)
                 widget = self.display_message(body, sender='assistant')
@@ -3567,6 +3707,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 f"chat_window: corrección ignorada sin burbuja correlacionada "
                 f"(request_id={request_id!r})")
             return
+        if self._at_bottom(self.message_scroll.get_vadjustment()):
+            self._stick_to_bottom = True
         widget.set_streaming(True)
         old_timeout = self._streaming_finalize_timeout_ids.pop(
             request_id, None)
@@ -3792,6 +3934,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
             popover.set_child(detail)
             info_button.set_popover(popover)
             header.append(info_button)
+        close_button = Gtk.Button()
+        close_button.add_css_class("flat")
+        close_button.set_tooltip_text(_("Dismiss"))
+        close_button.set_child(
+            resource_manager.create_icon_widget("window-close-symbolic"))
+        close_button.connect(
+            "clicked",
+            lambda _button: self._remove_sticky_response_item(item['id']))
+        header.append(close_button)
         card.append(header)
         if resolved and item.get('resolution_text'):
             resolution = Gtk.Label(label=item['resolution_text'])
@@ -4065,6 +4216,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
             on_selected,
             detail_text=detail_text,
             request_id=request_id,
+            # No ocultar la decisión antes del IQ result. Queda deshabilitada
+            # mientras está en vuelo y on_success la retira sólo después de
+            # que el gateway responda "Command submitted". on_error vuelve a
+            # habilitarla para reintentar.
             remove_on_select=False)
         self._scroll_to_bottom_after_layout_if_following()
 
@@ -4111,8 +4266,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if not re.fullmatch(r'(?i)Command submitted\.?', body.strip()):
                 on_error(body or _("Approval command was not accepted"))
                 return
-            # Keep the disabled card until the authoritative resolved payload
-            # arrives as XEP-0308. Submission acknowledgement is not resolution.
+            # La decisión aceptada invalida la acción local inmediatamente.
+            # La corrección XEP-0308 sigue actualizando el texto después, pero
+            # no es requisito para limpiar metadata ni para que la card no
+            # resurja al recargar MAM/cache.
+            if request_id and hasattr(self.backend, 'expire_pending_actions'):
+                self.backend.expire_pending_actions(request_id)
+            self._remove_sticky_response_item(None, request_id)
             if request_id not in self._approval_toast_request_ids:
                 self._approval_toast_request_ids.add(request_id)
                 self._show_toast(

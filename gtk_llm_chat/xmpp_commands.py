@@ -45,8 +45,13 @@ class XmppCommandClient:
         if not self.session.is_connected:
             on_error(_("Not connected to the XMPP server"))
             return
+        effective_action = action or AdHocAction.EXECUTE
+        debug_print(
+            "XmppCommandClient: execute "
+            f"jid={command.jid} node={command.node} "
+            f"action={effective_action.value}")
         task = self.session._client.get_module('AdHoc').execute_command(
-            command, action=action, dataform=dataform)
+            command, action=effective_action, dataform=dataform)
         task.add_done_callback(self._done_callback(on_success, on_error))
 
     def _finish_task(self, task, on_success, on_error):

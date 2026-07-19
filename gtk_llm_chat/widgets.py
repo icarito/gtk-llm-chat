@@ -2,6 +2,7 @@ import gi
 import os
 import re
 import sys
+import time
 import urllib.parse
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
@@ -498,8 +499,14 @@ class MessageWidget(Gtk.Box):
 
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.content_box.set_hexpand(True)
+        self.content_scroll = Gtk.ScrolledWindow()
+        self.content_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        self.content_scroll.set_propagate_natural_height(True)
+        self.content_scroll.set_child(self.content_box)
+        self._content_scroll_tick_id = None
         self._set_message_content(visible_content)
-        message_box.append(self.content_box)
+        message_box.append(self.content_scroll)
 
         # Estado de progreso/entrega en una cabecera de altura estable. Se
         # mantiene montada al finalizar para evitar un salto de reflow.
@@ -705,18 +712,29 @@ class MessageWidget(Gtk.Box):
         card.set_hexpand(True)
 
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_hexpand(True)
-        # Let short tables use their real height.  The previous row-count
-        # estimate reserved up to 200 px even when the rendered rows were much
-        # shorter, leaving a conspicuous blank band before following prose.
-        # Tall tables remain bounded and get their own vertical scrollbar.
-        scrolled.set_propagate_natural_height(True)
-        scrolled.set_max_content_height(300)
 
         headers = table.get('headers', [])
         rows = table.get('rows', [])
         align = table.get('align', [])
+        row_count = (1 if headers else 0) + len(rows)
+        # GTK4's ScrolledWindow frequently reports only the first Grid row as
+        # its natural height.  That clipped ordinary two-row Markdown tables
+        # to the header and showed a stray vertical scrollbar.  Give short
+        # tables enough deterministic height for every row and reserve an
+        # internal vertical scrollbar only for genuinely long tables.
+        if row_count <= 8:
+            scrolled.set_policy(
+                Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_min_content_height(max(28, row_count * 28))
+            scrolled.set_max_content_height(300)
+        else:
+            scrolled.set_policy(
+                Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_min_content_height(224)
+            scrolled.set_max_content_height(300)
+        scrolled.set_propagate_natural_height(True)
+
         max_cols = max(
             [len(headers)] + [len(r) for r in rows] + [1])
         grid = Gtk.Grid()
@@ -762,6 +780,18 @@ class MessageWidget(Gtk.Box):
 
     def _set_message_content(self, content):
         self._clear_content_box()
+        is_tool_output = bool(re.search(
+            r'(?i)^\s*(?:⚠️?|✅|❌)?\s*(?:🔧|🛠️?|Tool(?:\s|:)|Using tool|'
+            r'Herramienta:|Exec failed:|Ejecutando\b|Consultando\b|Recibido\b)',
+            str(content or '')))
+        if is_tool_output:
+            self.content_scroll.set_max_content_height(180)
+            self.content_scroll.set_policy(
+                Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        else:
+            self.content_scroll.set_max_content_height(-1)
+            self.content_scroll.set_policy(
+                Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
         if not (content or '').strip():
             return
         parts = _split_code_fences(content)
@@ -783,6 +813,10 @@ class MessageWidget(Gtk.Box):
 
     def update_content(self, new_content):
         """Actualiza el contenido del mensaje"""
+        adjustment = self.content_scroll.get_vadjustment()
+        follow_output = (
+            adjustment.get_upper() -
+            (adjustment.get_value() + adjustment.get_page_size()) < 24)
         self.message.content = Message.compact_blank_lines(new_content)
         debug_print(
             f"[widget] update_content sender={self.message.sender} "
@@ -793,8 +827,32 @@ class MessageWidget(Gtk.Box):
         visible_content = _content_without_attachment_url(
             self.message.content, image_url)
         self._set_message_content(visible_content)
+        if follow_output:
+            GLib.idle_add(self._animate_content_scroll_to_bottom)
         # Cambiar el label ya invalida el layout del widget; no hace falta
         # propagar queue_resize a mano (GTK4 lo hace hacia arriba).
+
+    def _animate_content_scroll_to_bottom(self):
+        adjustment = self.content_scroll.get_vadjustment()
+        target = max(0.0, adjustment.get_upper() - adjustment.get_page_size())
+        start = adjustment.get_value()
+        if abs(target - start) < 1:
+            return GLib.SOURCE_REMOVE
+        if self._content_scroll_tick_id is not None:
+            self.remove_tick_callback(self._content_scroll_tick_id)
+        started_at = time.monotonic()
+
+        def tick(_widget, _clock):
+            elapsed = min(1.0, (time.monotonic() - started_at) / 0.16)
+            eased = 1.0 - pow(1.0 - elapsed, 3)
+            adjustment.set_value(start + (target - start) * eased)
+            if elapsed >= 1.0:
+                self._content_scroll_tick_id = None
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+
+        self._content_scroll_tick_id = self.add_tick_callback(tick)
+        return GLib.SOURCE_REMOVE
 
     def add_quick_responses(self, responses, on_selected):
         """Adjunta botones de respuesta rápida a esta burbuja."""

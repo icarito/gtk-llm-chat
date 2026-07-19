@@ -186,6 +186,10 @@ class XmppSession(GObject.Object):
                              (str, str, GObject.TYPE_PYOBJECT, str)),
         # bare_jid, body — una XEP-0308 editó el último mensaje notificable
         'message-corrected': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
+        # Reconciliation path for open windows: bare_jid, body, actions,
+        # stanza_id, replace_id. Emitted after canonical persistence/delivery.
+        'chat-message-delivered': (GObject.SignalFlags.RUN_LAST, None,
+                                   (str, str, GObject.TYPE_PYOBJECT, str, str)),
         # bare_jid, state ('online'/'offline') — presencia de un contacto (spec 002)
         'presence-changed': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # bare_jid — cambió el status/caps de un contacto agente (spec 005)
@@ -989,10 +993,21 @@ class XmppSession(GObject.Object):
         stanza_id = _stanza.getAttr('id')
         replace_id = self._parse_replace_id(_stanza)
         correction = (replace_id, stanza_id) if replace_id else None
-        if conversation is not None:
-            conversation.deliver(
-                body, quick_responses, commands,
-                correction=correction, request_id=stanza_id)
+        # Notification delivery must never outrun chat delivery. A live
+        # message can arrive while its window is closed, or after reconnect
+        # cleared the conversation registry. Previously we still emitted the
+        # GNOME notification but silently skipped deliver(), so the message
+        # was neither cached nor available when the user opened the chat.
+        # Recreate the lightweight backend first; it persists the event now
+        # and the eventual window reuses the same conversation instance.
+        if conversation is None:
+            conversation = self.get_conversation(bare)
+        conversation.deliver(
+            body, quick_responses, commands,
+            correction=correction, request_id=stanza_id)
+        actions = commands if commands else quick_responses
+        self.emit('chat-message-delivered', bare, body, actions,
+                  stanza_id or '', replace_id or '')
         # Incluso un seed que no merece notificación debe ser el target
         # conocido más reciente: su XEP-0308 final podrá entonces actualizar
         # la UI y crear la notificación que el seed omitió.
@@ -1115,7 +1130,16 @@ class XmppSession(GObject.Object):
             # announcements do not degrade to plain fallback text.
             for child in stanza.getTags('query'):
                 namespace = getattr(child, 'getNamespace', lambda: None)()
-                if namespace == DISCO_ITEMS_NS:
+                # Depending on the nbxmpp/nodes implementation, an explicit
+                # xmlns on an extension inside <message xmlns='jabber:client'>
+                # may remain available only as an attribute while
+                # getNamespace() reports the inherited stanza namespace.
+                # The node value is protocol-specific too, so accept that as
+                # a final unambiguous discriminator.
+                explicit_namespace = child.getAttr('xmlns')
+                if (namespace == DISCO_ITEMS_NS
+                        or explicit_namespace == DISCO_ITEMS_NS
+                        or child.getAttr('node') == COMMANDS_NS):
                     queries.append(child)
         for query in queries:
             node = query.getAttr('node')
