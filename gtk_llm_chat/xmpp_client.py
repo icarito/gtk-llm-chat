@@ -1547,6 +1547,14 @@ class XmppConversation(ChatBackend):
         values = {
             r.get('value', '') for r in (quick_responses or []) if r.get('value')
         }
+        # Nota: las aprobaciones XEP-0050 llegan sin quick_responses, así que
+        # `values` queda vacío y notify_own_carbon no puede correlacionarlas por
+        # texto — aprobar desde otro dispositivo deja la card viva hasta que
+        # llega la corrección XEP-0308 del servidor. No es subsanable desde
+        # aquí: el nodo del comando es opaco (`cmd:<stanzaId>:<índice>`,
+        # send.ts:490) y el texto real "/approve <slug> <decisión>" solo existe
+        # en el registro del gateway. El id igual se registra abajo, así que
+        # deliver() sí reconoce su corrección.
         self._pending_request_ids[request_id] = values
         if len(self._pending_request_ids) > max_tracked:
             # Orden de inserción no se trackea con un dict-de-inserción

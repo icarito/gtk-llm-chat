@@ -3605,6 +3605,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # the actual interactive stanza. The card already contains both.
         if 'Command approval requested' in text and 'Approval:' in text:
             return True
+        if re.search(r'```\s*```', text) and '🔒' not in text:
+            return True
         return False
 
     @staticmethod
@@ -3804,6 +3806,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             if pending:
                 command = pending.group(1).strip()
         metadata = []
+        warning_match = re.search(r'(?m)^\s*⚠️\s*(.+?)\s*$', text)
+        if warning_match and warning_match.group(1).strip():
+            metadata.append(f"⚠️ {warning_match.group(1).strip()}")
         for label in ("Host", "CWD", "Expires in"):
             match = re.search(rf'(?im)^\s*{re.escape(label)}:\s*(.+?)\s*$', text)
             if match:
@@ -4066,9 +4071,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _sticky_detail_preview(detail_text, max_chars=160, approval=False):
         text = Message.compact_blank_lines(detail_text)
         if approval:
-            # New XMPP approval bodies put the useful summary on the lock line.
-            # Keep compatibility with cached/older verbose payloads by pulling
-            # the command out of the fenced "Pending command" section.
+            warning = ""
+            warning_match = re.search(r'(?m)^\s*⚠️\s*(.+?)\s*$', text)
+            if warning_match and warning_match.group(1).strip():
+                warning = f"⚠️ {warning_match.group(1).strip()} "
             lock_line = re.search(r'(?m)^\s*🔒\s*(.+?)\s*$', text)
             if lock_line:
                 text = lock_line.group(1).strip()
@@ -4078,10 +4084,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 if pending and pending.group(1).strip():
                     text = pending.group(1).strip()
                 else:
-                    # Empty warning fences and approval metadata are never a
-                    # useful sticky summary.
                     text = re.sub(r'```(?:txt)?\s*```', '', text,
-                                  flags=re.IGNORECASE)
+                                   flags=re.IGNORECASE)
+            text = warning + text
         text = Message.compact_blank_lines(text).replace("\n", " ")
         if len(text) <= max_chars:
             return text
