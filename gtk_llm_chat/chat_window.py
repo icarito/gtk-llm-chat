@@ -469,14 +469,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # uso de contexto arriba, y abajo el modelo activo junto a la acción
         # (enviar / cancelar). Toda la información de estado vive aquí, en el
         # sitio donde el usuario ya está mirando, en vez de en una barra aparte.
-        input_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        input_box.add_css_class('toolbar')
-        input_box.add_css_class('card')
-        style_manager.apply_to_widget(input_box, "input-container")
-        input_box.set_margin_top(6)
-        input_box.set_margin_bottom(6)
-        input_box.set_margin_start(6)
-        input_box.set_margin_end(6)
+        self.input_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.input_box.add_css_class('toolbar')
+        self.input_box.add_css_class('card')
+        style_manager.apply_to_widget(self.input_box, "input-container")
+        self.input_box.set_margin_top(6)
+        self.input_box.set_margin_bottom(6)
+        self.input_box.set_margin_start(6)
+        self.input_box.set_margin_end(6)
 
         # Uso de contexto. Arranca oculto: sólo hay dato cuando el agente lo
         # publica en su presencia (ctx_used/ctx_max), y una barra vacía sin
@@ -497,7 +497,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.context_level.add_css_class('context-level')
         self.context_level.set_visible(False)
         style_manager.apply_to_widget(self.context_level, "context-level")
-        input_box.append(self.context_level)
+        self.input_box.append(self.context_level)
 
         # TextView para entrada
         self.input_text = Gtk.TextView()
@@ -544,7 +544,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.input_overlay.add_overlay(self.recording_revealer)
         self.input_overlay.set_hexpand(True)
 
-        input_box.append(self.input_overlay)
+        self.input_box.append(self.input_overlay)
 
         # Fila inferior: modelo activo (izquierda) · actividad · acción (derecha)
         input_actions = Gtk.Box(
@@ -630,7 +630,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         input_actions.append(self.mic_button)
 
-        input_box.append(input_actions)
+        self.input_box.append(input_actions)
 
         # El toast vive sólo sobre la lista de mensajes. Las acciones
         # pendientes quedan arriba y fuera del overlay, de modo que una
@@ -641,7 +641,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Ensamblar la interfaz de chat
         chat_content_box.append(self.sticky_response_box)
         chat_content_box.append(self.toast_overlay)
-        chat_content_box.append(input_box)
+        chat_content_box.append(self.input_box)
 
         # El chat vive dentro del split de ajustes, y ése dentro del del roster:
         # roster | chat | ajustes, cada panel con su propio toggle.
@@ -1080,6 +1080,16 @@ class LLMChatWindow(Adw.ApplicationWindow):
             "show-sidebar", self.roster_button, "active",
             GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE
         )
+        # Sin conversación (el picker) no hay a quién escribirle: ocultar la
+        # barra de escribir entera, no deshabilitarla vía set_enabled(False)
+        # más abajo. Ese método reutiliza _set_busy(True) — pensado para
+        # "generando respuesta" — y activaba el spinner con el botón "Stop"
+        # indefinidamente, sin que nada lo apagara (no hay backend generando
+        # nada acá, y tocar "Stop" tampoco haría nada porque backend es
+        # None). set_enabled no toca visibilidad, así que si esta llamada
+        # SÍ trae backend (conversión del picker al elegir un contacto)
+        # tiene que reaparecer explícitamente acá.
+        self.input_box.set_visible(has_conversation)
         self.set_enabled(True)
         self.split_view.set_collapsed(True)
         self.split_view.set_show_sidebar(False)
@@ -1165,10 +1175,10 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         if not has_conversation:
             # Ventana sin conversación (el "picker"): el roster se ve de
-            # entrada, no escondido tras un toggle.
+            # entrada, no escondido tras un toggle. input_box ya se ocultó
+            # arriba (ver comentario junto a self.input_box.set_visible).
             self.split_view.set_show_sidebar(True)
             self.split_view.set_collapsed(False)
-            self.set_enabled(False)
 
         self._update_settings_panel()
 
