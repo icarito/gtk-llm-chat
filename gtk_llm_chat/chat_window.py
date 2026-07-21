@@ -51,6 +51,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
     _INPUT_MIN_HEIGHT = 60
     _INPUT_MAX_HEIGHT = 120
 
+    # Panel de actividad de herramientas. Antes era un tope fijo de 144px
+    # (~6 líneas monoespaciadas): la salida de casi cualquier exec real
+    # —git status, un traceback, un ls largo— se cortaba y obligaba a hacer
+    # scroll dentro de una ventanita. Ahora es proporcional a la ventana, con
+    # un suelo utilizable y un techo que no se coma la conversación.
+    _TOOL_OUTPUT_MIN_HEIGHT = 260
+    _TOOL_OUTPUT_MAX_HEIGHT = 560
+    _TOOL_OUTPUT_HEIGHT_FRACTION = 0.42
+
     def __init__(self, config=None, chat_history=None, backend=None,
                  xmpp_session=None, **kwargs):
         super().__init__(**kwargs)
@@ -189,6 +198,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # Fijar tamaño por defecto y mínimo para evitar problemas de layout/segfault
         self.set_default_size(420, 550)
         self.set_size_request(400, 300)  # tamaño mínimo seguro
+        # El panel de herramientas (tool_output_scroll, creado más abajo) se
+        # calcula contra el alto real de la ventana en _sync_tool_output_height.
+        # notify::default-height cubre el resize del usuario; "map" cubre el
+        # primer alto que asigna el WM, que puede diferir del default si la
+        # sesión anterior quedó maximizada o en tiling.
+        self.connect("map", lambda *_: self._sync_tool_output_height())
 
         # Mantener referencia al último mensaje enviado
         self.last_message = None
@@ -282,7 +297,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.tool_output_scroll = Gtk.ScrolledWindow()
         self.tool_output_scroll.set_policy(
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.tool_output_scroll.set_max_content_height(144)
+        # Altura adaptativa: 144px fijos dejaban ~6 líneas monoespaciadas, muy
+        # poco para la salida de un exec (un `git status` o un traceback ya se
+        # cortaban). Se recalcula contra la altura real de la ventana en
+        # _sync_tool_output_height; este valor es sólo el arranque, antes de
+        # que la ventana tenga tamaño asignado.
+        self.tool_output_scroll.set_max_content_height(
+            self._TOOL_OUTPUT_MIN_HEIGHT)
         self.tool_output_scroll.set_propagate_natural_height(True)
         self.tool_output_scroll.set_child(self.tool_output_label)
         self.tool_output_panel = Adw.Bin()
@@ -374,6 +395,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # backend actual y puede cambiar si la ventana se re-bindea.
         # Conectar al cambio de 'show-sidebar' para cambiar el icono y foco
         self.split_view.connect("notify::show-sidebar", self._on_sidebar_visibility_changed)
+        # El panel de herramientas se redimensiona con la ventana: sin esto el
+        # tope quedaba fijado al arranque, cuando la ventana todavía no tiene
+        # su tamaño real (maximizada, restaurada de sesión, o en tiling).
+        self.connect("notify::default-height", self._on_window_height_changed)
+        self.connect("notify::maximized", self._on_window_height_changed)
 
         # --- Contenido principal (el chat) ---
         chat_content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -1258,6 +1284,23 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self.roster_sidebar.show_list()
             self.input_text.grab_focus()
 
+    def _on_window_height_changed(self, *_args):
+        self._sync_tool_output_height()
+
+    def _sync_tool_output_height(self):
+        """Recalcula el tope del panel de actividad contra el alto real de la
+        ventana. Proporcional en vez de fijo: en una ventana grande se ve la
+        salida completa de un exec normal; en una chica no se come el chat."""
+        height = self.get_height()
+        if height <= 0:
+            # Sin superficie asignada todavía (arranque): mantener el mínimo
+            # ya puesto por __init__ en vez de calcular sobre un 0.
+            return
+        target = int(height * self._TOOL_OUTPUT_HEIGHT_FRACTION)
+        target = max(self._TOOL_OUTPUT_MIN_HEIGHT,
+                     min(self._TOOL_OUTPUT_MAX_HEIGHT, target))
+        self.tool_output_scroll.set_max_content_height(target)
+
     def _on_roster_contact_selected(self, bare_jid):
         """Un contacto XMPP elegido en el roster: abre/enfoca su ventana."""
         session = getattr(self.backend, 'session', None) or self._xmpp_session
@@ -1723,15 +1766,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._on_send_clicked(None)
         return True
 
-    def display_message(self, content, sender="user"):
+    def display_message(self, content, sender="user", timestamp=None):
         """
         Displays a message in the chat window.
 
         Args:
             content (str): The text content of the message.
             sender (str): The sender of the message ("user" or "assistant").
+            timestamp (datetime, optional): Hora real del mensaje. Sin esto,
+                Message cae en datetime.now() (hora de RENDERIZADO), lo que
+                rompía _has_recent_matching_bubble (ventana de 60s) contra el
+                timestamp real que trae el catch-up de MAM al reconectar —
+                el mismo mensaje terminaba pintado dos veces si pasaba más de
+                un minuto entre la burbuja en vivo y la re-sincronización.
         """
-        message = Message(content, sender)
+        message = Message(content, sender, timestamp=timestamp)
 
         if sender == "user":
             self.last_message = message
@@ -2109,11 +2158,20 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._remove_orphaned_progress_seeds()
 
     def _remove_orphaned_progress_seeds(self):
-        """Retira seeds sin corrección cuando PEP confirma que terminó el turno."""
+        """Retira seeds y burbujas de actividad de herramienta sin corrección
+        cuando PEP confirma que terminó el turno.
+
+        Antes solo miraba _is_progress_seed ("Recibido · preparando…"), pero
+        la burbuja "🛠️ Usando herramienta: X" que crea _apply_agent_telemetry
+        (vía display_message cuando no hay progress seed que reusar) tiene
+        otro texto y nunca calificaba — quedaba pegada en el historial para
+        siempre, como mensaje del asistente, aunque solo fuera indicador de
+        actividad transitoria."""
         for request_id, widget in list(self._message_widgets_by_id.items()):
             message = getattr(widget, 'message', None)
             body = getattr(message, 'content', '') if message is not None else ''
-            if not self._is_progress_seed(body):
+            if not (self._is_progress_seed(body)
+                    or self._is_tool_activity_message(body)):
                 continue
             if widget.get_parent() == self.messages_box:
                 self.messages_box.remove(widget)
@@ -2775,6 +2833,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
     # Un fallback más corto sólo oculta la card: NO cancela el pending del
     # gateway y deja la sesión bloqueada con “approval already pending”.
     _APPROVAL_ACTION_FALLBACK_MAX_AGE_MS = 30 * 60 * 1000
+    # Cuánto se espera el IQ result de una decisión antes de rehabilitar la
+    # card. No es un timeout de la aprobación (esa la gobierna el gateway, y
+    # acortarla del lado del cliente es justo el error documentado arriba):
+    # sólo cubre el caso de que la respuesta al IQ no llegue nunca, que dejaba
+    # la card en “Enviada…” de forma permanente. Generoso a propósito, para no
+    # rehabilitar una decisión que en realidad sí viajó.
+    _APPROVAL_IQ_TIMEOUT_SECONDS = 30
 
     def _restore_history_actions(self, body, timestamp, quick_responses,
                                  commands, request_id=None):
@@ -3443,8 +3508,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
                       self.accumulated_response)
         self._scroll_to_bottom_after_layout_if_following()
 
-    def _on_response_message(self, _backend, request_id, body):
+    def _on_response_message(self, _backend, request_id, body, timestamp=''):
         """Mensaje discreto XMPP con identidad estable para correcciones."""
+        ts = self._parse_history_ts(timestamp) if timestamp else None
         toast = self._approval_transport_toast(body)
         if toast:
             # Los acuses exitosos pueden llegar como un stanza nuevo, no como
@@ -3459,14 +3525,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._is_approval_transport_noise(body):
             return
         if self._is_progress_snapshot(body):
-            widget = self.display_message(body, sender='assistant')
+            widget = self.display_message(body, sender='assistant', timestamp=ts)
             widget.set_streaming(True)
             self.current_message_widget = widget
             if request_id:
                 self._message_widgets_by_id[request_id] = widget
             return
         if self._is_tool_activity_message(body):
-            widget = self.display_message(body, sender="assistant")
+            widget = self.display_message(body, sender="assistant", timestamp=ts)
             widget.set_streaming(True)
             self.current_message_widget = widget
             if request_id:
@@ -3482,7 +3548,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.current_message_widget = None
             self._display_context_unavailable(body)
             return
-        widget = self.display_message(body, sender='assistant')
+        widget = self.display_message(body, sender='assistant', timestamp=ts)
         self.current_message_widget = widget
         if request_id:
             self._message_widgets_by_id[request_id] = widget
@@ -3994,6 +4060,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 continue
             button = Gtk.Button(label=label)
             button.add_css_class("pill")
+            self._apply_action_button_style(button, response)
             button.set_sensitive(not resolved and not submitted)
             button.connect("clicked", handle_click, response)
             flow.append(button)
@@ -4058,6 +4125,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                     continue
                 button = Gtk.Button(label=label)
                 button.add_css_class("pill")
+                self._apply_action_button_style(button, response)
                 button.set_sensitive(not resolved and not submitted)
                 button.connect("clicked", handle_click, response)
                 flow.append(button)
@@ -4066,6 +4134,25 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 row.append(flow)
             box.append(row)
         return box
+
+    @staticmethod
+    def _apply_action_button_style(button, action):
+        # El plugin XMPP emite un hint de color no estándar (primary|secondary|
+        # success|danger) tanto en <response style=...> como en el <item> de
+        # XEP-0050. Ambos parsers lo conservan y la burbuja ya lo pintaba
+        # (widgets.add_quick_responses), pero la sticky card lo descartaba al
+        # renderizar: las approvals salían todas del mismo color, con Deny
+        # indistinguible de Allow. Mismas clases qr-* que la burbuja, definidas
+        # en style_manager con background explícito para ganarle a .pill.
+        style = (action.get('style') or '').strip().lower()
+        css_class = {
+            'primary': 'qr-primary',
+            'success': 'qr-success',
+            'danger': 'qr-danger',
+            'secondary': 'qr-secondary',
+        }.get(style)
+        if css_class:
+            button.add_css_class(css_class)
 
     @staticmethod
     def _sticky_detail_preview(detail_text, max_chars=160, approval=False):
@@ -4252,14 +4339,50 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # pendientes y no debe recolectarse antes de que llegue la respuesta.
         self._agent_command_client = client
         adhoc = AdHocCommand(jid=JID.from_string(jid), node=node, name=name)
+        # Una respuesta tardía tras el timeout no debe reabrir ni cerrar nada:
+        # el estado ya se decidió. Se comparte por closure entre las tres vías
+        # (éxito, error y vencimiento) para que sólo la primera gane.
+        settled = {'done': False}
+
+        def claim():
+            if settled['done']:
+                return False
+            settled['done'] = True
+            return True
+
         def on_error(message):
+            if not claim():
+                return
             for item in self._sticky_response_items:
                 if item.get('request_id') == request_id:
                     item['submitted'] = False
             self._rebuild_sticky_response_box()
             self._on_llm_error(self.backend, message)
 
+        def on_timeout():
+            # Sin esto, un IQ result que nunca llega (servidor caído, sesión
+            # perdida, stanza descartada) dejaba la card deshabilitada en
+            # "Enviada…" hasta reiniciar la app: la decisión no se envió y el
+            # usuario se quedaba sin ninguna superficie para reintentar.
+            # Rehabilitar es lo seguro — la aprobación sigue viva en el
+            # gateway y un reintento es idempotente, mientras que darla por
+            # buena mentiría sobre algo que no se resolvió.
+            if not claim():
+                return False
+            for item in self._sticky_response_items:
+                if item.get('request_id') == request_id:
+                    item['submitted'] = False
+            self._rebuild_sticky_response_box()
+            self._show_toast(
+                _("No response from the server. Try again."))
+            return False  # one-shot
+
+        GLib.timeout_add_seconds(
+            self._APPROVAL_IQ_TIMEOUT_SECONDS, on_timeout)
+
         def on_success(result):
+            if not claim():
+                return
             from .xmpp_commands import command_result_body
             body = command_result_body(result)
             if re.fullmatch(r'(?i)Command expired\.?', body.strip()):

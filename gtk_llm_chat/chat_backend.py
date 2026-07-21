@@ -35,11 +35,18 @@ class ChatBackend(GObject.Object):
 
     __gsignals__ = {
         'response': (GObject.SignalFlags.RUN_LAST, None, (str,)),
-        'response-message': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
-        # (request_id, body) — request_id identifica la pregunta original
-        # que esta corrección resuelve (XEP-0308 <replace id=request_id>),
-        # None si el backend no pudo correlacionarla (degradación: se trata
-        # como mensaje nuevo, ver XmppConversation.deliver()).
+        'response-message': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
+        # (request_id, body, timestamp) — request_id identifica la pregunta
+        # original que esta corrección resuelve (XEP-0308 <replace
+        # id=request_id>), None si el backend no pudo correlacionarla
+        # (degradación: se trata como mensaje nuevo, ver
+        # XmppConversation.deliver()). timestamp es ISO-8601 UTC del momento
+        # de recepción, o "" si el backend no lo provee (p.ej. LLMClient
+        # local): sin esto, la burbuja en vivo quedaba marcada con la hora de
+        # RENDERIZADO en pantalla en vez de la hora real del mensaje, y la
+        # deduplicación contra el catch-up de MAM (_has_recent_matching_bubble,
+        # ventana de 60s) fallaba si pasaba más de un minuto entre ambas —
+        # el mismo mensaje terminaba pintado dos veces.
         'response-correction': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # request_id de una pregunta resuelta por un carbon (XEP-0280) de la
         # propia respuesta enviada desde otro recurso — señal secundaria,

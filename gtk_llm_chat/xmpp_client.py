@@ -1485,7 +1485,7 @@ class XmppConversation(ChatBackend):
                         self.bare_jid, body, 'in', ts,
                         request_id=replace_id)
                 self._track_incoming_id(replace_id)
-                self.emit('response-message', replace_id, body)
+                self.emit('response-message', replace_id, body, ts)
                 self.emit('finished', True)
                 return
         from datetime import datetime, timezone
@@ -1508,7 +1508,7 @@ class XmppConversation(ChatBackend):
             self._track_pending_request(request_id, quick_responses)
         if request_id:
             self._track_incoming_id(request_id)
-        self.emit('response-message', request_id or '', body)
+        self.emit('response-message', request_id or '', body, ts)
         # Preferir command-items (XEP-0050, responde por IQ off-band) sobre
         # quick-responses (texto en el body) cuando el mensaje trae ambos.
         # El plugin XMPP de OpenClaw manda ambos en el mismo <message> por
