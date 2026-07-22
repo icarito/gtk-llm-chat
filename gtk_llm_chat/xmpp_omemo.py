@@ -365,6 +365,7 @@ class OMEMOEngine:
     def initialize(self, label: str):
         """Inicializa las claves OMEMO en segundo plano."""
         XmppOMEMOSessionManager.set_session_instance(self.session)
+        print(f"[omemo-init] initialize-enter source={__file__} jid={self.jid_str}", flush=True)
         debug_print(
             f"[omemo-init] start jid={self.jid_str} "
             f"oldmemo=True twomemo={twomemo_available} storage={self.storage_path}"
@@ -376,6 +377,7 @@ class OMEMOEngine:
             backends.append(Twomemo(self.storage))
 
         async def _init_coro():
+            print(f"[omemo-init] create-start jid={self.jid_str}", flush=True)
             debug_print(f"[omemo-init] create-start jid={self.jid_str}")
             manager = await XmppOMEMOSessionManager.create(
                 backends=backends,
@@ -384,6 +386,7 @@ class OMEMOEngine:
                 initial_own_label=label,
                 undecided_trust_level_name="undecided"
             )
+            print(f"[omemo-init] create-done jid={self.jid_str}", flush=True)
             debug_print(f"[omemo-init] create-done jid={self.jid_str}")
             # Salir de modo sincronización de historial inicial
             await manager.after_history_sync()
