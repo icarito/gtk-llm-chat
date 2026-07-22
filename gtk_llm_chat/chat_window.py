@@ -3378,8 +3378,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         started = time.monotonic()
         if DEBUG:
             debug_print(f"[send] start backend send len={len(str(prompt_text or ''))}")
-        # Enviar el prompt usando el ChatBackend
-        self.backend.send_message(prompt_text)
+        # Enviar el prompt usando el ChatBackend. Un backend que revienta
+        # aquí (p.ej. la conexión XMPP caída justo a mitad del envío) se
+        # tragaba la excepción en el idle de GLib: sin 'error' ni 'finished',
+        # el input y el spinner quedaban trabados y la burbuja en "Sending…".
+        try:
+            self.backend.send_message(prompt_text)
+        except Exception as exc:  # noqa: BLE001
+            debug_print(f"[send] backend send_message raised: {exc}")
+            self._on_llm_error(self.backend, str(exc))
         elapsed_ms = (time.monotonic() - started) * 1000.0
         if DEBUG:
             debug_print(f"[send] backend send returned in {elapsed_ms:.1f}ms")
@@ -3406,8 +3413,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             session = getattr(self.backend, 'session', None)
             if session is not None and session.is_connected:
                 GLib.timeout_add_seconds(4, self._restore_connection_status)
-        # Verificar si el widget actual existe y es hijo del messages_box
-        if self.current_message_widget is not None:
+        # Sólo el backend LLM deja un placeholder de respuesta vacío que
+        # conviene retirar al fallar. En mensajería (XMPP)
+        # current_message_widget es la ÚLTIMA burbuja real recibida:
+        # quitarla aquí hacía "desaparecer" un mensaje del chat cada vez
+        # que fallaba un comando ad-hoc o un envío.
+        if (self.current_message_widget is not None
+                and not self.is_messaging_backend):
             is_child = (self.current_message_widget.get_parent() ==
                         self.messages_box)
             # Si es hijo, removerlo
@@ -3545,13 +3557,27 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.current_message_widget = widget
             if request_id:
                 self._message_widgets_by_id[request_id] = widget
+                # Tope de seguridad: si el turno muere antes del primer
+                # edit, el spinner no se queda girando para siempre.
+                self._arm_streaming_finalize(
+                    request_id, widget, self._STREAMING_STALE_TIMEOUT_MS)
             return
         if self._is_tool_activity_message(body):
+            # Un fallo de herramienta/comando ("❌ …", "Exec failed: …") es
+            # el FINAL del turno, no actividad en curso: no gira y además
+            # apaga cualquier burbuja de progreso anterior.
+            terminal = self._is_terminal_tool_message(body)
             widget = self.display_message(body, sender="assistant", timestamp=ts)
-            widget.set_streaming(True)
+            if terminal:
+                self._stop_tracked_streaming_widgets()
+            else:
+                widget.set_streaming(True)
             self.current_message_widget = widget
             if request_id:
                 self._message_widgets_by_id[request_id] = widget
+                if not terminal:
+                    self._arm_streaming_finalize(
+                        request_id, widget, self._STREAMING_STALE_TIMEOUT_MS)
             return
         if request_id and self._body_looks_like_approval(body):
             self._pending_action_bodies[request_id] = body
@@ -3563,6 +3589,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self.current_message_widget = None
             self._display_context_unavailable(body)
             return
+        # Mensaje definitivo del asistente: el turno terminó, así que ninguna
+        # burbuja de progreso anterior puede seguir en 'Working…'.
+        self._stop_tracked_streaming_widgets()
         widget = self.display_message(body, sender='assistant', timestamp=ts)
         self.current_message_widget = widget
         if request_id:
@@ -3593,6 +3622,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
             r'^\s*(?:⚠️?|✅|❌)?\s*'
             r'(?:🔧|🛠️?|Tool(?:\s|:)|Using tool|Herramienta:|Exec failed:)',
             str(response or ''), re.IGNORECASE))
+
+    @staticmethod
+    def _is_terminal_tool_message(response):
+        """Fallo de herramienta/comando que CIERRA el turno ("❌ …",
+        "Exec failed: …"). Llega como stanza nuevo, no como corrección del
+        seed, así que sin distinguirlo la burbuja quedaba en 'Working…'.
+        El prefijo del agente varía ("⚠️ 🛠 ", "⚠️ ", ninguno): el marcador
+        se busca en la primera línea, sin anclarlo a emojis concretos."""
+        text = str(response or '').lstrip()
+        if text.startswith('❌'):
+            return True
+        first_line = text.split('\n', 1)[0]
+        return bool(re.search(r'(?i)\bExec failed\s*:', first_line))
 
     def _show_tool_output(self, body):
         self.tool_output_label.set_label(Message.compact_blank_lines(body))
@@ -3793,12 +3835,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self._at_bottom(self.message_scroll.get_vadjustment()):
             self._stick_to_bottom = True
         widget.set_streaming(True)
-        old_timeout = self._streaming_finalize_timeout_ids.pop(
-            request_id, None)
-        if old_timeout:
-            GLib.source_remove(old_timeout)
-        self._streaming_finalize_timeout_ids[request_id] = GLib.timeout_add(
-            2500, self._finalize_streaming_widget, request_id, widget)
+        self._arm_streaming_finalize(
+            request_id, widget, self._STREAMING_FINALIZE_TIMEOUT_MS)
         GLib.idle_add(widget.update_content, body)
         self._scroll_to_bottom_after_layout_if_following()
         if not resolved_a_card:
@@ -3810,6 +3848,46 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._streaming_finalize_timeout_ids.pop(request_id, None)
         widget.set_streaming(False)
         return GLib.SOURCE_REMOVE
+
+    # Cuánto espera una burbuja en 'Working…' a que llegue la corrección que
+    # la cierra. Tras cada corrección basta un settle corto; para un seed o
+    # actividad recién creados (el primer edit puede tardar) hace falta más.
+    # Sin un tope, un turno que muere a mitad dejaba la burbuja girando
+    # para siempre.
+    _STREAMING_FINALIZE_TIMEOUT_MS = 2500
+    _STREAMING_STALE_TIMEOUT_MS = 45000
+
+    def _arm_streaming_finalize(self, request_id, widget, timeout_ms):
+        old_timeout = self._streaming_finalize_timeout_ids.pop(
+            request_id, None)
+        if old_timeout:
+            GLib.source_remove(old_timeout)
+        self._streaming_finalize_timeout_ids[request_id] = GLib.timeout_add(
+            timeout_ms, self._finalize_streaming_widget, request_id, widget)
+
+    def _stop_tracked_streaming_widgets(self, except_request_id=None):
+        """Apaga el 'Working…' de todas las burbujas rastreadas.
+
+        Red de seguridad para los turnos que terminan SIN una corrección
+        XEP-0308 para su seed: la respuesta final llega como stanza nuevo,
+        el comando falla ("❌ …"), o el agente muere a mitad. Antes sólo una
+        corrección o un PEP 'available' apagaban el spinner, así que esas
+        burbujas se quedaban en 'Working…' indefinidamente."""
+        for request_id, widget in list(self._message_widgets_by_id.items()):
+            if request_id == except_request_id:
+                continue
+            if getattr(widget, '_streaming', False):
+                widget.set_streaming(False)
+        for request_id, timeout_id in list(
+                self._streaming_finalize_timeout_ids.items()):
+            if request_id == except_request_id:
+                continue
+            GLib.source_remove(timeout_id)
+            self._streaming_finalize_timeout_ids.pop(request_id, None)
+        telemetry_widget = self._telemetry_tool_widget
+        if (telemetry_widget is not None
+                and getattr(telemetry_widget, '_streaming', False)):
+            telemetry_widget.set_streaming(False)
 
     def _on_own_carbon_resolved(self, backend, request_id):
         """Carbon de la propia respuesta enviada desde otro dispositivo:

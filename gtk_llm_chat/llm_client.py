@@ -46,11 +46,16 @@ class LLMClient(ChatBackend):
         self._ensure_model_loaded() # Ensure model is loaded before sending
         if self._is_generating_flag:
             GLib.idle_add(self.emit, 'error', "Ya se está generando una respuesta.")
+            # 'error' sin 'finished' rompe el contrato del backend: la
+            # ventana se rehabilita en _on_llm_error, pero otros oyentes
+            # (p.ej. estado busy) esperan el cierre del turno.
+            GLib.idle_add(self.emit, 'finished', False)
             return
 
         if self._init_error or not self.model:
             GLib.idle_add(self.emit, 'error',
                           f"Error al inicializar el modelo: {self._init_error or 'Modelo no disponible'}")
+            GLib.idle_add(self.emit, 'finished', False)
             return
 
         self._is_generating_flag = True

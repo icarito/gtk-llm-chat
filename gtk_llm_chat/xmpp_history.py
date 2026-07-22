@@ -446,13 +446,39 @@ class XmppHistory:
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,
-                                      window_seconds: int = 30) -> bool:
+                                      window_seconds: int = 120) -> bool:
         return self.attach_mam_to_recent_message(
             bare_jid, body, 'out', timestamp, mam_id, window_seconds)
 
+    def attach_mam_to_request_id(self, bare_jid: str, request_id: str,
+                                 timestamp: str, mam_id: str) -> bool:
+        """Adjunta el mam_id del archivo a una fila local por su stanza id.
+
+        Un seed de streaming guardado en vivo ya no tiene el body original
+        (las correcciones XEP-0308 lo reescribieron), así que el match por
+        body de attach_mam_to_recent_message nunca lo encuentra y MAM
+        acababa insertando una segunda fila con el texto viejo. El request_id
+        es estable entre el stanza en vivo y su copia archivada.
+        """
+        if not request_id or not mam_id:
+            return False
+        conn = self.get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE messages SET mam_id = ?, timestamp = ? "
+                "WHERE bare_jid = ? AND request_id = ? AND direction = 'in' "
+                "AND mam_id IS NULL",
+                (mam_id, timestamp, bare_jid, request_id),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # Ese mam_id ya estaba en otra fila: no es esta.
+            return False
+        return cursor.rowcount > 0
+
     def attach_mam_to_recent_message(self, bare_jid: str, body: str,
                                      direction: str, timestamp: str,
-                                     mam_id: str, window_seconds: int = 30,
+                                     mam_id: str, window_seconds: int = 120,
                                      quick_responses=None, commands=None,
                                      request_id: Optional[str] = None) -> bool:
         target = self._parse_timestamp(timestamp)
@@ -467,29 +493,42 @@ class XmppHistory:
             "ORDER BY timestamp DESC LIMIT 10",
             (bare_jid, direction, body),
         )
+        # De los candidatos dentro de la ventana (holgada: el reloj local y
+        # el del archivo pueden ir bastante desfasados) elegir el MÁS
+        # CERCANO en el tiempo, no el más reciente — con mensajes idénticos
+        # repetidos ("ok" dos veces), quedarse con el más nuevo asignaba el
+        # mam_id a la fila equivocada y dejaba la otra como sombra.
+        best_id = None
+        best_delta = None
         for row in cursor.fetchall():
             candidate = self._parse_timestamp(row["timestamp"])
             if candidate is None:
                 continue
-            if abs((target - candidate).total_seconds()) <= window_seconds:
-                try:
-                    if direction == "in":
-                        self._resolve_prior_approvals(
-                            conn, bare_jid, body, quick_responses, commands,
-                            exclude_id=row["id"])
-                    conn.execute(
-                        "UPDATE messages SET timestamp = ?, mam_id = ?, "
-                        "quick_responses = COALESCE(?, quick_responses), "
-                        "commands = COALESCE(?, commands), "
-                        "request_id = COALESCE(?, request_id) WHERE id = ?",
-                        (timestamp, mam_id, quick_json, commands_json,
-                         request_id, row["id"]),
-                    )
-                    conn.commit()
-                except sqlite3.IntegrityError:
-                    pass
-                return True
-        return False
+            delta = abs((target - candidate).total_seconds())
+            if delta > window_seconds:
+                continue
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_id = row["id"]
+        if best_id is None:
+            return False
+        try:
+            if direction == "in":
+                self._resolve_prior_approvals(
+                    conn, bare_jid, body, quick_responses, commands,
+                    exclude_id=best_id)
+            conn.execute(
+                "UPDATE messages SET timestamp = ?, mam_id = ?, "
+                "quick_responses = COALESCE(?, quick_responses), "
+                "commands = COALESCE(?, commands), "
+                "request_id = COALESCE(?, request_id) WHERE id = ?",
+                (timestamp, mam_id, quick_json, commands_json,
+                 request_id, best_id),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            pass
+        return True
 
     def cleanup_mam_shadow_duplicates(self, window_seconds: int = 30):
         if self._cleanup_done:

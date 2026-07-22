@@ -974,9 +974,14 @@ class XmppSession(GObject.Object):
                 # <replace id=...> — sin esto, preguntas descubiertas sólo
                 # vía MAM (p.ej. tras reconectar) no podrían correlacionarse.
                 stanza_id = _stanza.getAttr('id')
+                # El <replace> archivado también hace falta: el archivo
+                # guarda cada corrección XEP-0308 como un stanza aparte, y
+                # sin plegarlas (ver _collapse_mam_corrections) un turno con
+                # streaming se restaura como N burbujas a N horas distintas.
+                replace_id = self._parse_replace_id(_stanza)
                 pending['buffer'].append(
                     (body, direction, ts, mam.id, quick_responses,
-                     commands, stanza_id))
+                     commands, stanza_id, replace_id))
             return
 
         if properties.has_chatstate and conversation is not None:
@@ -1620,16 +1625,42 @@ class XmppConversation(ChatBackend):
 
     def send_message(self, prompt: str):
         if not self.session.is_connected:
+            self._emit_delivery_failed(prompt)
             self.emit('error', _("Not connected to the XMPP server"))
             self.emit('finished', False)
             return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
+        try:
+            stanza_id = self.session.send_text(self.bare_jid, prompt)
+        except Exception as err:
+            # La conexión pudo caer entre el check y el write. Antes la
+            # excepción se tragaba en el idle de GLib: la burbuja quedaba en
+            # "Sending…" para siempre y, peor, la fila ya grabada simulaba
+            # un envío que nunca salió del equipo.
+            debug_print(f"XmppConversation: send_text falló: {err}")
+            self._emit_delivery_failed(prompt)
+            self.emit('error', str(err))
+            self.emit('finished', False)
+            return
+        if stanza_id is None:
+            self._emit_delivery_failed(prompt)
+            self.emit('error', _("Could not send the message"))
+            self.emit('finished', False)
+            return
+        # Grabar DESPUÉS de entregar el stanza al transporte: una fila
+        # guardada antes de un envío fallido reaparece al recargar como si
+        # se hubiera enviado de verdad.
         history = self.session.history
         if history is not None:
             history.record_message(self.bare_jid, prompt, 'out', ts)
-        self.session.send_text(self.bare_jid, prompt)
         self.emit('finished', True)
+
+    def _emit_delivery_failed(self, body):
+        """Marca la burbuja pendiente como fallida (con retry) aunque no haya
+        stanza id que correlacionar: la ventana casa por body."""
+        self.emit('delivery-state',
+                  f"local-fail-{GLib.get_monotonic_time()}", 'failed', body)
 
     def send_file(self, path: str):
         """Sube y envía un adjunto (XEP-0363 + OOB). El link se registra en el
@@ -1660,15 +1691,28 @@ class XmppConversation(ChatBackend):
 
     def send_quick_response(self, value: str, label: str):
         if not self.session.is_connected:
+            self._emit_delivery_failed(value)
             self.emit('error', _("Not connected to the XMPP server"))
             self.emit('finished', False)
             return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
+        try:
+            stanza_id = self.session.send_text(self.bare_jid, value)
+        except Exception as err:
+            debug_print(f"XmppConversation: quick response falló: {err}")
+            self._emit_delivery_failed(value)
+            self.emit('error', str(err))
+            self.emit('finished', False)
+            return
+        if stanza_id is None:
+            self._emit_delivery_failed(value)
+            self.emit('error', _("Could not send the message"))
+            self.emit('finished', False)
+            return
         history = self.session.history
         if history is not None:
             history.record_message(self.bare_jid, value, 'out', ts)
-        self.session.send_text(self.bare_jid, value)
         self.emit('finished', True)
 
     # send_command (legacy: solo action='execute', leía un <note> e ignoraba
@@ -1805,10 +1849,57 @@ class XmppConversation(ChatBackend):
             self._pending_mam_queryid = self.session.query_mam(
                 self.bare_jid, end=self._history_shown_from, callback=self._on_mam_page)
 
+    def _collapse_mam_corrections(self, messages):
+        """Pliega las correcciones XEP-0308 de una página MAM.
+
+        El archivo guarda cada <replace> como un stanza independiente con su
+        propia hora; sin plegado, un turno con streaming (seed + N edits) se
+        restaura como N burbujas a N horas distintas — y además duplicadas
+        respecto de la fila local, cuyo body ya fue reescrito en vivo y por
+        tanto nunca coincide con el merge por body+ventana. Cada corrección
+        se aplica sobre:
+          1. un mensaje previo de la MISMA página: se reescribe su body (y
+             sus acciones) antes de emitirlo — la burbuja única resultante
+             muestra el texto final, o
+          2. una fila ya conocida (grabada en vivo o en páginas previas):
+             se actualiza en caché y no se emite nada, o
+          3. si el objetivo es desconocido, se ancla como mensaje nuevo con
+             request_id=<replace_id> — igual que deliver() en vivo — para
+             que los edits siguientes del mismo turno colapsen sobre ella.
+        """
+        history = self.session.history
+        output = []
+        position_by_request = {}
+        for item in messages:
+            body, direction, timestamp, mam_id = item[:4]
+            quick_responses = item[4] if len(item) > 4 else []
+            commands = item[5] if len(item) > 5 else []
+            request_id = item[6] if len(item) > 6 else None
+            replace_id = item[7] if len(item) > 7 else None
+            if replace_id and direction == 'in':
+                position = position_by_request.get(replace_id)
+                if position is not None:
+                    previous = output[position]
+                    output[position] = (
+                        body, previous[1], previous[2], previous[3],
+                        quick_responses, commands, previous[6])
+                    continue
+                if (history is not None
+                        and history.update_by_request_id(
+                            self.bare_jid, replace_id, body)):
+                    continue
+                request_id = replace_id
+            if request_id and direction == 'in':
+                position_by_request[request_id] = len(output)
+            output.append(
+                (body, direction, timestamp, mam_id,
+                 quick_responses, commands, request_id))
+        return output
+
     def _record_and_emit(self, messages):
         """Persiste en caché y emite a la UI cada mensaje de una página MAM."""
         history = self.session.history
-        for item in messages:
+        for item in self._collapse_mam_corrections(messages):
             body, direction, timestamp, mam_id = item[:4]
             quick_responses = item[4] if len(item) > 4 else []
             commands = item[5] if len(item) > 5 else []
@@ -1820,12 +1911,17 @@ class XmppConversation(ChatBackend):
             has_pending = bool(quick_responses) or bool(commands)
             if request_id and direction == 'in':
                 self._track_incoming_id(request_id)
-            if (history is not None and
-                    history.attach_mam_to_recent_message(
+            if history is not None:
+                # Primero por request_id: un seed cuyo body ya reescribieron
+                # las correcciones en vivo jamás casa por body.
+                if request_id and history.attach_mam_to_request_id(
+                        self.bare_jid, request_id, timestamp, mam_id):
+                    continue
+                if history.attach_mam_to_recent_message(
                         self.bare_jid, body, direction, timestamp, mam_id,
                         quick_responses=quick_responses, commands=commands,
-                        request_id=request_id)):
-                continue
+                        request_id=request_id):
+                    continue
             inserted = True
             if history is not None:
                 inserted = history.record_message(

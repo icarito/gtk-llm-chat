@@ -159,8 +159,11 @@ XMPP contact.
   — they use `xmpp_history.py` (spec 004) for local message cache with
   MAM backfill.
 - `xmpp_history.py` — `XmppHistory`: local SQLite cache for XMPP messages
-  per bare JID, with dedup via MAM archive id. Thread-local connections,
-  same pattern as `ChatHistory` but own schema and file (`xmpp_history.db`).
+  per bare JID, with dedup via MAM archive id (attached to live rows by
+  stanza id when known, else closest body+time match). Thread-local
+  connections, same pattern as `ChatHistory` but own schema and file
+  (`xmpp_history.db`). MAM restore folds XEP-0308 `<replace>` chains into
+  their target row, so a streamed turn comes back as one message, not N.
 - `stubs/llm/` — stub of the `llm` module enabling `--no-llm` UI-only mode
   (see `plans/NO_LLM_MODE_DOCUMENTATION.md`).
 
