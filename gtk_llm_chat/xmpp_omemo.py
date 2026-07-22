@@ -178,6 +178,7 @@ def run_on_main_thread(func, *args, **kwargs):
 
     def main_thread_callback():
         try:
+            debug_print(f"[omemo-glib] call {getattr(func, '__name__', repr(func))}")
             task = func(*args, **kwargs)
             if task is None:
                 loop.call_soon_threadsafe(future.set_result, None)
@@ -186,6 +187,7 @@ def run_on_main_thread(func, *args, **kwargs):
             def on_done(t):
                 try:
                     res = t.finish()
+                    debug_print(f"[omemo-glib] done {getattr(func, '__name__', repr(func))}")
                     loop.call_soon_threadsafe(future.set_result, res)
                 except Exception as e:
                     loop.call_soon_threadsafe(future.set_exception, e)
@@ -374,6 +376,7 @@ class OMEMOEngine:
             backends.append(Twomemo(self.storage))
 
         async def _init_coro():
+            debug_print(f"[omemo-init] create-start jid={self.jid_str}")
             manager = await XmppOMEMOSessionManager.create(
                 backends=backends,
                 storage=self.storage,
@@ -381,8 +384,10 @@ class OMEMOEngine:
                 initial_own_label=label,
                 undecided_trust_level_name="undecided"
             )
+            debug_print(f"[omemo-init] create-done jid={self.jid_str}")
             # Salir de modo sincronización de historial inicial
             await manager.after_history_sync()
+            debug_print(f"[omemo-init] history-sync-done jid={self.jid_str}")
             return manager
 
         try:
