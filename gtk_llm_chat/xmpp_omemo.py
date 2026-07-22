@@ -155,11 +155,13 @@ class JSONStorage(Storage):
                 pass
 
     async def _load(self, key: str) -> Maybe[JSONType]:
+        print(f"[omemo-storage] load key={key}", flush=True)
         if key in self.data:
             return Just(self.data[key])
         return Nothing()
 
     async def _store(self, key: str, value: JSONType) -> None:
+        print(f"[omemo-storage] store key={key}", flush=True)
         self.data[key] = value
         self.save_to_file()
 
