@@ -1274,7 +1274,9 @@ class XmppSession(GObject.Object):
                     encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
                     if encrypted_node is not None:
                         msg.setBody(None)
-                        msg.addChild(node=encrypted_node)
+                        nodes = encrypted_node if isinstance(encrypted_node, list) else [encrypted_node]
+                        for node in nodes:
+                            msg.addChild(node=node)
                         debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
                     else:
                         # Encryption is mandatory when OMEMO is enabled.
@@ -1487,7 +1489,9 @@ class XmppSession(GObject.Object):
                     self._finish_send_file(on_done, False,
                                            _("OMEMO encryption failed; file was not sent"))
                     return
-                msg.addChild(node=encrypted_node)
+                nodes = encrypted_node if isinstance(encrypted_node, list) else [encrypted_node]
+                for node in nodes:
+                    msg.addChild(node=node)
                 debug_print(f"OMEMO: enviando adjunto cifrado a {to_bare_jid}")
             else:
                 msg.setBody(get_uri)

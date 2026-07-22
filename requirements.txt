@@ -2,6 +2,10 @@ pygobject
 keyring
 markdown-it-py
 nbxmpp
+# OMEMO backends (2.1 API: per-namespace plaintext and message mapping)
+omemo==2.1.0
+oldmemo==2.1.0
+twomemo==2.1.0
 python-ulid
 llm
 llm-gemini

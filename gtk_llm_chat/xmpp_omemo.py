@@ -367,15 +367,30 @@ class OMEMOEngine:
             debug_print(f"OMEMO: Error grave al inicializar el motor: {e}")
 
     def encrypt_msg_async(self, to_bare_jid: str, text: str):
-        """Encripta un mensaje de texto para el destinatario. Devuelve (Node, text)."""
+        """Encripta para el destinatario usando la API OMEMO 2.1.
+
+        ``SessionManager.encrypt`` recibe destinatarios inmutables y un mapa de
+        plaintext por backend; devuelve un mapa de mensajes (uno por backend)
+        junto con errores no críticos. Se conserva compatibilidad con los
+        llamadores antiguos devolviendo un Node cuando hay un solo backend y
+        una lista de Nodes cuando hay varios.
+        """
         if self.manager is None:
             return None, text
 
         async def _encrypt_coro():
-            recipients = {self.jid_str, to_bare_jid}
+            recipients = frozenset({to_bare_jid})
             try:
                 plaintext_bytes = text.encode('utf-8')
-                omemo_message, namespace = await self.manager.encrypt(recipients, plaintext_bytes)
+                plaintext = {LEGACY_NS: plaintext_bytes}
+                if twomemo_available:
+                    plaintext[TWOMEMO_NS] = plaintext_bytes
+                encrypted_messages, errors = await self.manager.encrypt(
+                    recipients, plaintext)
+                if errors:
+                    debug_print(f"OMEMO: errores no críticos al cifrar para {to_bare_jid}: {errors}")
+                if not encrypted_messages:
+                    raise NoEligibleDevices(f"no encrypted messages for {to_bare_jid}")
             except NoEligibleDevices as e:
                 debug_print(f"OMEMO: no hay dispositivos OMEMO elegibles para {to_bare_jid}: {e}")
                 return None, text
@@ -383,13 +398,20 @@ class OMEMOEngine:
                 debug_print(f"OMEMO: error durante encriptación OMEMO: {e}")
                 return None, text
 
-            # Serializar según namespace
-            if namespace == TWOMEMO_NS:
-                et_el = two_serialize_message(omemo_message)
-            else:
-                et_el = old_serialize_message(omemo_message)
-
-            return etree_to_node(et_el), text
+            nodes = []
+            for omemo_message in encrypted_messages.keys():
+                namespace = omemo_message.namespace
+                if namespace == TWOMEMO_NS:
+                    et_el = two_serialize_message(omemo_message)
+                elif namespace == LEGACY_NS:
+                    et_el = old_serialize_message(omemo_message)
+                else:
+                    debug_print(f"OMEMO: namespace desconocido {namespace}; se omite")
+                    continue
+                nodes.append(etree_to_node(et_el))
+            if not nodes:
+                return None, text
+            return (nodes[0] if len(nodes) == 1 else nodes), text
 
         try:
             return self.worker.run_coroutine(_encrypt_coro())
