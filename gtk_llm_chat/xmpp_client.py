@@ -217,6 +217,8 @@ class XmppSession(GObject.Object):
         GObject.Object.__init__(self)
         self.omemo_engine = None
         self._omemo_init_started = False
+        self._omemo_decrypting = set()
+        self._omemo_decrypted = set()
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = f"{resource}-{_device_resource_suffix()}"
@@ -997,7 +999,37 @@ class XmppSession(GObject.Object):
                 debug_print(f"OMEMO: recibido mensaje cifrado de {sender_bare} pero OMEMO no está habilitado. Se ignora.")
                 return
 
-            decrypted_body = self.omemo_engine.decrypt_msg(sender_bare, encrypted_node)
+            stanza_key = id(_stanza)
+            if stanza_key not in self._omemo_decrypted:
+                if stanza_key in self._omemo_decrypting:
+                    return
+                self._omemo_decrypting.add(stanza_key)
+
+                def decrypt_in_background():
+                    try:
+                        body = self.omemo_engine.decrypt_msg(sender_bare, encrypted_node)
+                    except Exception as exc:
+                        body = None
+                        debug_print(f"OMEMO: error en hilo de descifrado para {sender_bare}: {exc}")
+
+                    def resume_message():
+                        self._omemo_decrypting.discard(stanza_key)
+                        if body is None:
+                            debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
+                            return GLib.SOURCE_REMOVE
+                        properties.body = body
+                        self._omemo_decrypted.add(stanza_key)
+                        self._on_message(_client, _stanza, properties)
+                        self._omemo_decrypted.discard(stanza_key)
+                        return GLib.SOURCE_REMOVE
+
+                    GLib.idle_add(resume_message)
+
+                threading.Thread(target=decrypt_in_background, daemon=True).start()
+                return
+
+            self._omemo_decrypted.discard(stanza_key)
+            decrypted_body = properties.body
             if decrypted_body is not None:
                 # Si contiene la etiqueta XML de OOB, la extraemos usando ElementTree para evitar expresiones regulares frágiles
                 if '<x xmlns=' in decrypted_body:
