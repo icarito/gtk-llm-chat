@@ -8,6 +8,7 @@ import os
 import json
 import socket
 import asyncio
+import faulthandler
 import threading
 import traceback
 from xml.etree import ElementTree as ET
@@ -400,9 +401,12 @@ class OMEMOEngine:
             return manager
 
         try:
+            faulthandler.dump_traceback_later(10, repeat=False)
             self.manager = self.worker.run_coroutine(_init_coro(), timeout=60)
+            faulthandler.cancel_dump_traceback_later()
             debug_print(f"[omemo-init] ready jid={self.jid_str} label={label}")
         except Exception as e:
+            faulthandler.cancel_dump_traceback_later()
             self.manager = None
             debug_print(f"[omemo-init] failed jid={self.jid_str} error={e!r}")
             debug_print(traceback.format_exc())
