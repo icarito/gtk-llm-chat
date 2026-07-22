@@ -1252,6 +1252,17 @@ class XmppSession(GObject.Object):
         }
         self.emit('delivery-state', stanza_id, 'pending', text)
 
+        # OMEMO is fail-closed.  Never leak the first message while the
+        # background engine is still loading (or after initialization failed).
+        from .xmpp_account import is_omemo_enabled
+        if is_omemo_enabled() and (
+                self.omemo_engine is None or
+                getattr(self.omemo_engine, 'manager', None) is None):
+            debug_print(f"OMEMO: motor no disponible; se bloquea envío a {to_bare_jid}")
+            self._pending_delivery.pop(stanza_id, None)
+            self.emit('delivery-state', stanza_id, 'failed', text)
+            return stanza_id
+
         def do_encrypt_and_send():
             msg = Message(to=to_bare_jid, body=text, typ='chat')
             msg.setID(stanza_id)
@@ -1266,7 +1277,10 @@ class XmppSession(GObject.Object):
                         msg.addChild(node=encrypted_node)
                         debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
                     else:
-                        debug_print(f"OMEMO: fallback a texto plano para {to_bare_jid}")
+                        # Encryption is mandatory when OMEMO is enabled.
+                        debug_print(f"OMEMO: no se pudo cifrar; se bloquea envío a {to_bare_jid}")
+                        GLib.idle_add(lambda: self.emit('delivery-state', stanza_id, 'failed', text))
+                        return
                 except Exception as e:
                     debug_print(f"OMEMO: error durante cifrado para {to_bare_jid}: {e}")
                     # Actualizar a 'failed' para evitar que quede huérfano si el cifrado falla
@@ -1322,6 +1336,13 @@ class XmppSession(GObject.Object):
         `on_done(ok: bool, detail: str)` se llama en el hilo principal.
         Igual que el plugin (upload.ts/send.ts): el link va en el body Y en el
         OOB, para que lo vea cualquier cliente."""
+        from .xmpp_account import is_omemo_enabled
+        if is_omemo_enabled() and (
+                self.omemo_engine is None or
+                getattr(self.omemo_engine, 'manager', None) is None):
+            self._finish_send_file(on_done, False,
+                                   _("OMEMO is not ready; file sending is blocked"))
+            return
         if not self.is_connected:
             self._finish_send_file(on_done, False, _("Not connected to the XMPP server"))
             return
@@ -1454,16 +1475,20 @@ class XmppSession(GObject.Object):
             chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
             msg.addChild(node=chatstate)
 
-            if self.omemo_engine is not None:
-                encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, plaintext)
-                if encrypted_node is not None:
-                    msg.addChild(node=encrypted_node)
-                    debug_print(f"OMEMO: enviando adjunto cifrado a {to_bare_jid}")
-                else:
-                    msg.setBody(get_uri)
-                    oob = Node('x', attrs={'xmlns': OOB_NS})
-                    oob.addChild('url', payload=[get_uri])
-                    msg.addChild(node=oob)
+            from .xmpp_account import is_omemo_enabled
+            if is_omemo_enabled():
+                try:
+                    encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, plaintext)
+                except Exception as exc:
+                    debug_print(f"OMEMO: error cifrando adjunto para {to_bare_jid}: {exc}")
+                    self._finish_send_file(on_done, False, str(exc))
+                    return
+                if encrypted_node is None:
+                    self._finish_send_file(on_done, False,
+                                           _("OMEMO encryption failed; file was not sent"))
+                    return
+                msg.addChild(node=encrypted_node)
+                debug_print(f"OMEMO: enviando adjunto cifrado a {to_bare_jid}")
             else:
                 msg.setBody(get_uri)
                 oob = Node('x', attrs={'xmlns': OOB_NS})
