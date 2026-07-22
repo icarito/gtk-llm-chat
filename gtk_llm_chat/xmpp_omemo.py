@@ -123,6 +123,29 @@ def _strip_non_schema_device_attributes(element: ET.Element) -> ET.Element:
     return element
 
 
+def _unwrap_sce_payload(payload: str) -> str:
+    """Return user-visible bodies from an OMEMO 2 SCE envelope.
+
+    A few servers/clients can coalesce adjacent encrypted payloads while
+    replaying a seed and its update, so accept either one envelope or several
+    concatenated envelopes.  Non-SCE plaintext remains untouched.
+    """
+    if "urn:xmpp:sce:1" not in payload:
+        return payload
+    try:
+        root = ET.fromstring(f"<root>{payload}</root>")
+    except ET.ParseError:
+        return payload
+    bodies = []
+    for envelope in root.findall("{urn:xmpp:sce:1}envelope"):
+        body = envelope.find(
+            "{urn:xmpp:sce:1}content/{jabber:client}body"
+        )
+        if body is not None:
+            bodies.append("".join(body.itertext()))
+    return "\n".join(bodies) if bodies else payload
+
+
 # --- Storage Provider ---
 
 class JSONStorage(Storage):
@@ -733,7 +756,7 @@ class OMEMOEngine:
             if has_prekey:
                 GLib.idle_add(lambda: self.session.send_text(from_bare_jid, ""))
 
-            return plaintext_bytes.decode('utf-8')
+            return _unwrap_sce_payload(plaintext_bytes.decode('utf-8'))
 
         try:
             return self.worker.run_coroutine(_decrypt_coro(), timeout=20)
