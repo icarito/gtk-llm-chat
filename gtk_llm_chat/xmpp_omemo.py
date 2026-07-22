@@ -402,7 +402,7 @@ class OMEMOEngine:
             return manager
 
         try:
-            faulthandler.dump_traceback_later(10, repeat=False)
+            faulthandler.dump_traceback_later(3, repeat=False)
             def dump_omemo_stack():
                 for thread_id, frame in sys._current_frames().items():
                     frames = traceback.extract_stack(frame)
@@ -411,7 +411,7 @@ class OMEMOEngine:
                         print(f"[omemo-stack] thread={thread_id}", flush=True)
                         for item in relevant[-12:]:
                             print(f"[omemo-stack] {item.filename}:{item.lineno} {item.name}", flush=True)
-            stack_timer = threading.Timer(10, dump_omemo_stack)
+            stack_timer = threading.Timer(3, dump_omemo_stack)
             stack_timer.daemon = True
             stack_timer.start()
             self.manager = self.worker.run_coroutine(_init_coro(), timeout=60)
