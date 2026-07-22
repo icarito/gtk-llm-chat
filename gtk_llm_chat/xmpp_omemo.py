@@ -9,8 +9,9 @@ import json
 import socket
 import asyncio
 import faulthandler
-import threading
+import sys
 import traceback
+import threading
 from xml.etree import ElementTree as ET
 
 from gi.repository import GLib
@@ -402,10 +403,23 @@ class OMEMOEngine:
 
         try:
             faulthandler.dump_traceback_later(10, repeat=False)
+            def dump_omemo_stack():
+                for thread_id, frame in sys._current_frames().items():
+                    frames = traceback.extract_stack(frame)
+                    relevant = [f for f in frames if "omemo" in f.filename or "xmpp" in f.filename]
+                    if relevant:
+                        print(f"[omemo-stack] thread={thread_id}", flush=True)
+                        for item in relevant[-12:]:
+                            print(f"[omemo-stack] {item.filename}:{item.lineno} {item.name}", flush=True)
+            stack_timer = threading.Timer(10, dump_omemo_stack)
+            stack_timer.daemon = True
+            stack_timer.start()
             self.manager = self.worker.run_coroutine(_init_coro(), timeout=60)
+            stack_timer.cancel()
             faulthandler.cancel_dump_traceback_later()
             debug_print(f"[omemo-init] ready jid={self.jid_str} label={label}")
         except Exception as e:
+            stack_timer.cancel()
             faulthandler.cancel_dump_traceback_later()
             self.manager = None
             debug_print(f"[omemo-init] failed jid={self.jid_str} error={e!r}")
