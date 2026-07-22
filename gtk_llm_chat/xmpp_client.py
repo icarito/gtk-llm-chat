@@ -257,7 +257,15 @@ class XmppSession(GObject.Object):
 
     @property
     def is_connected(self) -> bool:
-        return self._state == STATE_CONNECTED
+        return (
+            self._state == STATE_CONNECTED
+            and self._client is not None
+            and getattr(self._client, '_con', None) is not None
+        )
+
+    def _has_live_transport(self) -> bool:
+        """True cuando nbxmpp conserva un transporte capaz de enviar."""
+        return self._client is not None and getattr(self._client, '_con', None) is not None
 
     @property
     def bare_jid(self) -> str:
@@ -1348,9 +1356,11 @@ class XmppSession(GObject.Object):
                     return
 
             def send_on_main():
-                if self._client is None:
+                if not self._has_live_transport():
                     debug_print(f"[delivery] id={stanza_id} phase=send-abort reason=disconnected")
                     self._mark_delivery_failed(stanza_id)
+                    self._set_state(STATE_DISCONNECTED)
+                    self._schedule_reconnect()
                     return GLib.SOURCE_REMOVE
                 try:
                     self._client.send_stanza(msg)
@@ -1589,8 +1599,16 @@ class XmppSession(GObject.Object):
                 msg.addChild(node=oob)
 
             def send_on_main():
-                if self._client is not None:
+                if not self._has_live_transport():
+                    self._finish_send_file(on_done, False, _("XMPP connection lost"))
+                    self._set_state(STATE_DISCONNECTED)
+                    self._schedule_reconnect()
+                    return GLib.SOURCE_REMOVE
+                try:
                     self._client.send_stanza(msg)
+                except Exception as exc:
+                    self._finish_send_file(on_done, False, str(exc))
+                    return GLib.SOURCE_REMOVE
                 self._finish_send_file(on_done, True, get_uri)
                 return GLib.SOURCE_REMOVE
 
@@ -1610,7 +1628,11 @@ class XmppSession(GObject.Object):
             return
         payload = Node(chatstate, attrs={'xmlns': Namespace.CHATSTATES})
         msg = Message(to=to_bare_jid, typ='chat', payload=[payload])
-        GLib.idle_add(lambda: self._client.send_stanza(msg))
+        def send_on_main():
+            if self._has_live_transport():
+                self._client.send_stanza(msg)
+            return GLib.SOURCE_REMOVE
+        GLib.idle_add(send_on_main)
 
     # --- Suscripciones (spec 002 T6) ---
 
