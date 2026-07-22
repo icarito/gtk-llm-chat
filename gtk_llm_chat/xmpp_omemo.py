@@ -578,26 +578,18 @@ class OMEMOEngine:
                     # namespace legacy sin publicar su bundle. Evitar que la
                     # biblioteca intente descargar ese bundle durante la
                     # resolución inicial de identidad.
+                    # Refresh unconditionally.  A cached v2 device can be
+                    # retired and replaced (for example during an identity
+                    # migration), so merely finding one local entry is not
+                    # proof that the online list is current.
+                    debug_print(f"OMEMO: refrescando device list OMEMO 2 de {to_bare_jid}")
+                    await asyncio.wait_for(
+                        self.manager.refresh_device_list(TWOMEMO_NS, to_bare_jid),
+                        timeout=8,
+                    )
                     ids = (await self.storage.load_list(
                         f"/devices/{to_bare_jid}/list", int
                     )).maybe([])
-                    has_twomemo_device = False
-                    for device_id in ids:
-                        key = f"/devices/{to_bare_jid}/{device_id}"
-                        namespaces = (await self.storage.load_list(
-                            f"{key}/namespaces", str
-                        )).maybe([])
-                        has_twomemo_device = has_twomemo_device or TWOMEMO_NS in namespaces
-
-                    if not has_twomemo_device:
-                        debug_print(f"OMEMO: refrescando device list OMEMO 2 de {to_bare_jid}")
-                        await asyncio.wait_for(
-                            self.manager.refresh_device_list(TWOMEMO_NS, to_bare_jid),
-                            timeout=8,
-                        )
-                        ids = (await self.storage.load_list(
-                            f"/devices/{to_bare_jid}/list", int
-                        )).maybe([])
 
                     for device_id in ids:
                         key = f"/devices/{to_bare_jid}/{device_id}"
