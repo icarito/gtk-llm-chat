@@ -96,7 +96,9 @@ class XmppAccountDialog(Adw.Window):
         self.connect_button.set_sensitive(not busy)
         self.jid_row.set_sensitive(not busy)
         self.password_row.set_sensitive(not busy)
-        self.omemo_row.set_sensitive(not busy)
+        # El usuario debe poder desactivar OMEMO incluso mientras la prueba
+        # de credenciales está en curso; el valor se persiste al confirmar.
+        self.omemo_row.set_sensitive(True)
         self.spinner.set_visible(busy)
         if busy:
             self.spinner.start()
