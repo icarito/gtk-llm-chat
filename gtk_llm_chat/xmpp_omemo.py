@@ -578,7 +578,7 @@ class OMEMOEngine:
             return (nodes[0] if len(nodes) == 1 else nodes), text
 
         try:
-            return self.worker.run_coroutine(_encrypt_coro(), timeout=30)
+            return self.worker.run_coroutine(_encrypt_coro(), timeout=10)
         except Exception as e:
             debug_print(f"OMEMO: Error encriptando mensaje: {e}")
             print(f"[omemo-encrypt] failed target={to_bare_jid} error={e!r}", flush=True)
