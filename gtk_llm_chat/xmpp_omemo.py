@@ -544,8 +544,13 @@ class OMEMOEngine:
                     self.jid_str, own_device_id
                 )
                 await XmppOMEMOSessionManager._upload_bundle(own_bundle)
+                # Also reconcile the online device list.  Existing local
+                # state may contain our device even when the PEP node was
+                # never created (or was lost), in which case create() alone
+                # has nothing to republish.
+                await manager.refresh_device_list(TWOMEMO_NS, self.jid_str)
                 debug_print(
-                    f"[omemo-init] republished standard OMEMO 2 bundle "
+                    f"[omemo-init] republished standard OMEMO 2 bundle/device "
                     f"device={own_device_id}"
                 )
             # Salir de modo sincronización de historial inicial
