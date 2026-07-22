@@ -202,6 +202,8 @@ class XmppSession(GObject.Object):
         'avatar-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # stanza_id, state, body para mensajes propios.
         'delivery-state': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
+        # emitido cuando se procesa o desencripta un mensaje OMEMO
+        'omemo-status-changed': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
 
     PRESENCE_ONLINE = 'online'
@@ -212,6 +214,7 @@ class XmppSession(GObject.Object):
     def __init__(self, jid: str, password: str, resource: str = RESOURCE,
                  auto_reconnect: bool = True):
         GObject.Object.__init__(self)
+        self.omemo_engine = None
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = f"{resource}-{_device_resource_suffix()}"
@@ -312,16 +315,25 @@ class XmppSession(GObject.Object):
         # El servidor sólo nos la entrega si nuestras caps piden el nodo con
         # "+notify" — de ahí que se declare aquí y no baste con responder al
         # disco. Un contacto que no publique el nodo simplemente no emite nada.
+        from .xmpp_account import is_omemo_enabled
+        from .xmpp_omemo import twomemo_available, LEGACY_NS, TWOMEMO_NS
+
+        features = [
+            Namespace.DISCO_INFO,
+            f'{TELEMETRY_NODE}+notify',
+            f'{LEGACY_TELEMETRY_NODE}+notify',
+            # Avatares XEP-0084: sin el +notify del nodo de metadata el
+            # servidor no nos avisa de que un contacto cambió su foto.
+            f'{AVATAR_METADATA_NODE}+notify',
+        ]
+        if is_omemo_enabled():
+            features.append(LEGACY_NS)
+            if twomemo_available:
+                features.append(TWOMEMO_NS)
+
         client.get_module('EntityCaps').set_caps(
             [DiscoIdentity(category='client', type='pc', name='gtk-llm-chat')],
-            [
-                Namespace.DISCO_INFO,
-                f'{TELEMETRY_NODE}+notify',
-                f'{LEGACY_TELEMETRY_NODE}+notify',
-                # Avatares XEP-0084: sin el +notify del nodo de metadata el
-                # servidor no nos avisa de que un contacto cambió su foto.
-                f'{AVATAR_METADATA_NODE}+notify',
-            ],
+            features,
             'https://github.com/icarito/gtk-llm-chat')
         client.register_handler(
             StanzaHandler(name='message', callback=self._on_pep_event,
@@ -581,6 +593,19 @@ class XmppSession(GObject.Object):
         enable_carbons = Iq(typ='set')
         enable_carbons.addChild('enable', namespace=Namespace.CARBONS)
         self._client.send_stanza(enable_carbons)
+
+        # Inicialización de claves OMEMO al conectarse si está habilitado
+        from .xmpp_account import is_omemo_enabled, load_omemo_device_label
+        if is_omemo_enabled():
+            from .xmpp_omemo import OMEMOEngine
+            label = load_omemo_device_label()
+            self.omemo_engine = OMEMOEngine(self, self.bare_jid)
+
+            def init_omemo():
+                self.omemo_engine.initialize(label)
+
+            threading.Thread(target=init_omemo, daemon=True).start()
+
         self._reconnect_attempt = 0
         self._set_state(STATE_CONNECTED)
         if roster is not None:
@@ -927,6 +952,46 @@ class XmppSession(GObject.Object):
             return
         bare = str(properties.jid.bare)
         conversation = self._conversations.get(bare)
+
+        # Determinar el remitente real
+        sender_bare = bare
+        if properties.from_ is not None:
+            sender_bare = str(properties.from_.bare)
+
+        # Interceptar y desencriptar si el mensaje es OMEMO (legacy o 2.0)
+        # Buscar el nodo <encrypted> (puede estar anidado en <forwarded> para Carbons o MAM)
+        encrypted_node = _stanza.getTag('encrypted', namespace='eu.siacs.conversations.axolotl')
+        if encrypted_node is None:
+            encrypted_node = _stanza.getTag('encrypted', namespace='urn:xmpp:omemo:2')
+
+        if encrypted_node is None:
+            # Intentar buscar dentro de <forwarded> (Message Carbons o MAM)
+            forwarded = _stanza.getTag('forwarded', namespace='urn:xmpp:forward:0')
+            if forwarded is not None:
+                msg_node = forwarded.getTag('message')
+                if msg_node is not None:
+                    encrypted_node = msg_node.getTag('encrypted', namespace='eu.siacs.conversations.axolotl')
+                    if encrypted_node is None:
+                        encrypted_node = msg_node.getTag('encrypted', namespace='urn:xmpp:omemo:2')
+
+        if encrypted_node is not None:
+            if self.omemo_engine is None:
+                debug_print(f"OMEMO: recibido mensaje cifrado de {sender_bare} pero OMEMO no está habilitado. Se ignora.")
+                return
+
+            decrypted_body = self.omemo_engine.decrypt_msg(sender_bare, encrypted_node)
+            if decrypted_body is not None:
+                # Si contiene la etiqueta XML de OOB, la extraemos para la UI y la limpiamos del body principal
+                if '<x xmlns=' in decrypted_body:
+                    match = re.search(r'<url>(.*?)</url>', decrypted_body)
+                    if match:
+                        decrypted_body = match.group(1).strip()
+                properties.body = decrypted_body
+                self.emit('omemo-status-changed', True)
+            else:
+                debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
+                return
+
         if _stanza.getType() == 'error':
             stanza_id = _stanza.getAttr('id') or ''
             pending = self._pending_delivery.pop(stanza_id, None)
@@ -1167,21 +1232,43 @@ class XmppSession(GObject.Object):
         return None
 
     def send_text(self, to_bare_jid: str, text: str):
-        # XEP-0085: marcar 'active' junto con cada mensaje
-        chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
-        msg = Message(to=to_bare_jid, body=text, typ='chat', payload=[chatstate])
-        debug_print(f"XmppSession: enviando mensaje a {to_bare_jid}: {text[:60]!r}")
-        stanza_id = self._client.send_stanza(msg)
-        smacks = getattr(self._client, '_smacks', None)
-        sequence = getattr(smacks, '_out_h', None) if smacks is not None else None
+        # Generar un ID único upfront para que la UI pueda registrarlo y marcarlo como 'pending' de inmediato
+        stanza_id = str(uuid.uuid4())
         self._pending_delivery[stanza_id] = {
-            'body': text, 'sequence': sequence,
+            'body': text, 'sequence': None,
         }
         self.emit('delivery-state', stanza_id, 'pending', text)
-        # Sin SM no existe un ack de transporte que esperar: el write local es
-        # el máximo nivel de confirmación disponible.
-        if smacks is None or not getattr(smacks, 'enabled', False):
-            self._mark_delivery_sent(stanza_id)
+
+        def do_encrypt_and_send():
+            msg = Message(to=to_bare_jid, body=text, typ='chat')
+            msg.setID(stanza_id)
+            chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
+            msg.addChild(node=chatstate)
+
+            if self.omemo_engine is not None:
+                encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
+                if encrypted_node is not None:
+                    msg.setBody(None)
+                    msg.addChild(node=encrypted_node)
+                    debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
+                else:
+                    debug_print(f"OMEMO: fallback a texto plano para {to_bare_jid}")
+
+            def send_on_main():
+                if self._client is not None:
+                    self._client.send_stanza(msg)
+                    smacks = getattr(self._client, '_smacks', None)
+                    if smacks is not None and getattr(smacks, 'enabled', False):
+                        sequence = getattr(smacks, '_out_h', None)
+                        if stanza_id in self._pending_delivery:
+                            self._pending_delivery[stanza_id]['sequence'] = sequence
+                    else:
+                        self._mark_delivery_sent(stanza_id)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(send_on_main)
+
+        threading.Thread(target=do_encrypt_and_send, daemon=True).start()
         return stanza_id
 
     def _on_sm_ack(self, _client, stanza, _properties):
@@ -1336,16 +1423,41 @@ class XmppSession(GObject.Object):
         if not ok:
             self._finish_send_file(on_done, False, detail)
             return
-        # El link va en el body Y como OOB: los clientes que no entienden OOB
-        # igual ven (y pueden abrir) la URL.
-        oob = Node('x', attrs={'xmlns': OOB_NS})
-        oob.addChild('url', payload=[get_uri])
-        chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
-        msg = Message(to=to_bare_jid, body=get_uri, typ='chat',
-                      payload=[oob, chatstate])
-        self._client.send_stanza(msg)
-        debug_print(f"XmppSession: adjunto enviado a {to_bare_jid}: {filename}")
-        self._finish_send_file(on_done, True, get_uri)
+
+        def do_encrypt_and_send_file():
+            # "el link OOB y el body se encriptan con OMEMO, AND el elemento <x xmlns="jabber:x:oob"> va dentro"
+            # Ponemos el XML de <x> en el plaintext
+            plaintext = f"{get_uri}\n<x xmlns='{OOB_NS}'><url>{get_uri}</url></x>"
+
+            msg = Message(to=to_bare_jid, typ='chat')
+            chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
+            msg.addChild(node=chatstate)
+
+            if self.omemo_engine is not None:
+                encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, plaintext)
+                if encrypted_node is not None:
+                    msg.addChild(node=encrypted_node)
+                    debug_print(f"OMEMO: enviando adjunto cifrado a {to_bare_jid}")
+                else:
+                    msg.setBody(get_uri)
+                    oob = Node('x', attrs={'xmlns': OOB_NS})
+                    oob.addChild('url', payload=[get_uri])
+                    msg.addChild(node=oob)
+            else:
+                msg.setBody(get_uri)
+                oob = Node('x', attrs={'xmlns': OOB_NS})
+                oob.addChild('url', payload=[get_uri])
+                msg.addChild(node=oob)
+
+            def send_on_main():
+                if self._client is not None:
+                    self._client.send_stanza(msg)
+                self._finish_send_file(on_done, True, get_uri)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(send_on_main)
+
+        threading.Thread(target=do_encrypt_and_send_file, daemon=True).start()
 
     @staticmethod
     def _finish_send_file(on_done, ok, detail):
@@ -1358,7 +1470,8 @@ class XmppSession(GObject.Object):
         if not self.is_connected:
             return
         payload = Node(chatstate, attrs={'xmlns': Namespace.CHATSTATES})
-        self._client.send_stanza(Message(to=to_bare_jid, typ='chat', payload=[payload]))
+        msg = Message(to=to_bare_jid, typ='chat', payload=[payload])
+        GLib.idle_add(lambda: self._client.send_stanza(msg))
 
     # --- Suscripciones (spec 002 T6) ---
 

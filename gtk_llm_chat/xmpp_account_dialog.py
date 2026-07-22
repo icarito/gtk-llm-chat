@@ -21,7 +21,7 @@ from gi.repository import Gtk, Adw, GLib
 from .chat_application import _
 from .debug_utils import debug_print
 from .style_manager import style_manager
-from .xmpp_account import load_account, save_account
+from .xmpp_account import load_account, save_account, is_omemo_enabled
 from .xmpp_client import XmppSession, STATE_CONNECTED, STATE_DISCONNECTED
 
 
@@ -50,9 +50,13 @@ class XmppAccountDialog(Adw.Window):
         if self._existing_jid:
             self.password_row.set_title(_("Password (leave empty to keep current)"))
 
+        self.omemo_row = Adw.SwitchRow(title=_("Enable OMEMO encryption (XEP-0384)"))
+        self.omemo_row.set_active(is_omemo_enabled())
+
         group = Adw.PreferencesGroup()
         group.add(self.jid_row)
         group.add(self.password_row)
+        group.add(self.omemo_row)
 
         self.status_label = Gtk.Label(label="")
         self.status_label.set_wrap(True)
@@ -92,6 +96,7 @@ class XmppAccountDialog(Adw.Window):
         self.connect_button.set_sensitive(not busy)
         self.jid_row.set_sensitive(not busy)
         self.password_row.set_sensitive(not busy)
+        self.omemo_row.set_sensitive(not busy)
         self.spinner.set_visible(busy)
         if busy:
             self.spinner.start()
@@ -138,7 +143,8 @@ class XmppAccountDialog(Adw.Window):
         if state == STATE_CONNECTED:
             debug_print(f"XmppAccountDialog: credenciales válidas para {jid}")
             try:
-                save_account(jid, password)
+                omemo_enabled = self.omemo_row.get_active()
+                save_account(jid, password, omemo_enabled=omemo_enabled)
             except RuntimeError as err:
                 self._show_error(str(err))
                 self._cleanup_probe()
