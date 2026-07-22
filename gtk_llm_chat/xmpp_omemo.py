@@ -538,6 +538,29 @@ class OMEMOEngine:
         async def _encrypt_coro():
             recipients = frozenset({to_bare_jid})
             try:
+                if twomemo_available:
+                    # Los clientes OMEMO 2 pueden anunciar también el
+                    # namespace legacy sin publicar su bundle. Evitar que la
+                    # biblioteca intente descargar ese bundle durante la
+                    # resolución inicial de identidad.
+                    ids = (await self.storage.load_list(
+                        f"/devices/{to_bare_jid}/list", int
+                    )).maybe([])
+                    for device_id in ids:
+                        key = f"/devices/{to_bare_jid}/{device_id}"
+                        namespaces = (await self.storage.load_list(
+                            f"{key}/namespaces", str
+                        )).maybe([])
+                        active = (await self.storage.load_dict(
+                            f"{key}/active", bool
+                        )).maybe({})
+                        if TWOMEMO_NS in namespaces:
+                            await self.storage.store(
+                                f"{key}/namespaces", [TWOMEMO_NS]
+                            )
+                            await self.storage.store(
+                                f"{key}/active", {TWOMEMO_NS: bool(active.get(TWOMEMO_NS, True))}
+                            )
                 plaintext_bytes = text.encode('utf-8')
                 # Preferir OMEMO 2 para envíos: los clientes modernos (Dino,
                 # OpenClaw) pueden publicar solo el bundle urn:xmpp:omemo:2.
@@ -548,7 +571,11 @@ class OMEMOEngine:
                 else:
                     plaintext = {LEGACY_NS: plaintext_bytes}
                 encrypted_messages, errors = await asyncio.wait_for(
-                    self.manager.encrypt(recipients, plaintext), timeout=20
+                    self.manager.encrypt(
+                        recipients,
+                        plaintext,
+                        backend_priority_order=[TWOMEMO_NS] if twomemo_available else [LEGACY_NS],
+                    ), timeout=20
                 )
                 if errors:
                     debug_print(f"OMEMO: errores no críticos al cifrar para {to_bare_jid}: {errors}")
