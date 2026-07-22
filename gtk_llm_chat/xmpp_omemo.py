@@ -9,6 +9,7 @@ import json
 import socket
 import asyncio
 import threading
+import traceback
 from xml.etree import ElementTree as ET
 
 from gi.repository import GLib
@@ -362,6 +363,10 @@ class OMEMOEngine:
     def initialize(self, label: str):
         """Inicializa las claves OMEMO en segundo plano."""
         XmppOMEMOSessionManager.set_session_instance(self.session)
+        debug_print(
+            f"[omemo-init] start jid={self.jid_str} "
+            f"oldmemo=True twomemo={twomemo_available} storage={self.storage_path}"
+        )
 
         # Configurar backends
         backends = [Oldmemo(self.storage)]
@@ -381,10 +386,12 @@ class OMEMOEngine:
             return manager
 
         try:
-            self.manager = self.worker.run_coroutine(_init_coro())
-            debug_print(f"OMEMO: Motor inicializado para {self.jid_str} con label {label}")
+            self.manager = self.worker.run_coroutine(_init_coro(), timeout=60)
+            debug_print(f"[omemo-init] ready jid={self.jid_str} label={label}")
         except Exception as e:
-            debug_print(f"OMEMO: Error grave al inicializar el motor: {e}")
+            self.manager = None
+            debug_print(f"[omemo-init] failed jid={self.jid_str} error={e!r}")
+            debug_print(traceback.format_exc())
 
     def encrypt_msg_async(self, to_bare_jid: str, text: str):
         """Encripta para el destinatario usando la API OMEMO 2.1.
