@@ -449,6 +449,37 @@ class XmppHistory:
         return self.attach_mam_to_recent_message(
             bare_jid, body, 'out', timestamp, mam_id, window_seconds)
 
+    def attach_mam_to_decrypted_request(self, bare_jid: str, request_id: str,
+                                        timestamp: str, mam_id: str) -> bool:
+        """Promote a previously decrypted live message to its MAM row.
+
+        OMEMO ratchet messages are intentionally single-use.  When MAM
+        replays a stanza that was already decrypted live, attempting to
+        decrypt it again advances/fails the ratchet and used to create a
+        bogus failure bubble.  The stable inner stanza id lets us recognize
+        the replay before touching OMEMO state.
+        """
+        if not request_id or not mam_id:
+            return False
+        conn = self.get_connection()
+        row = conn.execute(
+            "SELECT id FROM messages WHERE bare_jid = ? AND request_id = ? "
+            "AND mam_id IS NULL AND body NOT LIKE '🔒 Encrypted message%' "
+            "ORDER BY id DESC LIMIT 1",
+            (bare_jid, request_id),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            conn.execute(
+                "UPDATE messages SET timestamp = ?, mam_id = ? WHERE id = ?",
+                (timestamp, mam_id, row["id"]),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
     def attach_mam_to_recent_message(self, bare_jid: str, body: str,
                                      direction: str, timestamp: str,
                                      mam_id: str, window_seconds: int = 30,
@@ -500,6 +531,19 @@ class XmppHistory:
             "WHERE mam_id IS NOT NULL"
         ).fetchall()
         delete_ids = []
+        # Remove failure placeholders produced by decrypting a MAM replay of
+        # a stanza that had already been decrypted live.  `request_id` is the
+        # stable id of the inner message and therefore a stronger match than
+        # timestamp/body heuristics.
+        failed_replays = conn.execute(
+            "SELECT failed.id FROM messages AS failed "
+            "WHERE failed.body LIKE '🔒 Encrypted message%' "
+            "AND failed.request_id IS NOT NULL AND EXISTS ("
+            "SELECT 1 FROM messages AS clear WHERE clear.bare_jid = failed.bare_jid "
+            "AND clear.request_id = failed.request_id AND clear.id != failed.id "
+            "AND clear.body NOT LIKE '🔒 Encrypted message%')"
+        ).fetchall()
+        delete_ids.extend(row["id"] for row in failed_replays)
         for row in rows:
             target = self._parse_timestamp(row["timestamp"])
             if target is None:

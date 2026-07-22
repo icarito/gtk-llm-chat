@@ -1004,6 +1004,24 @@ class XmppSession(GObject.Object):
                         encrypted_node = msg_node.getTag('encrypted', namespace='urn:xmpp:omemo:2')
 
         if encrypted_node is not None:
+            # A live OMEMO stanza can return through MAM seconds later.  The
+            # Double Ratchet message has already been consumed, so recognize
+            # the stable inner stanza id and attach the MAM id to the clear
+            # cached row without decrypting it a second time.
+            if getattr(properties, 'is_mam_message', False):
+                stanza_id = _stanza.getAttr('id') or ''
+                mam = properties.mam
+                if stanza_id and mam.id:
+                    self._ensure_history()
+                    from datetime import datetime, timezone
+                    mam_timestamp = datetime.fromtimestamp(
+                        mam.timestamp, timezone.utc).isoformat()
+                    if self.history.attach_mam_to_decrypted_request(
+                            bare, stanza_id, mam_timestamp, mam.id):
+                        debug_print(
+                            f"[omemo-decrypt] skip-mam-replay id={stanza_id} "
+                            f"mam={mam.id}")
+                        return
             stanza_key = id(_stanza)
             fallback_body = _("🔒 Encrypted message could not be decrypted")
 
