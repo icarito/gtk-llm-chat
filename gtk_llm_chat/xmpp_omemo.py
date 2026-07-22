@@ -539,9 +539,14 @@ class OMEMOEngine:
             recipients = frozenset({to_bare_jid})
             try:
                 plaintext_bytes = text.encode('utf-8')
-                plaintext = {LEGACY_NS: plaintext_bytes}
+                # Preferir OMEMO 2 para envíos: los clientes modernos (Dino,
+                # OpenClaw) pueden publicar solo el bundle urn:xmpp:omemo:2.
+                # El backend legacy permanece cargado para descifrar mensajes
+                # antiguos, pero no debe bloquear el cifrado saliente.
                 if twomemo_available:
-                    plaintext[TWOMEMO_NS] = plaintext_bytes
+                    plaintext = {TWOMEMO_NS: plaintext_bytes}
+                else:
+                    plaintext = {LEGACY_NS: plaintext_bytes}
                 encrypted_messages, errors = await asyncio.wait_for(
                     self.manager.encrypt(recipients, plaintext), timeout=20
                 )
