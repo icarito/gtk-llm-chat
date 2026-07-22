@@ -178,7 +178,9 @@ def run_on_main_thread(func, *args, **kwargs):
 
     def main_thread_callback():
         try:
-            debug_print(f"[omemo-glib] call {getattr(func, '__name__', repr(func))}")
+            name = getattr(func, '__name__', repr(func))
+            debug_print(f"[omemo-glib] call {name}")
+            print(f"[omemo-glib] call {name}", flush=True)
             task = func(*args, **kwargs)
             if task is None:
                 loop.call_soon_threadsafe(future.set_result, None)
@@ -187,7 +189,8 @@ def run_on_main_thread(func, *args, **kwargs):
             def on_done(t):
                 try:
                     res = t.finish()
-                    debug_print(f"[omemo-glib] done {getattr(func, '__name__', repr(func))}")
+                    debug_print(f"[omemo-glib] done {name}")
+                    print(f"[omemo-glib] done {name}", flush=True)
                     loop.call_soon_threadsafe(future.set_result, res)
                 except Exception as e:
                     loop.call_soon_threadsafe(future.set_exception, e)
@@ -379,6 +382,7 @@ class OMEMOEngine:
         async def _init_coro():
             print(f"[omemo-init] create-start jid={self.jid_str}", flush=True)
             debug_print(f"[omemo-init] create-start jid={self.jid_str}")
+            print("[omemo-init] manager-create-call", flush=True)
             manager = await XmppOMEMOSessionManager.create(
                 backends=backends,
                 storage=self.storage,
