@@ -601,9 +601,14 @@ class XmppSession(GObject.Object):
             from .xmpp_omemo import OMEMOEngine
             label = load_omemo_device_label()
             self.omemo_engine = OMEMOEngine(self, self.bare_jid)
+            debug_print(f"[omemo-init] engine-created jid={self.bare_jid}")
 
             def init_omemo():
-                self.omemo_engine.initialize(label)
+                try:
+                    debug_print(f"[omemo-init] thread-start jid={self.bare_jid}")
+                    self.omemo_engine.initialize(label)
+                except Exception as exc:
+                    debug_print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}")
 
             threading.Thread(target=init_omemo, daemon=True).start()
 
@@ -1260,7 +1265,11 @@ class XmppSession(GObject.Object):
         if is_omemo_enabled() and (
                 self.omemo_engine is None or
                 getattr(self.omemo_engine, 'manager', None) is None):
-            debug_print(f"OMEMO: motor no disponible; se bloquea envío a {to_bare_jid}")
+            debug_print(
+                f"OMEMO: motor no disponible; se bloquea envío a {to_bare_jid} "
+                f"engine={self.omemo_engine is not None} "
+                f"manager={getattr(self.omemo_engine, 'manager', None) is not None}"
+            )
             self._pending_delivery.pop(stanza_id, None)
             self.emit('delivery-state', stanza_id, 'failed', text)
             return stanza_id
