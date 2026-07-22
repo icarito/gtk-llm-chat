@@ -3390,6 +3390,11 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_llm_error(self, llm_client, message):
         """Muestra un mensaje de error en el chat"""
         debug_print(message, file=sys.stderr)
+        # send_message puede emitir 'error' sin lanzar _process_stream (p.ej.
+        # generación ya en curso, backend sin inicializar) — en esos casos
+        # 'finished' nunca llega y el spinner/input quedarían trabados si no
+        # se reactivan acá también.
+        self.set_enabled(True)
         if self.is_messaging_backend:
             # Un error de sesión (p.ej. roster fallido) no siempre viene
             # acompañado de 'state-changed'; reflejarlo brevemente en el
