@@ -216,6 +216,7 @@ class XmppSession(GObject.Object):
                  auto_reconnect: bool = True):
         GObject.Object.__init__(self)
         self.omemo_engine = None
+        self._omemo_init_started = False
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = f"{resource}-{_device_resource_suffix()}"
@@ -597,9 +598,10 @@ class XmppSession(GObject.Object):
 
         # Inicialización de claves OMEMO al conectarse si está habilitado
         from .xmpp_account import is_omemo_enabled, load_omemo_device_label
-        if is_omemo_enabled():
+        if is_omemo_enabled() and not self._omemo_init_started:
             from .xmpp_omemo import OMEMOEngine
             label = load_omemo_device_label()
+            self._omemo_init_started = True
             self.omemo_engine = OMEMOEngine(self, self.bare_jid)
             debug_print(f"[omemo-init] engine-created jid={self.bare_jid}")
             print(f"[omemo-init] engine-created source={__file__} jid={self.bare_jid}", flush=True)
@@ -616,6 +618,7 @@ class XmppSession(GObject.Object):
                     )
                     self.omemo_engine.initialize(label)
                 except Exception as exc:
+                    self._omemo_init_started = False
                     debug_print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}")
                     print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}", flush=True)
 
