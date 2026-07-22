@@ -981,11 +981,17 @@ class XmppSession(GObject.Object):
 
             decrypted_body = self.omemo_engine.decrypt_msg(sender_bare, encrypted_node)
             if decrypted_body is not None:
-                # Si contiene la etiqueta XML de OOB, la extraemos para la UI y la limpiamos del body principal
+                # Si contiene la etiqueta XML de OOB, la extraemos usando ElementTree para evitar expresiones regulares frágiles
                 if '<x xmlns=' in decrypted_body:
-                    match = re.search(r'<url>(.*?)</url>', decrypted_body)
-                    if match:
-                        decrypted_body = match.group(1).strip()
+                    try:
+                        from xml.etree import ElementTree as ET
+                        xml_part = decrypted_body[decrypted_body.find('<x'):]
+                        root = ET.fromstring(xml_part)
+                        url_elt = root.find('{jabber:x:oob}url')
+                        if url_elt is not None and url_elt.text:
+                            decrypted_body = url_elt.text.strip()
+                    except Exception as e:
+                        debug_print(f"OMEMO: error al parsear XML de OOB en body: {e}")
                 properties.body = decrypted_body
                 self.emit('omemo-status-changed', True)
             else:
@@ -1232,6 +1238,13 @@ class XmppSession(GObject.Object):
         return None
 
     def send_text(self, to_bare_jid: str, text: str):
+        """Envía un mensaje de texto.
+
+        Nota de semántica: Si OMEMO está habilitado, el cifrado se realiza de forma
+        asíncrona en un hilo secundario y la stanza se envía mediante GLib.idle_add.
+        Se devuelve un stanza_id generado upfront inmediatamente, y el estado de entrega
+        se actualiza a 'failed' si el cifrado falla.
+        """
         # Generar un ID único upfront para que la UI pueda registrarlo y marcarlo como 'pending' de inmediato
         stanza_id = str(uuid.uuid4())
         self._pending_delivery[stanza_id] = {
@@ -1246,17 +1259,25 @@ class XmppSession(GObject.Object):
             msg.addChild(node=chatstate)
 
             if self.omemo_engine is not None:
-                encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
-                if encrypted_node is not None:
-                    msg.setBody(None)
-                    msg.addChild(node=encrypted_node)
-                    debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
-                else:
-                    debug_print(f"OMEMO: fallback a texto plano para {to_bare_jid}")
+                try:
+                    encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
+                    if encrypted_node is not None:
+                        msg.setBody(None)
+                        msg.addChild(node=encrypted_node)
+                        debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
+                    else:
+                        debug_print(f"OMEMO: fallback a texto plano para {to_bare_jid}")
+                except Exception as e:
+                    debug_print(f"OMEMO: error durante cifrado para {to_bare_jid}: {e}")
+                    # Actualizar a 'failed' para evitar que quede huérfano si el cifrado falla
+                    GLib.idle_add(lambda: self.emit('delivery-state', stanza_id, 'failed', text))
+                    return
 
             def send_on_main():
                 if self._client is not None:
                     self._client.send_stanza(msg)
+                    # Nota de diseño: se accede a _smacks, un atributo interno de nbxmpp,
+                    # debido a la ausencia de una API pública para consultar la cola de SM de nbxmpp.
                     smacks = getattr(self._client, '_smacks', None)
                     if smacks is not None and getattr(smacks, 'enabled', False):
                         sequence = getattr(smacks, '_out_h', None)

@@ -372,20 +372,6 @@ class OMEMOEngine:
             return None, text
 
         async def _encrypt_coro():
-            # Actualizar lista de dispositivos del destinatario
-            for backend in self.manager._SessionManager__backends:
-                try:
-                    await self.manager.refresh_device_list(backend.namespace, to_bare_jid)
-                except Exception as e:
-                    debug_print(f"OMEMO: falló refresco de dispositivos para {to_bare_jid} ({backend.namespace}): {e}")
-
-            # Refrescar dispositivos propios
-            for backend in self.manager._SessionManager__backends:
-                try:
-                    await self.manager.refresh_device_list(backend.namespace, self.jid_str)
-                except Exception as e:
-                    debug_print(f"OMEMO: falló refresco de dispositivos propios ({backend.namespace}): {e}")
-
             recipients = {self.jid_str, to_bare_jid}
             try:
                 plaintext_bytes = text.encode('utf-8')
@@ -429,15 +415,17 @@ class OMEMOEngine:
             # Desencriptar
             plaintext_bytes, _device_info = await self.manager.decrypt(omemo_msg)
 
-            # Always trust (always-trust policy)
-            try:
-                await self.manager.set_trust(
-                    _device_info.bare_jid,
-                    _device_info.identity_key,
-                    TrustLevel.TRUSTED
-                )
-            except Exception as e:
-                debug_print(f"OMEMO: Error guardando trust para {_device_info.bare_jid}: {e}")
+            # Establecer confianza automática solo si es necesario (always-trust policy)
+            if _device_info.trust_level_name != 'TRUSTED':
+                try:
+                    await self.manager.set_trust(
+                        _device_info.bare_jid,
+                        _device_info.identity_key,
+                        TrustLevel.TRUSTED
+                    )
+                    debug_print(f"OMEMO: confianza automática establecida para {_device_info.bare_jid}")
+                except Exception as e:
+                    debug_print(f"OMEMO: Error guardando trust para {_device_info.bare_jid}: {e}")
 
             # Responder al exchange con un mensaje vacío de ser necesario
             header_node = encrypted_node.getTag('header')

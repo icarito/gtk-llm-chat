@@ -58,7 +58,6 @@ def save_account(jid: str, password: str, omemo_enabled: bool = False):
         json.dump({
             'jid': jid,
             'omemo': omemo_enabled,
-            'omemo_enabled': omemo_enabled,
             'omemo_device_label': existing_label
         }, f, indent=2)
 
