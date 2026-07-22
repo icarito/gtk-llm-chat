@@ -293,7 +293,7 @@ class XmppOMEMOSessionManager(SessionManager):
 
     async def _make_trust_decision(self, undecided, identifier):
         for device in undecided:
-            await self.set_trust(device.bare_jid, device.identity_key, TrustLevel.TRUSTED)
+            await self.set_trust(device.bare_jid, device.identity_key, "trusted")
 
     @staticmethod
     async def _send_message(message, bare_jid: str) -> None:
@@ -681,15 +681,16 @@ class OMEMOEngine:
                 omemo_msg = await old_parse_message(et_el, from_bare_jid, self.jid_str, self.manager)
 
             # Desencriptar
-            plaintext_bytes, _device_info = await self.manager.decrypt(omemo_msg)
+            decrypt_result = await self.manager.decrypt(omemo_msg)
+            plaintext_bytes, _device_info = decrypt_result[:2]
 
             # Establecer confianza automática solo si es necesario (always-trust policy)
-            if _device_info.trust_level_name != 'TRUSTED':
+            if _device_info.trust_level_name.lower() != 'trusted':
                 try:
                     await self.manager.set_trust(
                         _device_info.bare_jid,
                         _device_info.identity_key,
-                        TrustLevel.TRUSTED
+                        "trusted"
                     )
                     debug_print(f"OMEMO: confianza automática establecida para {_device_info.bare_jid}")
                 except Exception as e:
