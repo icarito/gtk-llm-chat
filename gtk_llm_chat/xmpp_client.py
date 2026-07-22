@@ -219,6 +219,7 @@ class XmppSession(GObject.Object):
         self._omemo_init_started = False
         self._omemo_decrypting = set()
         self._omemo_decrypted = set()
+        self._omemo_decrypt_failed = set()
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = f"{resource}-{_device_resource_suffix()}"
@@ -1003,11 +1004,19 @@ class XmppSession(GObject.Object):
                         encrypted_node = msg_node.getTag('encrypted', namespace='urn:xmpp:omemo:2')
 
         if encrypted_node is not None:
-            if self.omemo_engine is None:
-                debug_print(f"OMEMO: recibido mensaje cifrado de {sender_bare} pero OMEMO no está habilitado. Se ignora.")
+            stanza_key = id(_stanza)
+            fallback_body = _("🔒 Encrypted message could not be decrypted")
+
+            if self.omemo_engine is None and stanza_key not in self._omemo_decrypted:
+                debug_print(f"OMEMO: recibido mensaje cifrado de {sender_bare} pero OMEMO no está habilitado")
+                properties.body = fallback_body
+                self._omemo_decrypted.add(stanza_key)
+                self._omemo_decrypt_failed.add(stanza_key)
+                self._on_message(_client, _stanza, properties)
+                self._omemo_decrypted.discard(stanza_key)
+                self._omemo_decrypt_failed.discard(stanza_key)
                 return
 
-            stanza_key = id(_stanza)
             if stanza_key not in self._omemo_decrypted:
                 if stanza_key in self._omemo_decrypting:
                     return
@@ -1024,11 +1033,14 @@ class XmppSession(GObject.Object):
                         self._omemo_decrypting.discard(stanza_key)
                         if body is None:
                             debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
-                            return GLib.SOURCE_REMOVE
-                        properties.body = body
+                            properties.body = fallback_body
+                            self._omemo_decrypt_failed.add(stanza_key)
+                        else:
+                            properties.body = body
                         self._omemo_decrypted.add(stanza_key)
                         self._on_message(_client, _stanza, properties)
                         self._omemo_decrypted.discard(stanza_key)
+                        self._omemo_decrypt_failed.discard(stanza_key)
                         return GLib.SOURCE_REMOVE
 
                     GLib.idle_add(resume_message)
@@ -1036,7 +1048,7 @@ class XmppSession(GObject.Object):
                 threading.Thread(target=decrypt_in_background, daemon=True).start()
                 return
 
-            self._omemo_decrypted.discard(stanza_key)
+            decrypt_failed = stanza_key in self._omemo_decrypt_failed
             decrypted_body = properties.body
             if decrypted_body is not None:
                 # Si contiene la etiqueta XML de OOB, la extraemos usando ElementTree para evitar expresiones regulares frágiles
@@ -1051,7 +1063,7 @@ class XmppSession(GObject.Object):
                     except Exception as e:
                         debug_print(f"OMEMO: error al parsear XML de OOB en body: {e}")
                 properties.body = decrypted_body
-                self.emit('omemo-status-changed', True)
+                self.emit('omemo-status-changed', not decrypt_failed)
             else:
                 debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
                 return
