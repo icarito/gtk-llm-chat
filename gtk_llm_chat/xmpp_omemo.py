@@ -523,6 +523,8 @@ class OMEMOEngine:
         if self.manager is None:
             return None, text
 
+        print(f"[omemo-encrypt] start target={to_bare_jid} len={len(text)}", flush=True)
+
         async def _encrypt_coro():
             recipients = frozenset({to_bare_jid})
             try:
@@ -530,8 +532,9 @@ class OMEMOEngine:
                 plaintext = {LEGACY_NS: plaintext_bytes}
                 if twomemo_available:
                     plaintext[TWOMEMO_NS] = plaintext_bytes
-                encrypted_messages, errors = await self.manager.encrypt(
-                    recipients, plaintext)
+                encrypted_messages, errors = await asyncio.wait_for(
+                    self.manager.encrypt(recipients, plaintext), timeout=20
+                )
                 if errors:
                     debug_print(f"OMEMO: errores no críticos al cifrar para {to_bare_jid}: {errors}")
                 if not encrypted_messages:
@@ -556,12 +559,14 @@ class OMEMOEngine:
                 nodes.append(etree_to_node(et_el))
             if not nodes:
                 return None, text
+            print(f"[omemo-encrypt] done target={to_bare_jid} nodes={len(nodes)}", flush=True)
             return (nodes[0] if len(nodes) == 1 else nodes), text
 
         try:
             return self.worker.run_coroutine(_encrypt_coro(), timeout=30)
         except Exception as e:
             debug_print(f"OMEMO: Error encriptando mensaje: {e}")
+            print(f"[omemo-encrypt] failed target={to_bare_jid} error={e!r}", flush=True)
             return None, text
 
     def decrypt_msg(self, from_bare_jid: str, encrypted_node: Node) -> str | None:
