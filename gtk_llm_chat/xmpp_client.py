@@ -20,6 +20,7 @@ import mimetypes
 import os
 import re
 import threading
+import time
 import urllib.request
 import uuid
 
@@ -1250,6 +1251,7 @@ class XmppSession(GObject.Object):
         self._pending_delivery[stanza_id] = {
             'body': text, 'sequence': None,
         }
+        debug_print(f"[delivery] id={stanza_id} phase=pending target={to_bare_jid} len={len(text or '')}")
         self.emit('delivery-state', stanza_id, 'pending', text)
 
         # OMEMO is fail-closed.  Never leak the first message while the
@@ -1264,6 +1266,8 @@ class XmppSession(GObject.Object):
             return stanza_id
 
         def do_encrypt_and_send():
+            started = time.monotonic()
+            debug_print(f"[delivery] id={stanza_id} phase=encrypt-start")
             msg = Message(to=to_bare_jid, body=text, typ='chat')
             msg.setID(stanza_id)
             chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
@@ -1278,23 +1282,26 @@ class XmppSession(GObject.Object):
                         for node in nodes:
                             msg.addChild(node=node)
                         debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
+                        debug_print(f"[delivery] id={stanza_id} phase=encrypt-done elapsed={time.monotonic()-started:.2f}s nodes={len(nodes)}")
                     else:
                         # Encryption is mandatory when OMEMO is enabled.
                         debug_print(f"OMEMO: no se pudo cifrar; se bloquea envío a {to_bare_jid}")
-                        GLib.idle_add(lambda: self.emit('delivery-state', stanza_id, 'failed', text))
+                        GLib.idle_add(lambda: self._mark_delivery_failed(stanza_id))
                         return
                 except Exception as e:
                     debug_print(f"OMEMO: error durante cifrado para {to_bare_jid}: {e}")
                     # Actualizar a 'failed' para evitar que quede huérfano si el cifrado falla
-                    GLib.idle_add(lambda: self.emit('delivery-state', stanza_id, 'failed', text))
+                    GLib.idle_add(lambda: self._mark_delivery_failed(stanza_id))
                     return
 
             def send_on_main():
                 if self._client is None:
+                    debug_print(f"[delivery] id={stanza_id} phase=send-abort reason=disconnected")
                     self._mark_delivery_failed(stanza_id)
                     return GLib.SOURCE_REMOVE
                 try:
                     self._client.send_stanza(msg)
+                    debug_print(f"[delivery] id={stanza_id} phase=stanza-sent")
                 except Exception as exc:
                     debug_print(f"XmppSession: no se pudo enviar {stanza_id}: {exc}")
                     self._mark_delivery_failed(stanza_id)
@@ -1307,8 +1314,10 @@ class XmppSession(GObject.Object):
                         sequence = getattr(smacks, '_out_h', None)
                         if stanza_id in self._pending_delivery:
                             self._pending_delivery[stanza_id]['sequence'] = sequence
+                            debug_print(f"[delivery] id={stanza_id} phase=await-ack sequence={sequence}")
                             self._schedule_delivery_timeout(stanza_id)
                     else:
+                        debug_print(f"[delivery] id={stanza_id} phase=sent-no-smacks")
                         self._mark_delivery_sent(stanza_id)
                 return GLib.SOURCE_REMOVE
 
@@ -1322,6 +1331,7 @@ class XmppSession(GObject.Object):
             handled = int(stanza.getAttr('h'))
         except (TypeError, ValueError):
             return
+        debug_print(f"[delivery] phase=sm-ack handled={handled}")
         for stanza_id, pending in list(self._pending_delivery.items()):
             sequence = pending.get('sequence')
             if sequence is not None and sequence <= handled:
@@ -1330,11 +1340,13 @@ class XmppSession(GObject.Object):
     def _mark_delivery_sent(self, stanza_id):
         pending = self._pending_delivery.pop(stanza_id, None)
         if pending is not None:
+            debug_print(f"[delivery] id={stanza_id} phase=sent")
             self.emit('delivery-state', stanza_id, 'sent', pending['body'])
 
     def _mark_delivery_failed(self, stanza_id):
         pending = self._pending_delivery.pop(stanza_id, None)
         if pending is not None:
+            debug_print(f"[delivery] id={stanza_id} phase=failed")
             self.emit('delivery-state', stanza_id, 'failed', pending['body'])
 
     def _schedule_delivery_timeout(self, stanza_id, timeout_seconds=60):

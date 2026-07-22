@@ -1870,6 +1870,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.backend.send_message(body)
 
     def _on_delivery_state(self, _backend, stanza_id, state, body):
+        debug_print(f"[delivery-ui] id={stanza_id} state={state} len={len(body or '')}")
         widget = self._delivery_widgets.get(stanza_id)
         if widget is None:
             pending = self._pending_delivery_widgets.get(body, [])
@@ -4423,30 +4424,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     _SCROLL_BOTTOM_EPSILON = 4.0
 
     def _log_scroll_state(self, where, adj=None, extra=""):
-        """Traza compacta del estado de scroll para depurar carreras."""
-        if not DEBUG:
-            return
-        if adj is None and hasattr(self, 'message_scroll'):
-            adj = self.message_scroll.get_vadjustment()
-        if adj is None:
-            debug_print(f"[scroll] {where} | adj=<none> {extra}")
-            return
-        value = adj.get_value()
-        upper = adj.get_upper()
-        page = adj.get_page_size()
-        distance = max(0.0, upper - (value + page))
-        at_bottom = distance <= self._SCROLL_BOTTOM_EPSILON
-        debug_print(
-            "[scroll] "
-            f"{where} | v={value:.1f} u={upper:.1f} p={page:.1f} "
-            f"d={distance:.1f} at_bottom={at_bottom} "
-            f"stick={getattr(self, '_stick_to_bottom', None)} "
-            f"pending={getattr(self, '_post_layout_scroll_pending', None)} "
-            f"force={getattr(self, '_post_layout_scroll_force', None)} "
-            f"added_pending={getattr(self, '_content_added_pending', None)} "
-            f"restoring={getattr(self, '_restoring_scroll', None)} "
-            f"{extra}"
-        )
+        """Legacy hook retained for callers; scroll tracing is intentionally off."""
+        return
 
     def _at_bottom(self, adj):
         return (adj.get_upper() - (adj.get_value() + adj.get_page_size())
