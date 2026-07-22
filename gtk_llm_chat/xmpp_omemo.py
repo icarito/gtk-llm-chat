@@ -135,11 +135,23 @@ class JSONStorage(Storage):
             self.data = {}
 
     def save_to_file(self):
+        tmp_path = f"{self.filepath}.tmp"
         try:
-            with open(self.filepath, 'w', encoding='utf-8') as f:
+            os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, self.filepath)
+            os.chmod(self.filepath, 0o600)
         except Exception as e:
             debug_print(f"OMEMO JSONStorage: error al guardar {self.filepath}: {e}")
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
 
     async def _load(self, key: str) -> Maybe[JSONType]:
         if key in self.data:
