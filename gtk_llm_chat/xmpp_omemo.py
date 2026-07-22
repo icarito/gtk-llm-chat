@@ -38,7 +38,7 @@ from omemo import (
 )
 from omemo.storage import Storage, StorageException
 from omemo.backend import Backend
-from omemo.types import DeviceList
+from omemo.types import DeviceInformation, DeviceList
 
 from oldmemo import Oldmemo
 from oldmemo.oldmemo import BundleImpl as OldBundleImpl
@@ -240,6 +240,42 @@ class XmppOMEMOSessionManager(SessionManager):
         if namespace == TWOMEMO_NS:
             return f"{TWOMEMO_NS}:bundles:{device_id}"
         return f"{LEGACY_NS}.bundles:{device_id}"
+
+    @staticmethod
+    async def _delete_bundle(namespace: str, device_id: int) -> None:
+        pubsub = XmppOMEMOSessionManager._get_pubsub_module()
+        await run_on_main_thread(
+            pubsub.retract,
+            XmppOMEMOSessionManager._get_bundle_node(namespace, device_id),
+            str(device_id),
+            notify=True,
+        )
+
+    async def _evaluate_custom_trust_level(self, device: DeviceInformation) -> TrustLevel:
+        # The desktop client currently exposes no interactive fingerprint UI.
+        # Preserve the PR's explicit always-trust policy until that UI exists.
+        if device.trust_level_name == "undecided":
+            return TrustLevel.TRUSTED
+        if device.trust_level_name == "trusted":
+            return TrustLevel.TRUSTED
+        return TrustLevel.DISTRUSTED
+
+    async def _make_trust_decision(self, undecided, identifier):
+        for device in undecided:
+            await self.set_trust(device.bare_jid, device.identity_key, TrustLevel.TRUSTED)
+
+    @staticmethod
+    async def _send_message(message, bare_jid: str) -> None:
+        session = XmppOMEMOSessionManager.get_session_instance()
+        if session is None or session._client is None:
+            raise RuntimeError("No hay cliente XMPP activo conectado")
+        if message.namespace == TWOMEMO_NS:
+            et_el = two_serialize_message(message)
+        else:
+            et_el = old_serialize_message(message)
+        stanza = Message(to=bare_jid, typ="chat")
+        stanza.addChild(node=etree_to_node(et_el))
+        await run_on_main_thread(session._client.send_stanza, stanza)
 
     @staticmethod
     async def _upload_bundle(bundle) -> None:
