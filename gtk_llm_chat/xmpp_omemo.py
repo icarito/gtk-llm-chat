@@ -114,6 +114,15 @@ def node_to_etree(node, parent_ns=None) -> ET.Element:
     return et_element
 
 
+def _strip_non_schema_device_attributes(element: ET.Element) -> ET.Element:
+    """Acepta clientes que añaden ``label`` a <device> (OMEMO 2)."""
+    for child in element.iter():
+        tag = child.tag.rsplit('}', 1)[-1] if isinstance(child.tag, str) else ''
+        if tag == 'device':
+            child.attrib.pop('label', None)
+    return element
+
+
 # --- Storage Provider ---
 
 class JSONStorage(Storage):
@@ -399,6 +408,7 @@ class XmppOMEMOSessionManager(SessionManager):
             if namespace == TWOMEMO_NS:
                 return two_parse_device_list(et_el)
             else:
+                et_el = _strip_non_schema_device_attributes(et_el)
                 return old_parse_device_list(et_el)
 
         return {}
