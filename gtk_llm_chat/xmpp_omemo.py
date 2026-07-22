@@ -382,6 +382,12 @@ class OMEMOEngine:
         backends = [Oldmemo(self.storage)]
         if twomemo_available:
             backends.append(Twomemo(self.storage))
+        else:
+            print(
+                "[omemo-init] WARNING: twomemo package unavailable; "
+                "OMEMO 2 decrypt/encrypt is disabled",
+                flush=True,
+            )
 
         async def _init_coro():
             print(f"[omemo-init] create-start jid={self.jid_str}", flush=True)
