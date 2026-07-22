@@ -318,7 +318,7 @@ class XmppOMEMOSessionManager(SessionManager):
             id_=str(bundle.device_id),
             options={
                 "pubsub#persist_items": "true",
-                "pubsub#max_items": "max",
+                "pubsub#max_items": "1",
                 "pubsub#access_model": "open",
             },
             force_node_options=True,
