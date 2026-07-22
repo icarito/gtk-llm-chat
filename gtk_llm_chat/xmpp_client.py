@@ -1299,6 +1299,7 @@ class XmppSession(GObject.Object):
                         sequence = getattr(smacks, '_out_h', None)
                         if stanza_id in self._pending_delivery:
                             self._pending_delivery[stanza_id]['sequence'] = sequence
+                            self._schedule_delivery_timeout(stanza_id)
                     else:
                         self._mark_delivery_sent(stanza_id)
                 return GLib.SOURCE_REMOVE
@@ -1322,6 +1323,16 @@ class XmppSession(GObject.Object):
         pending = self._pending_delivery.pop(stanza_id, None)
         if pending is not None:
             self.emit('delivery-state', stanza_id, 'sent', pending['body'])
+
+    def _schedule_delivery_timeout(self, stanza_id, timeout_seconds=60):
+        """Fail a delivery that never receives a transport acknowledgement."""
+        def expire():
+            pending = self._pending_delivery.pop(stanza_id, None)
+            if pending is not None:
+                debug_print(f"XmppSession: timeout esperando ACK para {stanza_id}")
+                self.emit('delivery-state', stanza_id, 'failed', pending['body'])
+            return GLib.SOURCE_REMOVE
+        GLib.timeout_add_seconds(timeout_seconds, expire)
 
     # --- Adjuntos: XEP-0363 (HTTP File Upload) + XEP-0066 (OOB) ---
 

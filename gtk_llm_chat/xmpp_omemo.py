@@ -328,10 +328,18 @@ class OMEMOAsyncWorker:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def run_coroutine(self, coro):
-        """Ejecuta una corrutina de forma síncrona esperando su resultado."""
+    def run_coroutine(self, coro, timeout=None):
+        """Ejecuta una corrutina de forma síncrona esperando su resultado.
+
+        A network-backed OMEMO operation must not be allowed to leave the
+        outbound delivery bubble pending forever.
+        """
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            raise
 
 
 class OMEMOEngine:
@@ -426,7 +434,7 @@ class OMEMOEngine:
             return (nodes[0] if len(nodes) == 1 else nodes), text
 
         try:
-            return self.worker.run_coroutine(_encrypt_coro())
+            return self.worker.run_coroutine(_encrypt_coro(), timeout=30)
         except Exception as e:
             debug_print(f"OMEMO: Error encriptando mensaje: {e}")
             return None, text
