@@ -1326,7 +1326,7 @@ class XmppSession(GObject.Object):
             chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
             msg.addChild(node=chatstate)
 
-            if self.omemo_engine is not None:
+            if self.omemo_engine is not None and is_omemo_enabled():
                 try:
                     encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
                     if encrypted_node is not None:
@@ -1567,7 +1567,7 @@ class XmppSession(GObject.Object):
             msg.addChild(node=chatstate)
 
             from .xmpp_account import is_omemo_enabled
-            if is_omemo_enabled():
+            if is_omemo_enabled() and self.omemo_engine is not None:
                 try:
                     encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, plaintext)
                 except Exception as exc:
