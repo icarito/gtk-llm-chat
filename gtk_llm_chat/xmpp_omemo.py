@@ -31,6 +31,7 @@ from omemo import (
     BundleNotFound,
     DeviceListDownloadFailed,
     BundleDownloadFailed,
+    MessageNotForUs,
     NoEligibleDevices,
     JSONType,
     Maybe,
@@ -70,6 +71,7 @@ except ImportError:
 # XML Namespaces
 LEGACY_NS = "eu.siacs.conversations.axolotl"
 TWOMEMO_NS = "urn:xmpp:omemo:2"
+OMEMO_NOT_FOR_US = object()
 
 
 # --- XML Conversion Utilities ---
@@ -517,6 +519,7 @@ class OMEMOEngine:
         self.jid_str = jid_str
         self.worker = OMEMOAsyncWorker()
         self.manager = None
+        self.own_device_id = None
 
         # Ruta del archivo de persistencia
         user_dir = ensure_user_dir_exists()
@@ -568,6 +571,7 @@ class OMEMOEngine:
                 own_device_id = (await self.storage.load_primitive(
                     "/own_device_id", int
                 )).from_just()
+                self.own_device_id = own_device_id
                 twomemo_backend = next(
                     backend for backend in backends
                     if backend.namespace == TWOMEMO_NS
@@ -714,7 +718,7 @@ class OMEMOEngine:
             print(f"[omemo-encrypt] failed target={to_bare_jid} error={e!r}", flush=True)
             return None, text
 
-    def decrypt_msg(self, from_bare_jid: str, encrypted_node: Node) -> str | None:
+    def decrypt_msg(self, from_bare_jid: str, encrypted_node: Node) -> str | None | object:
         """Desencripta un nodo encriptado entrante."""
         if self.manager is None:
             return None
@@ -723,6 +727,26 @@ class OMEMOEngine:
         # Convertir a ElementTree
         et_el = node_to_etree(encrypted_node)
         ns = encrypted_node.getNamespace()
+        header_node = encrypted_node.getTag('header')
+        addressed_keys = []
+        if header_node is not None:
+            if ns == TWOMEMO_NS:
+                for keys_node in header_node.getTags('keys'):
+                    key_jid = keys_node.getAttr('jid') or '?'
+                    addressed_keys.extend(
+                        f"{key_jid}:{key.getAttr('rid') or '?'}"
+                        for key in keys_node.getTags('key')
+                    )
+            else:
+                addressed_keys.extend(
+                    key.getAttr('rid') or '?'
+                    for key in header_node.getTags('key')
+                )
+        print(
+            f"[omemo-decrypt] namespace={ns} own-device={self.own_device_id} "
+            f"addressed={','.join(addressed_keys) or '-'}",
+            flush=True,
+        )
 
         async def _decrypt_coro():
             if ns == TWOMEMO_NS:
@@ -747,7 +771,6 @@ class OMEMOEngine:
                     debug_print(f"OMEMO: Error guardando trust para {_device_info.bare_jid}: {e}")
 
             # Responder al exchange con un mensaje vacío de ser necesario
-            header_node = encrypted_node.getTag('header')
             has_prekey = False
             if header_node is not None:
                 keys = []
@@ -769,6 +792,13 @@ class OMEMOEngine:
 
         try:
             return self.worker.run_coroutine(_decrypt_coro(), timeout=20)
+        except MessageNotForUs:
+            print(
+                f"[omemo-decrypt] ignored-not-for-us from={from_bare_jid} "
+                f"namespace={ns}",
+                flush=True,
+            )
+            return OMEMO_NOT_FOR_US
         except Exception as e:
             debug_print(f"OMEMO: Error desencriptando mensaje: {e}")
             print(f"[omemo-decrypt] failed from={from_bare_jid} error={e!r}", flush=True)

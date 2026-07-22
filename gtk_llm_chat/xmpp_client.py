@@ -1031,6 +1031,14 @@ class XmppSession(GObject.Object):
 
                     def resume_message():
                         self._omemo_decrypting.discard(stanza_key)
+                        from .xmpp_omemo import OMEMO_NOT_FOR_US
+                        if body is OMEMO_NOT_FOR_US:
+                            # A bare-JID message may be delivered to every
+                            # connected resource even when its OMEMO key only
+                            # targets another device (for example Gajim).  It
+                            # is not a corrupt message and must not create a
+                            # failure bubble in this resource.
+                            return GLib.SOURCE_REMOVE
                         if body is None:
                             debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
                             properties.body = fallback_body
