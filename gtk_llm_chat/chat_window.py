@@ -3367,11 +3367,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not text:
             return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(
-            self._start_llm_task,
-            text,
-            priority=GLib.PRIORITY_LOW,
-        )
+        if DEBUG:
+            debug_print(f"[send] flush backend send len={len(text)}")
+        # XMPP's send_text starts its encryption worker immediately. Calling
+        # it here avoids a low-priority idle callback starving behind GTK
+        # redraw/layout work, which left the bubble stuck at Sending….
+        self._start_llm_task(text)
         return GLib.SOURCE_REMOVE
 
     def _start_llm_task(self, prompt_text):
