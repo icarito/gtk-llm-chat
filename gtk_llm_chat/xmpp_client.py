@@ -608,6 +608,12 @@ class XmppSession(GObject.Object):
                 try:
                     debug_print(f"[omemo-init] thread-start jid={self.bare_jid}")
                     print(f"[omemo-init] thread-start jid={self.bare_jid}", flush=True)
+                    import inspect
+                    print(
+                        f"[omemo-init] engine-class={type(self.omemo_engine)!r} "
+                        f"initialize-source={inspect.getsourcefile(self.omemo_engine.initialize)}",
+                        flush=True,
+                    )
                     self.omemo_engine.initialize(label)
                 except Exception as exc:
                     debug_print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}")
