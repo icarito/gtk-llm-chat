@@ -1790,6 +1790,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 el mismo mensaje terminaba pintado dos veces si pasaba más de
                 un minuto entre la burbuja en vivo y la re-sincronización.
         """
+        # Old cache rows may contain the authenticated SCE envelope from
+        # before OMEMO unwrapping happened in the transport layer.  Normalize
+        # at the rendering boundary as well so those rows do not leak XML.
+        if isinstance(content, str) and "urn:xmpp:sce:1" in content:
+            from .xmpp_omemo import _unwrap_sce_payload
+            content = _unwrap_sce_payload(content)
         message = Message(content, sender, timestamp=timestamp)
 
         if sender == "user":

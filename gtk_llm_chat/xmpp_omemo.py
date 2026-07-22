@@ -12,6 +12,7 @@ import faulthandler
 import sys
 import traceback
 import threading
+import html
 from xml.etree import ElementTree as ET
 
 from gi.repository import GLib
@@ -132,14 +133,22 @@ def _unwrap_sce_payload(payload: str) -> str:
     """
     if "urn:xmpp:sce:1" not in payload:
         return payload
+    candidate = payload
+    if "<envelope" not in candidate and "&lt;envelope" in candidate:
+        candidate = html.unescape(candidate)
     try:
-        root = ET.fromstring(f"<root>{payload}</root>")
+        root = ET.fromstring(f"<root>{candidate}</root>")
     except ET.ParseError:
         return payload
     bodies = []
-    for envelope in root.findall("{urn:xmpp:sce:1}envelope"):
-        body = envelope.find(
-            "{urn:xmpp:sce:1}content/{jabber:client}body"
+    for envelope in root.iter():
+        local_name = str(envelope.tag).rsplit("}", 1)[-1]
+        if local_name != "envelope":
+            continue
+        body = next(
+            (child for child in envelope.iter()
+             if str(child.tag).rsplit("}", 1)[-1] == "body"),
+            None,
         )
         if body is not None:
             bodies.append("".join(body.itertext()))
