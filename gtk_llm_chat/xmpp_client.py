@@ -602,13 +602,16 @@ class XmppSession(GObject.Object):
             label = load_omemo_device_label()
             self.omemo_engine = OMEMOEngine(self, self.bare_jid)
             debug_print(f"[omemo-init] engine-created jid={self.bare_jid}")
+            print(f"[omemo-init] engine-created source={__file__} jid={self.bare_jid}", flush=True)
 
             def init_omemo():
                 try:
                     debug_print(f"[omemo-init] thread-start jid={self.bare_jid}")
+                    print(f"[omemo-init] thread-start jid={self.bare_jid}", flush=True)
                     self.omemo_engine.initialize(label)
                 except Exception as exc:
                     debug_print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}")
+                    print(f"[omemo-init] thread-crashed jid={self.bare_jid} error={exc!r}", flush=True)
 
             threading.Thread(target=init_omemo, daemon=True).start()
 
