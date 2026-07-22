@@ -179,6 +179,15 @@ def run_on_main_thread(func, *args, **kwargs):
     """Ejecuta una función en el hilo principal de GLib y devuelve un Future de asyncio."""
     loop = asyncio.get_event_loop()
     future = loop.create_future()
+    timeout_handle = None
+
+    def complete_result(result):
+        if not future.done():
+            future.set_result(result)
+
+    def complete_exception(error):
+        if not future.done():
+            future.set_exception(error)
 
     def main_thread_callback():
         try:
@@ -187,7 +196,9 @@ def run_on_main_thread(func, *args, **kwargs):
             print(f"[omemo-glib] call {name}", flush=True)
             task = func(*args, **kwargs)
             if task is None:
-                loop.call_soon_threadsafe(future.set_result, None)
+                if timeout_handle is not None:
+                    timeout_handle.cancel()
+                loop.call_soon_threadsafe(complete_result, None)
                 return
 
             def on_done(t):
@@ -195,15 +206,26 @@ def run_on_main_thread(func, *args, **kwargs):
                     res = t.finish()
                     debug_print(f"[omemo-glib] done {name}")
                     print(f"[omemo-glib] done {name}", flush=True)
-                    loop.call_soon_threadsafe(future.set_result, res)
+                    if timeout_handle is not None:
+                        timeout_handle.cancel()
+                    loop.call_soon_threadsafe(complete_result, res)
                 except Exception as e:
-                    loop.call_soon_threadsafe(future.set_exception, e)
+                    if timeout_handle is not None:
+                        timeout_handle.cancel()
+                    loop.call_soon_threadsafe(complete_exception, e)
 
             task.add_done_callback(on_done, weak=False)
         except Exception as e:
-            loop.call_soon_threadsafe(future.set_exception, e)
+            if timeout_handle is not None:
+                timeout_handle.cancel()
+            loop.call_soon_threadsafe(complete_exception, e)
 
     GLib.idle_add(main_thread_callback)
+    timeout_handle = loop.call_later(
+        20,
+        complete_exception,
+        TimeoutError(f"GLib XMPP operation timed out: {getattr(func, '__name__', repr(func))}"),
+    )
     return future
 
 
@@ -289,7 +311,18 @@ class XmppOMEMOSessionManager(SessionManager):
             et_el = old_serialize_bundle(bundle)
 
         nb_node = etree_to_node(et_el)
-        await run_on_main_thread(pubsub.publish, node_name, nb_node, force_node_options=True)
+        await run_on_main_thread(
+            pubsub.publish,
+            node_name,
+            nb_node,
+            id_=str(bundle.device_id),
+            options={
+                "pubsub#persist_items": "true",
+                "pubsub#max_items": "max",
+                "pubsub#access_model": "open",
+            },
+            force_node_options=True,
+        )
 
     @staticmethod
     async def _download_bundle(namespace: str, bare_jid: str, device_id: int):
@@ -330,7 +363,18 @@ class XmppOMEMOSessionManager(SessionManager):
             et_el = old_serialize_device_list(device_list)
 
         nb_node = etree_to_node(et_el)
-        await run_on_main_thread(pubsub.publish, node_name, nb_node, force_node_options=True)
+        await run_on_main_thread(
+            pubsub.publish,
+            node_name,
+            nb_node,
+            id_="current",
+            options={
+                "pubsub#persist_items": "true",
+                "pubsub#max_items": "1",
+                "pubsub#access_model": "open",
+            },
+            force_node_options=True,
+        )
 
     @staticmethod
     async def _download_device_list(namespace: str, bare_jid: str) -> DeviceList:
