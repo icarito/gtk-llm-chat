@@ -573,6 +573,7 @@ class OMEMOEngine:
         """Desencripta un nodo encriptado entrante."""
         if self.manager is None:
             return None
+        print(f"[omemo-decrypt] start from={from_bare_jid}", flush=True)
 
         # Convertir a ElementTree
         et_el = node_to_etree(encrypted_node)
@@ -621,7 +622,8 @@ class OMEMOEngine:
             return plaintext_bytes.decode('utf-8')
 
         try:
-            return self.worker.run_coroutine(_decrypt_coro())
+            return self.worker.run_coroutine(_decrypt_coro(), timeout=20)
         except Exception as e:
             debug_print(f"OMEMO: Error desencriptando mensaje: {e}")
+            print(f"[omemo-decrypt] failed from={from_bare_jid} error={e!r}", flush=True)
             return None
