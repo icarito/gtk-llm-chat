@@ -2928,8 +2928,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _body_looks_like_approval(body):
         text = str(body or '').lower()
         return ('approval' in text or 'aprobación' in text
-                or 'aprobacion' in text or 'pending command' in text
-                or '🔒' in text)
+                or 'aprobacion' in text or 'pending command' in text)
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)

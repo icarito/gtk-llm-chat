@@ -527,6 +527,27 @@ class OMEMOEngine:
             )
             print(f"[omemo-init] create-done jid={self.jid_str}", flush=True)
             debug_print(f"[omemo-init] create-done jid={self.jid_str}")
+            # Migrate existing installations from the early per-device v2
+            # bundle node to the standard shared :bundles node.  Creating a
+            # manager from persisted state does not otherwise republish its
+            # already-generated bundle, leaving new peers unable to identify
+            # this sender.
+            if twomemo_available:
+                own_device_id = (await self.storage.load_primitive(
+                    "/own_device_id", int
+                )).from_just()
+                twomemo_backend = next(
+                    backend for backend in backends
+                    if backend.namespace == TWOMEMO_NS
+                )
+                own_bundle = await twomemo_backend.get_bundle(
+                    self.jid_str, own_device_id
+                )
+                await XmppOMEMOSessionManager._upload_bundle(own_bundle)
+                debug_print(
+                    f"[omemo-init] republished standard OMEMO 2 bundle "
+                    f"device={own_device_id}"
+                )
             # Salir de modo sincronización de historial inicial
             await manager.after_history_sync()
             debug_print(f"[omemo-init] history-sync-done jid={self.jid_str}")

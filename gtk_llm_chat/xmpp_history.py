@@ -441,8 +441,7 @@ class XmppHistory:
     def _body_looks_like_approval(body) -> bool:
         text = str(body or "").lower()
         return ("approval" in text or "aprobación" in text
-                or "aprobacion" in text or "pending command" in text
-                or "🔒" in text)
+                or "aprobacion" in text or "pending command" in text)
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,
