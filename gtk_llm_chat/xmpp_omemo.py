@@ -269,7 +269,7 @@ class XmppOMEMOSessionManager(SessionManager):
     @staticmethod
     def _get_bundle_node(namespace: str, device_id: int) -> str:
         if namespace == TWOMEMO_NS:
-            return f"{TWOMEMO_NS}:bundles:{device_id}"
+            return f"{TWOMEMO_NS}:bundles"
         return f"{LEGACY_NS}.bundles:{device_id}"
 
     @staticmethod
@@ -327,7 +327,7 @@ class XmppOMEMOSessionManager(SessionManager):
             id_=str(bundle.device_id),
             options={
                 "pubsub#persist_items": "true",
-                "pubsub#max_items": "1",
+                "pubsub#max_items": "100" if bundle.namespace == TWOMEMO_NS else "1",
                 "pubsub#access_model": "open",
             },
             force_node_options=True,
@@ -341,13 +341,34 @@ class XmppOMEMOSessionManager(SessionManager):
 
         try:
             items = await run_on_main_thread(
-                pubsub.request_items, node_name, max_items=1, jid=JID.from_string(bare_jid)
+                pubsub.request_items,
+                node_name,
+                max_items=100 if namespace == TWOMEMO_NS else 1,
+                jid=JID.from_string(bare_jid),
             )
         except Exception as e:
-            debug_print(f"OMEMO: error al descargar bundle {node_name} de {bare_jid}: {e}")
-            raise BundleNotFound(f"Bundle {node_name} de {bare_jid} no encontrado: {e}")
+            if namespace != TWOMEMO_NS:
+                debug_print(f"OMEMO: error al descargar bundle {node_name} de {bare_jid}: {e}")
+                raise BundleNotFound(f"Bundle {node_name} de {bare_jid} no encontrado: {e}")
+            # Read compatibility with the early per-device OMEMO 2 draft.
+            legacy_node = f"{TWOMEMO_NS}:bundles:{device_id}"
+            try:
+                items = await run_on_main_thread(
+                    pubsub.request_items, legacy_node, max_items=1,
+                    jid=JID.from_string(bare_jid),
+                )
+                node_name = legacy_node
+            except Exception as legacy_error:
+                debug_print(f"OMEMO: error al descargar bundle {node_name} de {bare_jid}: {legacy_error}")
+                raise BundleNotFound(
+                    f"Bundle {node_name} de {bare_jid} no encontrado: {legacy_error}"
+                )
 
         for item in items or []:
+            if namespace == TWOMEMO_NS and node_name == f"{TWOMEMO_NS}:bundles":
+                item_id = item.getAttr("id")
+                if item_id is not None and item_id != str(device_id):
+                    continue
             bundle_tag = "bundle"
             bundle_el = item.getTag(bundle_tag, namespace=namespace)
             if bundle_el is None:
@@ -357,6 +378,20 @@ class XmppOMEMOSessionManager(SessionManager):
                 return two_parse_bundle(et_el, bare_jid, device_id)
             else:
                 return old_parse_bundle(et_el, bare_jid, device_id)
+
+        if namespace == TWOMEMO_NS and node_name == f"{TWOMEMO_NS}:bundles":
+            legacy_node = f"{TWOMEMO_NS}:bundles:{device_id}"
+            try:
+                legacy_items = await run_on_main_thread(
+                    pubsub.request_items, legacy_node, max_items=1,
+                    jid=JID.from_string(bare_jid),
+                )
+            except Exception:
+                legacy_items = []
+            for item in legacy_items or []:
+                bundle_el = item.getTag("bundle", namespace=namespace)
+                if bundle_el is not None:
+                    return two_parse_bundle(node_to_etree(bundle_el), bare_jid, device_id)
 
         raise BundleNotFound(f"Bundle {node_name} de {bare_jid} no encontrado en la respuesta PubSub")
 
