@@ -1368,7 +1368,10 @@ class XmppSession(GObject.Object):
                         if stanza_id in self._pending_delivery:
                             self._pending_delivery[stanza_id]['sequence'] = sequence
                             debug_print(f"[delivery] id={stanza_id} phase=await-ack sequence={sequence}")
-                            self._schedule_delivery_timeout(stanza_id)
+                            # El stanza ya fue aceptado por nbxmpp; no dejar
+                            # la UI en "Sending" esperando un ACK SM que puede
+                            # no llegar (p. ej. servidores/proxies intermedios).
+                            self._mark_delivery_sent(stanza_id)
                     else:
                         debug_print(f"[delivery] id={stanza_id} phase=sent-no-smacks")
                         self._mark_delivery_sent(stanza_id)
