@@ -1290,8 +1290,16 @@ class XmppSession(GObject.Object):
                     return
 
             def send_on_main():
-                if self._client is not None:
+                if self._client is None:
+                    self._mark_delivery_failed(stanza_id)
+                    return GLib.SOURCE_REMOVE
+                try:
                     self._client.send_stanza(msg)
+                except Exception as exc:
+                    debug_print(f"XmppSession: no se pudo enviar {stanza_id}: {exc}")
+                    self._mark_delivery_failed(stanza_id)
+                    return GLib.SOURCE_REMOVE
+                else:
                     # Nota de diseño: se accede a _smacks, un atributo interno de nbxmpp,
                     # debido a la ausencia de una API pública para consultar la cola de SM de nbxmpp.
                     smacks = getattr(self._client, '_smacks', None)
@@ -1323,6 +1331,11 @@ class XmppSession(GObject.Object):
         pending = self._pending_delivery.pop(stanza_id, None)
         if pending is not None:
             self.emit('delivery-state', stanza_id, 'sent', pending['body'])
+
+    def _mark_delivery_failed(self, stanza_id):
+        pending = self._pending_delivery.pop(stanza_id, None)
+        if pending is not None:
+            self.emit('delivery-state', stanza_id, 'failed', pending['body'])
 
     def _schedule_delivery_timeout(self, stanza_id, timeout_seconds=60):
         """Fail a delivery that never receives a transport acknowledgement."""
