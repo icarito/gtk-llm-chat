@@ -1112,6 +1112,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.connect('state-changed', self._on_backend_state_changed),
                 backend.connect('typing', self._on_backend_typing),
                 backend.connect('delivery-state', self._on_delivery_state),
+                backend.connect('encryption-state', self._on_encryption_state),
                 backend.connect('quick-responses', self._on_quick_responses),
                 backend.connect('commands', self._on_commands),
             ]
@@ -1887,6 +1888,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._pending_delivery_widgets.pop(body, None)
         if widget is not None:
             widget.set_delivery_state(state)
+
+    def _on_encryption_state(self, _backend, stanza_id, namespace):
+        widget = self._delivery_widgets.get(stanza_id)
+        if widget is not None:
+            widget.set_encrypted(namespace)
+        else:
+            pending = getattr(self, '_encrypted_incoming', None)
+            if pending is None:
+                self._encrypted_incoming = {}
+                pending = self._encrypted_incoming
+            pending[stanza_id] = namespace
 
     def _scroll_to_bottom_messaging(self, force=True):
         """Scroll para XMPP (mensajes discretos, sin streaming).
@@ -2768,7 +2780,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     # evento que llegue fuera de una (una sesión anterior que aún no se había
     # callado) se ignora en vez de reventar sobre un None.
 
-    def _on_xmpp_history_message(self, backend, body, direction, timestamp):
+    def _on_xmpp_history_message(self, backend, body, direction, timestamp,
+                                 was_encrypted=False, encryption_namespace=''):
         if self._xmpp_history_batch is None:
             return
         if direction == 'in':
@@ -2783,7 +2796,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         shown_body = (self._tool_activity_history_text(body)
                       if self._is_tool_activity_message(body) else body)
-        self._xmpp_history_batch.append((shown_body, direction, timestamp))
+        self._xmpp_history_batch.append((shown_body, direction, timestamp,
+                                         was_encrypted, encryption_namespace))
 
     def _on_xmpp_history_actions(self, backend, body, timestamp,
                                  quick_responses, commands, request_id=None):
@@ -2806,12 +2820,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # El lote se pinta por timestamp, no por su procedencia: de dónde
             # venga (carga inicial, backfill, scroll hacia arriba) no dice nada
             # sobre si es más nuevo o más viejo que lo que ya hay en pantalla.
-            for body, direction, timestamp in batch:
+            for body, direction, timestamp, was_encrypted, encryption_namespace in batch:
                 if (direction == 'in' and
                         (Message.compact_blank_lines(body), timestamp)
                         in approval_message_keys):
                     continue
-                self._add_history_bubble(body, direction, timestamp)
+                self._add_history_bubble(body, direction, timestamp,
+                                         was_encrypted, encryption_namespace)
             self._history_displayed = True
         for body, timestamp, quick_responses, commands, request_id in action_batch:
             self._restore_history_actions(
@@ -2949,7 +2964,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return False
         if hasattr(self.backend, 'quick_response_was_answered'):
             return self.backend.quick_response_was_answered(timestamp, values)
-        for body, direction, msg_timestamp in self._xmpp_history_batch:
+        for body, direction, msg_timestamp, _was_encrypted, _encryption_namespace in self._xmpp_history_batch:
             if direction != 'out' or body not in values:
                 continue
             msg_dt = self._parse_history_ts(msg_timestamp)
@@ -3128,7 +3143,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return (direction, Message.compact_blank_lines(body),
                 dt.isoformat() if dt is not None else None)
 
-    def _add_history_bubble(self, body, direction, timestamp):
+    def _add_history_bubble(self, body, direction, timestamp,
+                            was_encrypted=False, encryption_namespace=None):
         """Pinta un mensaje del historial en su sitio, si no estaba ya."""
         key = self._history_bubble_key(body, direction, timestamp)
         # Una clave sin fecha no identifica nada (dos mensajes iguales sin
@@ -3141,7 +3157,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         sender = "user" if direction == 'out' else "assistant"
         if self._has_recent_matching_bubble(body, sender, timestamp):
             return
-        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
+        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp),
+                      was_encrypted=was_encrypted,
+                      encryption_namespace=encryption_namespace)
         self._insert_bubble_by_timestamp(MessageWidget(msg))
 
     def _has_recent_matching_bubble(self, body, sender, timestamp,
@@ -3566,6 +3584,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
             self._display_context_unavailable(body)
             return
         widget = self.display_message(body, sender='assistant', timestamp=ts)
+        encrypted = getattr(self, '_encrypted_incoming', {}).pop(request_id, None)
+        if encrypted is not None:
+            widget.set_encrypted(encrypted)
         self.current_message_widget = widget
         if request_id:
             self._message_widgets_by_id[request_id] = widget

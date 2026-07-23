@@ -203,6 +203,7 @@ class XmppSession(GObject.Object):
         'avatar-changed': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         # stanza_id, state, body para mensajes propios.
         'delivery-state': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
+        'encryption-state': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # emitido cuando se procesa o desencripta un mensaje OMEMO
         'omemo-status-changed': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
     }
@@ -1063,6 +1064,10 @@ class XmppSession(GObject.Object):
                             self._omemo_decrypt_failed.add(stanza_key)
                         else:
                             properties.body = body
+                            stanza_id = _stanza.getAttr('id')
+                            if stanza_id:
+                                self.emit('encryption-state', stanza_id,
+                                          encrypted_node.getNamespace() or '')
                         self._omemo_decrypted.add(stanza_key)
                         self._on_message(_client, _stanza, properties)
                         self._omemo_decrypted.discard(stanza_key)
@@ -1393,6 +1398,7 @@ class XmppSession(GObject.Object):
                             'xmlns': 'urn:xmpp:hints',
                         }))
                         debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
+                        self.emit('encryption-state', stanza_id, encryption_namespace)
                         debug_print(f"[delivery] id={stanza_id} phase=encrypt-done elapsed={time.monotonic()-started:.2f}s nodes={len(nodes)}")
                     else:
                         # Encryption is mandatory when OMEMO is enabled.
@@ -1753,6 +1759,7 @@ class XmppConversation(ChatBackend):
         # not merely to whichever message happened to arrive last.
         self._known_incoming_ids: dict[str, None] = {}
         self._last_incoming_id: str | None = None
+        self._pending_encryption: dict[str, str] = {}
         session._ensure_history()
         # Guardar los handler ids para poder desconectarlos en shutdown:
         # la sesión es compartida y vive más que esta conversación.
@@ -1760,6 +1767,7 @@ class XmppConversation(ChatBackend):
             session.connect('state-changed', self._on_session_state),
             session.connect('session-error', self._on_session_error),
             session.connect('delivery-state', self._on_delivery_state),
+            session.connect('encryption-state', self._on_encryption_state),
         ]
         self._history_shown_from: str | None = None
         self._pending_mam_queryid: str | None = None
@@ -1781,6 +1789,12 @@ class XmppConversation(ChatBackend):
 
     def _on_delivery_state(self, _session, stanza_id, state, body):
         self.emit('delivery-state', stanza_id, state, body)
+
+    def _on_encryption_state(self, _session, stanza_id, namespace):
+        self._pending_encryption[stanza_id] = namespace
+        if self.session.history is not None:
+            self.session.history.mark_encrypted(self.bare_jid, stanza_id, namespace)
+        self.emit('encryption-state', stanza_id, namespace)
 
     # --- Entrantes (llamados por la sesión) ---
 
@@ -1824,12 +1838,14 @@ class XmppConversation(ChatBackend):
         # siempre "Recibido · preparando…" en vez de la respuesta final.
         if request_id is None and correction:
             request_id = correction[1]
+        encryption_namespace = self._pending_encryption.pop(request_id, None) if request_id else None
         has_pending = bool(quick_responses) or bool(commands)
         if history is not None:
             history.record_message(
                 self.bare_jid, body, 'in', ts,
                 quick_responses=quick_responses, commands=commands,
-                request_id=request_id)
+                request_id=request_id, was_encrypted=encryption_namespace is not None,
+                encryption_namespace=encryption_namespace)
         if has_pending and request_id:
             self._track_pending_request(request_id, quick_responses)
         if request_id:
@@ -2049,7 +2065,8 @@ class XmppConversation(ChatBackend):
             self.emit('history-complete', False)
             return
         for msg in messages:
-            self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+            self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'],
+                      bool(msg.get('was_encrypted')), msg.get('encryption_namespace') or '')
             if msg.get('request_id') and msg.get('direction') == 'in':
                 self._track_incoming_id(msg['request_id'])
             if msg.get('quick_responses') or msg.get('commands'):
@@ -2115,7 +2132,8 @@ class XmppConversation(ChatBackend):
         older = history.get_before(self.bare_jid, self._history_shown_from, limit=50)
         if older:
             for msg in older:
-                self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'])
+                self.emit('history-message', msg['body'], msg['direction'], msg['timestamp'],
+                          bool(msg.get('was_encrypted')), msg.get('encryption_namespace') or '')
                 if msg.get('quick_responses') or msg.get('commands'):
                     self.emit(
                         'history-actions', msg['body'], msg['timestamp'],
@@ -2161,7 +2179,7 @@ class XmppConversation(ChatBackend):
             if has_pending and request_id and direction == 'in':
                 self._track_pending_request(request_id, quick_responses)
             if inserted:
-                self.emit('history-message', body, direction, timestamp)
+                self.emit('history-message', body, direction, timestamp, False, '')
                 if quick_responses or commands:
                     self.emit(
                         'history-actions', body, timestamp, quick_responses,

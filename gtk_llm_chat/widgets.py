@@ -378,10 +378,13 @@ class Message:
     Representa un mensaje
     """
 
-    def __init__(self, content, sender="user", timestamp=None):
+    def __init__(self, content, sender="user", timestamp=None,
+                 was_encrypted=False, encryption_namespace=None):
         self.content = self.compact_blank_lines(content)
         self.sender = sender
         self.timestamp = timestamp or datetime.now()
+        self.was_encrypted = bool(was_encrypted)
+        self.encryption_namespace = encryption_namespace
 
     @staticmethod
     def compact_blank_lines(content):
@@ -533,11 +536,20 @@ class MessageWidget(Gtk.Box):
         self.retry_button.connect('clicked', self._retry)
         self.status_row.append(self.retry_button)
         self.status_row.append(time_label)
+        self.encryption_label = Gtk.Label(label='🔒', css_classes=['timestamp'])
+        self.encryption_label.set_tooltip_text('OMEMO encrypted')
+        self.encryption_label.set_visible(bool(getattr(message, 'was_encrypted', False)))
+        self.status_row.append(self.encryption_label)
         message_box.append(self.status_row)
         self.message_box = message_box
         self._quick_response_row = None
 
         self.append(margin_box)
+
+    def set_encrypted(self, namespace=None):
+        self.message.was_encrypted = True
+        self.message.encryption_namespace = namespace
+        self.encryption_label.set_visible(True)
 
     def _retry(self, _button):
         if self._on_retry is not None:
