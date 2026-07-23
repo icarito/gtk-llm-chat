@@ -572,17 +572,49 @@ class OMEMOEngine:
             )).from_just()
             self.own_device_id = own_device_id
             for backend in backends:
-                own_bundle = await backend.get_bundle(
-                    self.jid_str, own_device_id
-                )
-                await XmppOMEMOSessionManager._upload_bundle(own_bundle)
-                await manager.refresh_device_list(
-                    backend.namespace, self.jid_str
-                )
-                debug_print(
-                    f"[omemo-init] republished bundle/device "
-                    f"namespace={backend.namespace} device={own_device_id}"
-                )
+                try:
+                    own_bundle = await backend.get_bundle(
+                        self.jid_str, own_device_id
+                    )
+                    await XmppOMEMOSessionManager._upload_bundle(own_bundle)
+                    if backend.namespace == LEGACY_NS:
+                        # python-omemo's generic own-device reconciliation
+                        # tries to sign our v2 label even for Oldmemo, whose
+                        # sign_own_label() is deliberately unimplemented.
+                        # Publish the label-free OMEMO 1 list explicitly,
+                        # then feed that same list back into local state.
+                        legacy_devices = dict(
+                            await XmppOMEMOSessionManager._download_device_list(
+                                LEGACY_NS, self.jid_str
+                            )
+                        )
+                        legacy_devices[own_device_id] = None
+                        await XmppOMEMOSessionManager._upload_device_list(
+                            LEGACY_NS, legacy_devices
+                        )
+                        await manager.update_device_list(
+                            LEGACY_NS, self.jid_str, legacy_devices
+                        )
+                    else:
+                        await manager.refresh_device_list(
+                            backend.namespace, self.jid_str
+                        )
+                    debug_print(
+                        f"[omemo-init] republished bundle/device "
+                        f"namespace={backend.namespace} device={own_device_id}"
+                    )
+                except Exception as error:
+                    # A compatibility backend publication must not disable
+                    # decryption and the already initialized manager.
+                    debug_print(
+                        f"[omemo-init] backend-sync-failed "
+                        f"namespace={backend.namespace} error={error!r}"
+                    )
+                    print(
+                        f"[omemo-init] backend-sync-failed "
+                        f"namespace={backend.namespace} error={error!r}",
+                        flush=True,
+                    )
             # Salir de modo sincronización de historial inicial
             await manager.after_history_sync()
             debug_print(f"[omemo-init] history-sync-done jid={self.jid_str}")
