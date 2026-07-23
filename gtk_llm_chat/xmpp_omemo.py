@@ -520,6 +520,7 @@ class OMEMOEngine:
         self.worker = OMEMOAsyncWorker()
         self.manager = None
         self.own_device_id = None
+        self._decrypt_async_lock = None
 
         # Ruta del archivo de persistencia
         user_dir = ensure_user_dir_exists()
@@ -816,46 +817,47 @@ class OMEMOEngine:
         )
 
         async def _decrypt_coro():
-            if ns == TWOMEMO_NS:
-                omemo_msg = two_parse_message(et_el, from_bare_jid)
-            else:
-                omemo_msg = await old_parse_message(et_el, from_bare_jid, self.jid_str, self.manager)
-
-            # Desencriptar
-            decrypt_result = await self.manager.decrypt(omemo_msg)
-            plaintext_bytes, _device_info = decrypt_result[:2]
-
-            # Establecer confianza automática solo si es necesario (always-trust policy)
-            if _device_info.trust_level_name.lower() != 'trusted':
-                try:
-                    await self.manager.set_trust(
-                        _device_info.bare_jid,
-                        _device_info.identity_key,
-                        "trusted"
-                    )
-                    debug_print(f"OMEMO: confianza automática establecida para {_device_info.bare_jid}")
-                except Exception as e:
-                    debug_print(f"OMEMO: Error guardando trust para {_device_info.bare_jid}: {e}")
-
-            # Responder al exchange con un mensaje vacío de ser necesario
-            has_prekey = False
-            if header_node is not None:
-                keys = []
+            # Streaming can deliver the seed, first token and final update in
+            # rapid succession.  SessionManager mutates a Double Ratchet, so
+            # those decryptions must run strictly in arrival order rather
+            # than concurrently on the shared asyncio loop.
+            if self._decrypt_async_lock is None:
+                self._decrypt_async_lock = asyncio.Lock()
+            async with self._decrypt_async_lock:
                 if ns == TWOMEMO_NS:
-                    for keys_elt in header_node.getTags('keys'):
-                        keys.extend(keys_elt.getTags('key'))
+                    omemo_msg = two_parse_message(et_el, from_bare_jid)
                 else:
-                    keys.extend(header_node.getTags('key'))
+                    omemo_msg = await old_parse_message(
+                        et_el, from_bare_jid, self.jid_str, self.manager
+                    )
 
-                for key_node in keys:
-                    if key_node.getAttr('prekey') == 'true' or key_node.getAttr('kex') == 'true':
-                        has_prekey = True
-                        break
+                decrypt_result = await self.manager.decrypt(omemo_msg)
+                plaintext_bytes, _device_info = decrypt_result[:2]
 
-            if has_prekey:
-                GLib.idle_add(lambda: self.session.send_text(from_bare_jid, ""))
+                # Establecer confianza automática solo si es necesario
+                # (always-trust policy).
+                if _device_info.trust_level_name.lower() != 'trusted':
+                    try:
+                        await self.manager.set_trust(
+                            _device_info.bare_jid,
+                            _device_info.identity_key,
+                            "trusted"
+                        )
+                        debug_print(
+                            f"OMEMO: confianza automática establecida para "
+                            f"{_device_info.bare_jid}"
+                        )
+                    except Exception as e:
+                        debug_print(
+                            f"OMEMO: Error guardando trust para "
+                            f"{_device_info.bare_jid}: {e}"
+                        )
 
-            return _unwrap_sce_payload(plaintext_bytes.decode('utf-8'))
+                # SessionManager.decrypt() handles key-exchange responses via
+                # its own _send_message callback.  Sending another empty chat
+                # here advanced the ratchet twice and created visible failed
+                # delivery bubbles.
+                return _unwrap_sce_payload(plaintext_bytes.decode('utf-8'))
 
         try:
             return self.worker.run_coroutine(_decrypt_coro(), timeout=20)
