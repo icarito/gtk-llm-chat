@@ -1367,7 +1367,7 @@ class XmppSession(GObject.Object):
         def do_encrypt_and_send():
             started = time.monotonic()
             debug_print(f"[delivery] id={stanza_id} phase=encrypt-start")
-            msg = Message(to=to_bare_jid, body=text, typ='chat')
+            msg = Message(to=to_bare_jid, typ='chat')
             msg.setID(stanza_id)
             chatstate = Node('active', attrs={'xmlns': Namespace.CHATSTATES})
             msg.addChild(node=chatstate)
@@ -1376,10 +1376,22 @@ class XmppSession(GObject.Object):
                 try:
                     encrypted_node, _ = self.omemo_engine.encrypt_msg_async(to_bare_jid, text)
                     if encrypted_node is not None:
-                        msg.setBody(None)
                         nodes = encrypted_node if isinstance(encrypted_node, list) else [encrypted_node]
+                        if len(nodes) != 1:
+                            raise RuntimeError(
+                                "OMEMO protocol negotiation produced multiple stanzas"
+                            )
                         for node in nodes:
                             msg.addChild(node=node)
+                        encryption_namespace = nodes[0].getNamespace()
+                        msg.addChild(node=Node('encryption', attrs={
+                            'xmlns': 'urn:xmpp:eme:0',
+                            'namespace': encryption_namespace,
+                            'name': 'OMEMO',
+                        }))
+                        msg.addChild(node=Node('store', attrs={
+                            'xmlns': 'urn:xmpp:hints',
+                        }))
                         debug_print(f"OMEMO: enviando mensaje cifrado a {to_bare_jid}")
                         debug_print(f"[delivery] id={stanza_id} phase=encrypt-done elapsed={time.monotonic()-started:.2f}s nodes={len(nodes)}")
                     else:
@@ -1392,6 +1404,8 @@ class XmppSession(GObject.Object):
                     # Actualizar a 'failed' para evitar que quede huérfano si el cifrado falla
                     GLib.idle_add(lambda: self._mark_delivery_failed(stanza_id))
                     return
+            else:
+                msg.setBody(text)
 
             def send_on_main():
                 if not self._has_live_transport():

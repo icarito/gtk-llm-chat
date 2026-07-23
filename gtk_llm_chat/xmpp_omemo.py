@@ -562,32 +562,26 @@ class OMEMOEngine:
             )
             print(f"[omemo-init] create-done jid={self.jid_str}", flush=True)
             debug_print(f"[omemo-init] create-done jid={self.jid_str}")
-            # Migrate existing installations from the early per-device v2
-            # bundle node to the standard shared :bundles node.  Creating a
-            # manager from persisted state does not otherwise republish its
-            # already-generated bundle, leaving new peers unable to identify
-            # this sender.
-            if twomemo_available:
-                own_device_id = (await self.storage.load_primitive(
-                    "/own_device_id", int
-                )).from_just()
-                self.own_device_id = own_device_id
-                twomemo_backend = next(
-                    backend for backend in backends
-                    if backend.namespace == TWOMEMO_NS
-                )
-                own_bundle = await twomemo_backend.get_bundle(
+            # Republish both local bundles and reconcile both own device
+            # lists.  Accounts with Gajim/Dino still need this GTK device in
+            # the legacy list so one OMEMO 1 message can be decrypted by all
+            # own resources (Message Carbons), while OMEMO 2 remains
+            # available once all devices support it.
+            own_device_id = (await self.storage.load_primitive(
+                "/own_device_id", int
+            )).from_just()
+            self.own_device_id = own_device_id
+            for backend in backends:
+                own_bundle = await backend.get_bundle(
                     self.jid_str, own_device_id
                 )
                 await XmppOMEMOSessionManager._upload_bundle(own_bundle)
-                # Also reconcile the online device list.  Existing local
-                # state may contain our device even when the PEP node was
-                # never created (or was lost), in which case create() alone
-                # has nothing to republish.
-                await manager.refresh_device_list(TWOMEMO_NS, self.jid_str)
+                await manager.refresh_device_list(
+                    backend.namespace, self.jid_str
+                )
                 debug_print(
-                    f"[omemo-init] republished standard OMEMO 2 bundle/device "
-                    f"device={own_device_id}"
+                    f"[omemo-init] republished bundle/device "
+                    f"namespace={backend.namespace} device={own_device_id}"
                 )
             # Salir de modo sincronización de historial inicial
             await manager.after_history_sync()
@@ -668,20 +662,61 @@ class OMEMOEngine:
                             await self.storage.store(
                                 f"{key}/active", {TWOMEMO_NS: bool(active.get(TWOMEMO_NS, True))}
                             )
+                    # Load the recipient's genuine legacy devices after the
+                    # v2 cleanup, and our own legacy devices for Carbon sync.
+                    # A mixed account must use the common legacy backend;
+                    # otherwise Gajim/Dino receive a v2 carbon without key
+                    # material and display a decryption failure.
+                    await asyncio.wait_for(
+                        self.manager.refresh_device_list(
+                            LEGACY_NS, to_bare_jid
+                        ), timeout=8,
+                    )
+                    await asyncio.wait_for(
+                        self.manager.refresh_device_list(
+                            LEGACY_NS, self.jid_str
+                        ), timeout=8,
+                    )
                 plaintext_bytes = text.encode('utf-8')
-                # Preferir OMEMO 2 para envíos: los clientes modernos (Dino,
-                # OpenClaw) pueden publicar solo el bundle urn:xmpp:omemo:2.
-                # El backend legacy permanece cargado para descifrar mensajes
-                # antiguos, pero no debe bloquear el cifrado saliente.
                 if twomemo_available:
-                    plaintext = {TWOMEMO_NS: plaintext_bytes}
+                    own_ids = (await self.storage.load_list(
+                        f"/devices/{self.jid_str}/list", int
+                    )).maybe([])
+                    has_legacy_only_own_device = False
+                    for device_id in own_ids:
+                        if device_id == self.own_device_id:
+                            continue
+                        key = f"/devices/{self.jid_str}/{device_id}"
+                        namespaces = (await self.storage.load_list(
+                            f"{key}/namespaces", str
+                        )).maybe([])
+                        active = (await self.storage.load_dict(
+                            f"{key}/active", bool
+                        )).maybe({})
+                        if (LEGACY_NS in namespaces
+                                and bool(active.get(LEGACY_NS, True))
+                                and not (TWOMEMO_NS in namespaces
+                                         and bool(active.get(TWOMEMO_NS, False)))):
+                            has_legacy_only_own_device = True
+                            break
+                    selected_namespace = (
+                        LEGACY_NS if has_legacy_only_own_device
+                        else TWOMEMO_NS
+                    )
+                    debug_print(
+                        f"[omemo-encrypt] selected namespace={selected_namespace} "
+                        f"legacy-own-device={has_legacy_only_own_device}"
+                    )
+                    plaintext = {selected_namespace: plaintext_bytes}
+                    priority = [selected_namespace]
                 else:
                     plaintext = {LEGACY_NS: plaintext_bytes}
+                    priority = [LEGACY_NS]
                 encrypted_messages, errors = await asyncio.wait_for(
                     self.manager.encrypt(
                         recipients,
                         plaintext,
-                        backend_priority_order=[TWOMEMO_NS] if twomemo_available else [LEGACY_NS],
+                        backend_priority_order=priority,
                     ), timeout=20
                 )
                 if errors:
@@ -712,7 +747,7 @@ class OMEMOEngine:
             return (nodes[0] if len(nodes) == 1 else nodes), text
 
         try:
-            return self.worker.run_coroutine(_encrypt_coro(), timeout=10)
+            return self.worker.run_coroutine(_encrypt_coro(), timeout=25)
         except Exception as e:
             debug_print(f"OMEMO: Error encriptando mensaje: {e}")
             print(f"[omemo-encrypt] failed target={to_bare_jid} error={e!r}", flush=True)
