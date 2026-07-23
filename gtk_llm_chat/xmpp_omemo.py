@@ -263,7 +263,12 @@ def run_on_main_thread(func, *args, **kwargs):
                 timeout_handle.cancel()
             loop.call_soon_threadsafe(complete_exception, e)
 
-    GLib.idle_add(main_thread_callback)
+    # Prioridad alta: si no, este callback compite en la misma cola idle
+    # que el layout/redraw de GTK y, con una ventana de historial grande
+    # (cientos de burbujas de texto con wrap), puede quedar en espera
+    # indefinida detrás de todo ese trabajo — la inicialización de OMEMO
+    # nunca llega a emitir su primer request_items.
+    GLib.idle_add(main_thread_callback, priority=GLib.PRIORITY_HIGH_IDLE)
     timeout_handle = loop.call_later(
         20,
         complete_exception,

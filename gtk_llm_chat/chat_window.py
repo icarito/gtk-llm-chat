@@ -1958,10 +1958,19 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self._update_connection_status(state)
         # Al (re)conectar, ponerse al día con los mensajes que llegaron
         # mientras la sesión estuvo caída. La carga inicial la hace
-        # _load_xmpp_history; aquí solo cubrimos la transición de un estado
-        # no-conectado a 'connected' una vez que el historial ya se mostró.
-        if (state == 'connected' and previous not in (None, 'connected')
-                and getattr(self, '_xmpp_history_loaded', False)):
+        # _load_xmpp_history; aquí cubrimos tanto la transición de un estado
+        # no-conectado a 'connected' una vez que el historial ya se mostró,
+        # como el caso en que la carga inicial se disparó (p. ej. mientras
+        # OMEMO todavía estaba inicializando) pero nunca llegó a pintar nada
+        # — sin ese segundo caso, un 'ready' que coincide con OMEMO lento
+        # deja _xmpp_history_loaded en True para siempre y el historial no
+        # se recupera ni en reconexiones futuras.
+        never_displayed = (getattr(self, '_xmpp_history_loaded', False)
+                           and not getattr(self, '_history_displayed', False))
+        if state == 'connected' and (
+                (previous not in (None, 'connected')
+                 and getattr(self, '_xmpp_history_loaded', False))
+                or never_displayed):
             self._catch_up_xmpp_history()
 
     def _catch_up_xmpp_history(self):
@@ -2784,13 +2793,21 @@ class LLMChatWindow(Adw.ApplicationWindow):
                                  was_encrypted=False, encryption_namespace=''):
         if self._xmpp_history_batch is None:
             return
+        # Las heurísticas de transporte de aprobación/progreso (XEP-0050 ad-hoc
+        # de OpenClaw) sólo tienen sentido para un contacto agente. Aplicarlas a
+        # cualquier remitente descartaba en silencio mensajes legítimos de un
+        # contacto humano o de un cliente estándar (Gajim, Dino) cuyo texto
+        # calzara por casualidad con el patrón (p. ej. un bloque de código
+        # vacío ```` ``` ```` sin más).
+        is_agent = getattr(self, '_is_agent_contact', False)
         if direction == 'in':
             self._xmpp_history_latest_incoming = timestamp
-            if self._is_progress_snapshot(body) or self._is_tool_activity_message(body):
+            if is_agent and (self._is_progress_snapshot(body)
+                              or self._is_tool_activity_message(body)):
                 self._xmpp_history_tool_candidate = (body, timestamp)
         # Un toast sólo tiene sentido cuando el acuse llega en vivo. Al
         # restaurar MAM/cache se omiten estos estados efímeros por completo.
-        if (self._approval_transport_toast(body) or
+        if is_agent and (self._approval_transport_toast(body) or
                 self._is_progress_snapshot(body) or
                 self._is_approval_transport_noise(body)):
             return
@@ -3509,12 +3526,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if self.is_messaging_backend:
             def apply_response_on_ui_thread():
                 self.accumulated_response = ""
-                toast = self._approval_transport_toast(response)
-                if toast:
-                    self._show_toast(toast)
-                    return GLib.SOURCE_REMOVE
-                if self._is_approval_transport_noise(response):
-                    return GLib.SOURCE_REMOVE
+                # Ver nota en _on_xmpp_history_message: estas heurísticas son
+                # específicas del protocolo de comandos de OpenClaw y no deben
+                # aplicarse a contactos que no anuncian esa capacidad.
+                is_agent = getattr(self, '_is_agent_contact', False)
+                if is_agent:
+                    toast = self._approval_transport_toast(response)
+                    if toast:
+                        self._show_toast(toast)
+                        return GLib.SOURCE_REMOVE
+                    if self._is_approval_transport_noise(response):
+                        return GLib.SOURCE_REMOVE
                 if self._is_context_unavailable_response(response):
                     self.current_message_widget = None
                     self._display_context_unavailable(response)
@@ -3563,30 +3585,34 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _on_response_message(self, _backend, request_id, body, timestamp=''):
         """Mensaje discreto XMPP con identidad estable para correcciones."""
         ts = self._parse_history_ts(timestamp) if timestamp else None
-        toast = self._approval_transport_toast(body)
-        if toast:
-            # Los acuses exitosos pueden llegar como un stanza nuevo, no como
-            # corrección XEP-0308 del request original. En ese caso no existe
-            # un request_id correlacionable, pero la decisión igualmente hace
-            # que toda approval visible deje de ser accionable.
-            if not re.search(r'(?i)failed|already pending', str(body or '')):
-                if self._drop_sticky_approval_items():
-                    self._rebuild_sticky_response_box()
-            self._show_toast(toast)
-            return
-        if self._is_approval_transport_noise(body):
-            return
-        if self._is_progress_snapshot(body):
-            widget = self.display_message(body, sender='assistant', timestamp=ts)
-            widget.set_streaming(True)
-            self.current_message_widget = widget
-            if request_id:
-                self._message_widgets_by_id[request_id] = widget
-                # Tope de seguridad: si el turno muere antes del primer
-                # edit, el spinner no se queda girando para siempre.
-                self._arm_streaming_finalize(
-                    request_id, widget, self._STREAMING_STALE_TIMEOUT_MS)
-            return
+        # Ver nota en _on_xmpp_history_message: heurísticas específicas del
+        # protocolo de comandos de OpenClaw, sólo válidas para un agente.
+        is_agent = getattr(self, '_is_agent_contact', False)
+        if is_agent:
+            toast = self._approval_transport_toast(body)
+            if toast:
+                # Los acuses exitosos pueden llegar como un stanza nuevo, no como
+                # corrección XEP-0308 del request original. En ese caso no existe
+                # un request_id correlacionable, pero la decisión igualmente hace
+                # que toda approval visible deje de ser accionable.
+                if not re.search(r'(?i)failed|already pending', str(body or '')):
+                    if self._drop_sticky_approval_items():
+                        self._rebuild_sticky_response_box()
+                self._show_toast(toast)
+                return
+            if self._is_approval_transport_noise(body):
+                return
+            if self._is_progress_snapshot(body):
+                widget = self.display_message(body, sender='assistant', timestamp=ts)
+                widget.set_streaming(True)
+                self.current_message_widget = widget
+                if request_id:
+                    self._message_widgets_by_id[request_id] = widget
+                    # Tope de seguridad: si el turno muere antes del primer
+                    # edit, el spinner no se queda girando para siempre.
+                    self._arm_streaming_finalize(
+                        request_id, widget, self._STREAMING_STALE_TIMEOUT_MS)
+                return
         if self._is_tool_activity_message(body):
             # Un fallo de herramienta/comando ("❌ …", "Exec failed: …") es
             # el FINAL del turno, no actividad en curso: no gira y además
