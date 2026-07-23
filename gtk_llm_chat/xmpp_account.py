@@ -12,6 +12,7 @@ usa Gajim).
 """
 import json
 import os
+import socket
 
 import keyring
 
@@ -29,15 +30,39 @@ def _account_file_path():
     return os.path.join(user_dir, ACCOUNT_FILENAME)
 
 
-def save_account(jid: str, password: str):
+def save_account(jid: str, password: str, omemo_enabled: bool = False):
     """Guarda el JID en disco y la contraseña en el keyring del sistema."""
     path = _account_file_path()
     if not path:
         raise RuntimeError("No se pudo determinar el directorio de usuario")
+
+    # Intentar cargar la configuración existente para mantener el label si ya existe
+    existing_label = None
+    if os.path.exists(path):
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+                existing_label = data.get('omemo_device_label')
+        except Exception:
+            pass
+
+    # Generar label automático si se activa OMEMO por primera vez (sin label previo)
+    if omemo_enabled and not existing_label:
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = "localhost"
+        existing_label = f"gtk-llm-chat on {hostname}"
+
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump({'jid': jid}, f)
+        json.dump({
+            'jid': jid,
+            'omemo': omemo_enabled,
+            'omemo_device_label': existing_label
+        }, f, indent=2)
+
     keyring.set_password(KEYRING_SERVICE, jid, password)
-    debug_print(f"xmpp_account: cuenta guardada para {jid} (password en keyring)")
+    debug_print(f"xmpp_account: cuenta guardada para {jid} (password en keyring), OMEMO={omemo_enabled}, label={existing_label}")
 
 
 def load_account():
@@ -64,6 +89,32 @@ def load_account():
         debug_print(f"xmpp_account: JID {jid} en disco pero sin password en keyring")
         return None
     return jid, password
+
+
+def is_omemo_enabled() -> bool:
+    """Devuelve si OMEMO está habilitado para la cuenta configurada."""
+    path = _account_file_path()
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+            return bool(data.get('omemo', False) or data.get('omemo_enabled', False))
+    except Exception:
+        return False
+
+
+def load_omemo_device_label() -> str:
+    """Devuelve el label de dispositivo OMEMO actual o generado."""
+    path = _account_file_path()
+    if not path or not os.path.exists(path):
+        return "gtk-llm-chat"
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('omemo_device_label') or "gtk-llm-chat"
+    except Exception:
+        return "gtk-llm-chat"
 
 
 def has_account() -> bool:

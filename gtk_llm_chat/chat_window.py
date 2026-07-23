@@ -1112,6 +1112,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 backend.connect('state-changed', self._on_backend_state_changed),
                 backend.connect('typing', self._on_backend_typing),
                 backend.connect('delivery-state', self._on_delivery_state),
+                backend.connect('encryption-state', self._on_encryption_state),
                 backend.connect('quick-responses', self._on_quick_responses),
                 backend.connect('commands', self._on_commands),
             ]
@@ -1790,6 +1791,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 el mismo mensaje terminaba pintado dos veces si pasaba más de
                 un minuto entre la burbuja en vivo y la re-sincronización.
         """
+        # Old cache rows may contain the authenticated SCE envelope from
+        # before OMEMO unwrapping happened in the transport layer.  Normalize
+        # at the rendering boundary as well so those rows do not leak XML.
+        if isinstance(content, str) and "urn:xmpp:sce:1" in content:
+            from .xmpp_omemo import _unwrap_sce_payload
+            content = _unwrap_sce_payload(content)
         message = Message(content, sender, timestamp=timestamp)
 
         if sender == "user":
@@ -1870,6 +1877,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
         self.backend.send_message(body)
 
     def _on_delivery_state(self, _backend, stanza_id, state, body):
+        debug_print(f"[delivery-ui] id={stanza_id} state={state} len={len(body or '')}")
         widget = self._delivery_widgets.get(stanza_id)
         if widget is None:
             pending = self._pending_delivery_widgets.get(body, [])
@@ -1880,6 +1888,17 @@ class LLMChatWindow(Adw.ApplicationWindow):
                 self._pending_delivery_widgets.pop(body, None)
         if widget is not None:
             widget.set_delivery_state(state)
+
+    def _on_encryption_state(self, _backend, stanza_id, namespace):
+        widget = self._delivery_widgets.get(stanza_id)
+        if widget is not None:
+            widget.set_encrypted(namespace)
+        else:
+            pending = getattr(self, '_encrypted_incoming', None)
+            if pending is None:
+                self._encrypted_incoming = {}
+                pending = self._encrypted_incoming
+            pending[stanza_id] = namespace
 
     def _scroll_to_bottom_messaging(self, force=True):
         """Scroll para XMPP (mensajes discretos, sin streaming).
@@ -2761,7 +2780,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     # evento que llegue fuera de una (una sesión anterior que aún no se había
     # callado) se ignora en vez de reventar sobre un None.
 
-    def _on_xmpp_history_message(self, backend, body, direction, timestamp):
+    def _on_xmpp_history_message(self, backend, body, direction, timestamp,
+                                 was_encrypted=False, encryption_namespace=''):
         if self._xmpp_history_batch is None:
             return
         if direction == 'in':
@@ -2776,7 +2796,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return
         shown_body = (self._tool_activity_history_text(body)
                       if self._is_tool_activity_message(body) else body)
-        self._xmpp_history_batch.append((shown_body, direction, timestamp))
+        self._xmpp_history_batch.append((shown_body, direction, timestamp,
+                                         was_encrypted, encryption_namespace))
 
     def _on_xmpp_history_actions(self, backend, body, timestamp,
                                  quick_responses, commands, request_id=None):
@@ -2799,12 +2820,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
             # El lote se pinta por timestamp, no por su procedencia: de dónde
             # venga (carga inicial, backfill, scroll hacia arriba) no dice nada
             # sobre si es más nuevo o más viejo que lo que ya hay en pantalla.
-            for body, direction, timestamp in batch:
+            for body, direction, timestamp, was_encrypted, encryption_namespace in batch:
                 if (direction == 'in' and
                         (Message.compact_blank_lines(body), timestamp)
                         in approval_message_keys):
                     continue
-                self._add_history_bubble(body, direction, timestamp)
+                self._add_history_bubble(body, direction, timestamp,
+                                         was_encrypted, encryption_namespace)
             self._history_displayed = True
         for body, timestamp, quick_responses, commands, request_id in action_batch:
             self._restore_history_actions(
@@ -2927,8 +2949,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
     def _body_looks_like_approval(body):
         text = str(body or '').lower()
         return ('approval' in text or 'aprobación' in text
-                or 'aprobacion' in text or 'pending command' in text
-                or '🔒' in text)
+                or 'aprobacion' in text or 'pending command' in text)
 
     def _history_quick_response_was_answered(self, timestamp, quick_responses):
         request_dt = self._parse_history_ts(timestamp)
@@ -2943,7 +2964,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
             return False
         if hasattr(self.backend, 'quick_response_was_answered'):
             return self.backend.quick_response_was_answered(timestamp, values)
-        for body, direction, msg_timestamp in self._xmpp_history_batch:
+        for body, direction, msg_timestamp, _was_encrypted, _encryption_namespace in self._xmpp_history_batch:
             if direction != 'out' or body not in values:
                 continue
             msg_dt = self._parse_history_ts(msg_timestamp)
@@ -3122,7 +3143,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
         return (direction, Message.compact_blank_lines(body),
                 dt.isoformat() if dt is not None else None)
 
-    def _add_history_bubble(self, body, direction, timestamp):
+    def _add_history_bubble(self, body, direction, timestamp,
+                            was_encrypted=False, encryption_namespace=None):
         """Pinta un mensaje del historial en su sitio, si no estaba ya."""
         key = self._history_bubble_key(body, direction, timestamp)
         # Una clave sin fecha no identifica nada (dos mensajes iguales sin
@@ -3135,7 +3157,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         sender = "user" if direction == 'out' else "assistant"
         if self._has_recent_matching_bubble(body, sender, timestamp):
             return
-        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp))
+        msg = Message(body, sender, timestamp=self._parse_history_ts(timestamp),
+                      was_encrypted=was_encrypted,
+                      encryption_namespace=encryption_namespace)
         self._insert_bubble_by_timestamp(MessageWidget(msg))
 
     def _has_recent_matching_bubble(self, body, sender, timestamp,
@@ -3366,11 +3390,12 @@ class LLMChatWindow(Adw.ApplicationWindow):
         if not text:
             return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(
-            self._start_llm_task,
-            text,
-            priority=GLib.PRIORITY_LOW,
-        )
+        if DEBUG:
+            debug_print(f"[send] flush backend send len={len(text)}")
+        # XMPP's send_text starts its encryption worker immediately. Calling
+        # it here avoids a low-priority idle callback starving behind GTK
+        # redraw/layout work, which left the bubble stuck at Sending….
+        self._start_llm_task(text)
         return GLib.SOURCE_REMOVE
 
     def _start_llm_task(self, prompt_text):
@@ -3593,6 +3618,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
         # burbuja de progreso anterior puede seguir en 'Working…'.
         self._stop_tracked_streaming_widgets()
         widget = self.display_message(body, sender='assistant', timestamp=ts)
+        encrypted = getattr(self, '_encrypted_incoming', {}).pop(request_id, None)
+        if encrypted is not None:
+            widget.set_encrypted(encrypted)
         self.current_message_widget = widget
         if request_id:
             self._message_widgets_by_id[request_id] = widget
@@ -4506,30 +4534,8 @@ class LLMChatWindow(Adw.ApplicationWindow):
     _SCROLL_BOTTOM_EPSILON = 4.0
 
     def _log_scroll_state(self, where, adj=None, extra=""):
-        """Traza compacta del estado de scroll para depurar carreras."""
-        if not DEBUG:
-            return
-        if adj is None and hasattr(self, 'message_scroll'):
-            adj = self.message_scroll.get_vadjustment()
-        if adj is None:
-            debug_print(f"[scroll] {where} | adj=<none> {extra}")
-            return
-        value = adj.get_value()
-        upper = adj.get_upper()
-        page = adj.get_page_size()
-        distance = max(0.0, upper - (value + page))
-        at_bottom = distance <= self._SCROLL_BOTTOM_EPSILON
-        debug_print(
-            "[scroll] "
-            f"{where} | v={value:.1f} u={upper:.1f} p={page:.1f} "
-            f"d={distance:.1f} at_bottom={at_bottom} "
-            f"stick={getattr(self, '_stick_to_bottom', None)} "
-            f"pending={getattr(self, '_post_layout_scroll_pending', None)} "
-            f"force={getattr(self, '_post_layout_scroll_force', None)} "
-            f"added_pending={getattr(self, '_content_added_pending', None)} "
-            f"restoring={getattr(self, '_restoring_scroll', None)} "
-            f"{extra}"
-        )
+        """Legacy hook retained for callers; scroll tracing is intentionally off."""
+        return
 
     def _at_bottom(self, adj):
         return (adj.get_upper() - (adj.get_value() + adj.get_page_size())

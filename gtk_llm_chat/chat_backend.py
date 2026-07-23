@@ -67,12 +67,14 @@ class ChatBackend(GObject.Object):
         # pending|sent|failed; body permite correlacionar la burbuja creada
         # por la UI antes de que el backend asigne el stanza id.
         'delivery-state': (GObject.SignalFlags.RUN_LAST, None, (str, str, str)),
+        # (stanza_id, namespace): transporte confirmó que el mensaje usó OMEMO.
+        'encryption-state': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         # (options, request_id) — request_id es el stanza id propio del
         # mensaje que trajo estas opciones; None si no se pudo capturar.
         'quick-responses': (GObject.SignalFlags.RUN_LAST, None, (object, object)),
         'commands': (GObject.SignalFlags.RUN_LAST, None, (object, object)),
         'history-message': (GObject.SignalFlags.RUN_LAST, None,
-                            (str, str, str)),
+                            (str, str, str, bool, str)),
         'history-actions': (GObject.SignalFlags.RUN_LAST, None,
                             (str, str, object, object, object)),
         'history-complete': (GObject.SignalFlags.RUN_LAST, None, (bool,)),

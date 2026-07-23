@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS messages (
     attachment_duration REAL,
     attachment_local_path TEXT,
     attachment_state TEXT,
+    was_encrypted INTEGER NOT NULL DEFAULT 0,
+    encryption_namespace TEXT,
     UNIQUE(bare_jid, mam_id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_jid_ts ON messages(bare_jid, timestamp);
@@ -97,6 +99,10 @@ class XmppHistory:
             conn.execute("ALTER TABLE messages ADD COLUMN attachment_local_path TEXT")
         if "attachment_state" not in columns:
             conn.execute("ALTER TABLE messages ADD COLUMN attachment_state TEXT")
+        if "was_encrypted" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN was_encrypted INTEGER NOT NULL DEFAULT 0")
+        if "encryption_namespace" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN encryption_namespace TEXT")
         conn.commit()
 
     def record_message(self, bare_jid: str, body: str, direction: str,
@@ -107,7 +113,9 @@ class XmppHistory:
                        attachment_mime_type: Optional[str] = None,
                        attachment_duration: Optional[float] = None,
                        attachment_local_path: Optional[str] = None,
-                       attachment_state: Optional[str] = None):
+                       attachment_state: Optional[str] = None,
+                       was_encrypted: bool = False,
+                       encryption_namespace: Optional[str] = None):
         conn = self.get_connection()
         quick_json = self._encode_metadata(quick_responses)
         commands_json = self._encode_metadata(commands)
@@ -132,10 +140,12 @@ class XmppHistory:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO messages "
             "(bare_jid, body, direction, timestamp, mam_id, quick_responses, commands, request_id, "
-            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state, "
+            "was_encrypted, encryption_namespace) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (bare_jid, body, direction, timestamp, mam_id, quick_json, commands_json, request_id,
-             attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state),
+             attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state,
+             int(bool(was_encrypted)), encryption_namespace),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -220,9 +230,9 @@ class XmppHistory:
         verified_clause = "AND mam_id IS NOT NULL " if verified_only else ""
         cursor = conn.execute(
             "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
-            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM ("
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state, was_encrypted, encryption_namespace FROM ("
             "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
-            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM messages "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state, was_encrypted, encryption_namespace FROM messages "
             f"WHERE bare_jid = ? {verified_clause}ORDER BY timestamp DESC LIMIT ?"
             ") ORDER BY timestamp ASC",
             (bare_jid, limit),
@@ -233,9 +243,9 @@ class XmppHistory:
         conn = self.get_connection()
         cursor = conn.execute(
             "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
-            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM ("
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state, was_encrypted, encryption_namespace FROM ("
             "SELECT body, direction, timestamp, quick_responses, commands, request_id, "
-            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state FROM messages "
+            "attachment_url, attachment_mime_type, attachment_duration, attachment_local_path, attachment_state, was_encrypted, encryption_namespace FROM messages "
             "WHERE bare_jid = ? AND timestamp < ? "
             "ORDER BY timestamp DESC LIMIT ?"
             ") ORDER BY timestamp ASC",
@@ -441,8 +451,7 @@ class XmppHistory:
     def _body_looks_like_approval(body) -> bool:
         text = str(body or "").lower()
         return ("approval" in text or "aprobación" in text
-                or "aprobacion" in text or "pending command" in text
-                or "🔒" in text)
+                or "aprobacion" in text or "pending command" in text)
 
     def attach_mam_to_recent_outgoing(self, bare_jid: str, body: str,
                                       timestamp: str, mam_id: str,
@@ -475,6 +484,37 @@ class XmppHistory:
             # Ese mam_id ya estaba en otra fila: no es esta.
             return False
         return cursor.rowcount > 0
+
+    def attach_mam_to_decrypted_request(self, bare_jid: str, request_id: str,
+                                        timestamp: str, mam_id: str) -> bool:
+        """Promote a previously decrypted live message to its MAM row.
+
+        OMEMO ratchet messages are intentionally single-use.  When MAM
+        replays a stanza that was already decrypted live, attempting to
+        decrypt it again advances/fails the ratchet and used to create a
+        bogus failure bubble.  The stable inner stanza id lets us recognize
+        the replay before touching OMEMO state.
+        """
+        if not request_id or not mam_id:
+            return False
+        conn = self.get_connection()
+        row = conn.execute(
+            "SELECT id FROM messages WHERE bare_jid = ? AND request_id = ? "
+            "AND mam_id IS NULL AND body NOT LIKE '🔒 Encrypted message%' "
+            "ORDER BY id DESC LIMIT 1",
+            (bare_jid, request_id),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            conn.execute(
+                "UPDATE messages SET timestamp = ?, mam_id = ? WHERE id = ?",
+                (timestamp, mam_id, row["id"]),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return False
+        return True
 
     def attach_mam_to_recent_message(self, bare_jid: str, body: str,
                                      direction: str, timestamp: str,
@@ -540,6 +580,19 @@ class XmppHistory:
             "WHERE mam_id IS NOT NULL"
         ).fetchall()
         delete_ids = []
+        # Remove failure placeholders produced by decrypting a MAM replay of
+        # a stanza that had already been decrypted live.  `request_id` is the
+        # stable id of the inner message and therefore a stronger match than
+        # timestamp/body heuristics.
+        failed_replays = conn.execute(
+            "SELECT failed.id FROM messages AS failed "
+            "WHERE failed.body LIKE '🔒 Encrypted message%' "
+            "AND failed.request_id IS NOT NULL AND EXISTS ("
+            "SELECT 1 FROM messages AS clear WHERE clear.bare_jid = failed.bare_jid "
+            "AND clear.request_id = failed.request_id AND clear.id != failed.id "
+            "AND clear.body NOT LIKE '🔒 Encrypted message%')"
+        ).fetchall()
+        delete_ids.extend(row["id"] for row in failed_replays)
         for row in rows:
             target = self._parse_timestamp(row["timestamp"])
             if target is None:
@@ -612,6 +665,20 @@ class XmppHistory:
             ])),
         )
         conn.commit()
+
+    def mark_encrypted(self, bare_jid: str, request_id: str,
+                       namespace: Optional[str] = None) -> bool:
+        """Attach verified OMEMO metadata to a live or MAM-correlated row."""
+        if not request_id:
+            return False
+        conn = self.get_connection()
+        cur = conn.execute(
+            "UPDATE messages SET was_encrypted = 1, encryption_namespace = COALESCE(?, encryption_namespace) "
+            "WHERE id = (SELECT id FROM messages WHERE bare_jid = ? AND request_id = ? ORDER BY id DESC LIMIT 1)",
+            (namespace, bare_jid, request_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
     def get_failed_attachments(self, bare_jid: str):
         conn = self.get_connection()
