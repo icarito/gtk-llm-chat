@@ -2303,6 +2303,124 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         client.request_commands(on_commands, on_error)
 
+    def _set_approval_bypass(self, enabled, minutes=10, on_done=None):
+        """Activa/desactiva el bypass temporal de aprobaciones de la sesión
+        actual, ejecutando el comando ad-hoc real `approval-bypass` (no un
+        mensaje de texto plano -- ver openclaw-xmpp OPERATIONS.md y el
+        change xmpp-approval-bypass-and-fallback-cleanup). El nodo se
+        descubre vía disco#items, igual que el resto de comandos del
+        agente; no se hardcodea su presencia, solo el nombre a buscar.
+
+        A diferencia de _execute_agent_command, no muestra el diálogo de
+        formulario genérico: el segundo paso (mode + minutes) se completa
+        acá mismo con los valores del switch, sin interacción adicional."""
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            if on_done:
+                on_done(False, _("Not connected to an agent"))
+            return
+
+        from .xmpp_commands import XmppCommandClient, next_action_for, is_completed
+        from nbxmpp.modules.dataforms import SimpleDataForm, create_field
+
+        client = self._agent_command_client or XmppCommandClient(
+            session, bare_jid)
+        self._agent_command_client = client
+
+        def on_error(message):
+            if on_done:
+                on_done(False, message)
+
+        def on_commands(commands):
+            command = next((c for c in commands
+                            if getattr(c, 'node', '') == 'approval-bypass'), None)
+            if command is None:
+                on_error(_("This agent does not expose approval-bypass."))
+                return
+
+            def handle_first(result):
+                if is_completed(result) or result.data is None:
+                    from .xmpp_commands import command_result_body
+                    if on_done:
+                        on_done(True, command_result_body(result))
+                    return
+
+                fields = [create_field('list-single', var='mode',
+                                        value='on' if enabled else 'off')]
+                if enabled:
+                    fields.append(create_field(
+                        'text-single', var='minutes', value=str(minutes)))
+                dataform = SimpleDataForm(type_='submit', fields=fields)
+
+                def handle_second(final_result):
+                    from .xmpp_commands import command_result_body
+                    if on_done:
+                        on_done(True, command_result_body(final_result))
+
+                client.execute(
+                    result, handle_second, on_error,
+                    action=next_action_for(result), dataform=dataform)
+
+            client.execute(command, handle_first, on_error)
+
+        client.request_commands(on_commands, on_error)
+
+    def _query_approval_bypass_status(self, on_done):
+        """Consulta mode=status del comando approval-bypass real, para
+        reflejar en la UI si un bypass sigue activo tras su auto-reversión
+        server-side (sin aviso push -- ver design.md del change de
+        openclaw-xmpp). on_done(active: bool, remaining_minutes: int|None)."""
+        session = getattr(self.backend, 'session', None)
+        bare_jid = getattr(self.backend, 'bare_jid', None)
+        if session is None or bare_jid is None:
+            return
+
+        from .xmpp_commands import XmppCommandClient, next_action_for, is_completed, command_result_body
+        from nbxmpp.modules.dataforms import SimpleDataForm, create_field
+        import re as _re
+
+        client = self._agent_command_client or XmppCommandClient(
+            session, bare_jid)
+        self._agent_command_client = client
+
+        def parse_and_report(text):
+            active = bool(_re.search(r'(?i)activo', text or ''))
+            remaining = None
+            if active:
+                match = _re.search(r'(?i)quedan\s+(\d+)([ms])', text or '')
+                if match:
+                    value = int(match.group(1))
+                    remaining = value if match.group(2).lower() == 'm' else -(-value // 60)
+            on_done(active, remaining)
+
+        def on_error(_message):
+            pass  # poll silencioso: un fallo transitorio no debe interrumpir la UI
+
+        def on_commands(commands):
+            command = next((c for c in commands
+                            if getattr(c, 'node', '') == 'approval-bypass'), None)
+            if command is None:
+                return
+
+            def handle_first(result):
+                if is_completed(result) or result.data is None:
+                    parse_and_report(command_result_body(result))
+                    return
+                fields = [create_field('list-single', var='mode', value='status')]
+                dataform = SimpleDataForm(type_='submit', fields=fields)
+
+                def handle_second(final_result):
+                    parse_and_report(command_result_body(final_result))
+
+                client.execute(
+                    result, handle_second, on_error,
+                    action=next_action_for(result), dataform=dataform)
+
+            client.execute(command, handle_first, on_error)
+
+        client.request_commands(on_commands, on_error)
+
     @staticmethod
     def _as_number(value):
         try:
@@ -4149,7 +4267,57 @@ class LLMChatWindow(Adw.ApplicationWindow):
             detail.set_margin_bottom(10)
             detail.set_margin_start(10)
             detail.set_margin_end(10)
-            popover.set_child(detail)
+            if is_approval:
+                # Bypass temporal, contextual a esta aprobación -- pedido
+                # explícito del usuario de tenerlo al expandir la sticky
+                # card, no sólo en el panel general de comandos del agente.
+                popover_content = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                popover_content.append(detail)
+                bypass_row = Adw.SwitchRow(
+                    title=_("Bypass approvals (10 min)"))
+                bypass_list = Gtk.ListBox()
+                bypass_list.add_css_class("boxed-list")
+                bypass_list.set_selection_mode(Gtk.SelectionMode.NONE)
+                bypass_list.set_margin_top(6)
+                bypass_list.append(bypass_row)
+
+                def on_bypass_toggled(row, _pspec):
+                    enabled = row.get_active()
+
+                    def on_done(_ok, message):
+                        GLib.idle_add(
+                            lambda: row.set_subtitle(message or ""))
+
+                    self._set_approval_bypass(enabled, on_done=on_done)
+
+                bypass_row.connect("notify::active", on_bypass_toggled)
+
+                def refresh_bypass_status(_popover=None):
+                    def on_status(active, remaining):
+                        def apply():
+                            # set_active dispara notify::active -- bloqueado
+                            # para que un refresh de status no re-envie el
+                            # comando de activación/desactivación.
+                            bypass_row.handler_block_by_func(
+                                on_bypass_toggled)
+                            bypass_row.set_active(active)
+                            bypass_row.handler_unblock_by_func(
+                                on_bypass_toggled)
+                            if active and remaining is not None:
+                                bypass_row.set_subtitle(
+                                    _("{minutes} min left").format(
+                                        minutes=remaining))
+                            elif not active:
+                                bypass_row.set_subtitle("")
+                        GLib.idle_add(apply)
+                    self._query_approval_bypass_status(on_status)
+
+                popover.connect("show", refresh_bypass_status)
+                popover_content.append(bypass_list)
+                popover.set_child(popover_content)
+            else:
+                popover.set_child(detail)
             info_button.set_popover(popover)
             header.append(info_button)
         close_button = Gtk.Button()
