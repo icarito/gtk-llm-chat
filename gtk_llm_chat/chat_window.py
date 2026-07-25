@@ -2370,29 +2370,40 @@ class LLMChatWindow(Adw.ApplicationWindow):
         """Consulta mode=status del comando approval-bypass real, para
         reflejar en la UI si un bypass sigue activo tras su auto-reversión
         server-side (sin aviso push -- ver design.md del change de
-        openclaw-xmpp). on_done(active: bool, remaining_minutes: int|None)."""
+        openclaw-xmpp). on_done(active: bool, remaining_minutes: int|None).
+
+        Lee el campo estructurado que el servidor adjunta desde
+        xmpp-approval-unified-contract (var=active/remaining-seconds en un
+        <x type="result">), no el texto libre -- antes esto parseaba
+        /activo/i + /quedan\\s+(\\d+)([ms])/i sobre la prosa en español, que
+        se rompía en silencio con cualquier cambio de wording del lado
+        servidor."""
         session = getattr(self.backend, 'session', None)
         bare_jid = getattr(self.backend, 'bare_jid', None)
         if session is None or bare_jid is None:
             return
 
-        from .xmpp_commands import XmppCommandClient, next_action_for, is_completed, command_result_body
+        from .xmpp_commands import XmppCommandClient, next_action_for, is_completed, command_result_fields
         from nbxmpp.modules.dataforms import SimpleDataForm, create_field
-        import re as _re
 
         client = self._agent_command_client or XmppCommandClient(
             session, bare_jid)
         self._agent_command_client = client
 
-        def parse_and_report(text):
-            active = bool(_re.search(r'(?i)activo', text or ''))
+        def report_from_fields(result):
+            fields = command_result_fields(result)
+            active = fields.get('active') == 'true'
+            if not active:
+                on_done(False, None)
+                return
             remaining = None
-            if active:
-                match = _re.search(r'(?i)quedan\s+(\d+)([ms])', text or '')
-                if match:
-                    value = int(match.group(1))
-                    remaining = value if match.group(2).lower() == 'm' else -(-value // 60)
-            on_done(active, remaining)
+            remaining_seconds = fields.get('remaining-seconds')
+            if remaining_seconds is not None:
+                try:
+                    remaining = -(-int(remaining_seconds) // 60)  # ceil a minutos
+                except ValueError:
+                    pass
+            on_done(True, remaining)
 
         def on_error(_message):
             pass  # poll silencioso: un fallo transitorio no debe interrumpir la UI
@@ -2405,13 +2416,13 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
             def handle_first(result):
                 if is_completed(result) or result.data is None:
-                    parse_and_report(command_result_body(result))
+                    report_from_fields(result)
                     return
                 fields = [create_field('list-single', var='mode', value='status')]
                 dataform = SimpleDataForm(type_='submit', fields=fields)
 
                 def handle_second(final_result):
-                    parse_and_report(command_result_body(final_result))
+                    report_from_fields(final_result)
 
                 client.execute(
                     result, handle_second, on_error,

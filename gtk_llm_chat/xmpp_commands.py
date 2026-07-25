@@ -236,6 +236,27 @@ def command_result_body(command):
     return "\n".join(parts) or _("Command completed.")
 
 
+def command_result_fields(command):
+    """Devuelve los pares var->value del <x type="result"> adjunto al
+    comando (xmpp-approval-unified-contract), como dict {} si el comando no
+    trajo ninguno -- la mayoría de los comandos ad-hoc no lo hacen. Reusa
+    extend_form igual que command_result_body, sin reimplementar el parseo
+    de nbxmpp; la diferencia es que esta función expone var->value crudo
+    para lectura programática, en vez de "label: value" para mostrar."""
+    if command.data is None:
+        return {}
+    try:
+        form = extend_form(command.data)
+        return {
+            field.var: getattr(field, 'value', '')
+            for field in form.iter_fields()
+            if getattr(field, 'var', None)
+        }
+    except Exception as err:
+        debug_print(f"command_result_fields: {err}")
+        return {}
+
+
 def show_command_result(parent, command):
     body = command_result_body(command)
     dialog = Adw.MessageDialog(
