@@ -1005,6 +1005,23 @@ class XmppSession(GObject.Object):
                         encrypted_node = msg_node.getTag('encrypted', namespace='urn:xmpp:omemo:2')
 
         if encrypted_node is not None:
+            # Self-carbons (propios) from another device arrive with the body
+            # already in plaintext inside the forwarded <message>.  The
+            # <encrypted> node still exists but its key material targets the
+            # OTHER recipients, not us.  Letting these through to decrypt_msg
+            # wastes CPU and may hit spurious NameError/decryption failures.
+            # MAM-replayed own messages likewise: the plain body is sufficient.
+            is_own = (
+                getattr(properties, 'is_carbon_message', False)
+                and properties.carbon.is_sent
+            ) or (
+                getattr(properties, 'is_mam_message', False)
+                and properties.from_ is not None
+                and properties.from_.bare == self._jid.bare
+            )
+            if is_own and properties.body:
+                return
+
             # A live OMEMO stanza can return through MAM seconds later.  The
             # Double Ratchet message has already been consumed, so recognize
             # the stable inner stanza id and attach the MAM id to the clear

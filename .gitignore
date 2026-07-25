@@ -14,5 +14,4 @@ build/
 plans/
 po/**/*~
 .env
-tests
 .flatpak*

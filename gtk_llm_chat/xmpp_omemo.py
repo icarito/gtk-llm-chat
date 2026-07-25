@@ -19,6 +19,7 @@ from gi.repository import GLib
 
 from nbxmpp import Node, JID
 from nbxmpp.namespaces import Namespace
+from nbxmpp.protocol import Message
 
 from .debug_utils import debug_print
 from .platform_utils import ensure_user_dir_exists
@@ -875,5 +876,6 @@ class OMEMOEngine:
             return OMEMO_NOT_FOR_US
         except Exception as e:
             debug_print(f"OMEMO: Error desencriptando mensaje: {e}")
+            debug_print(traceback.format_exc())
             print(f"[omemo-decrypt] failed from={from_bare_jid} error={e!r}", flush=True)
             return None
