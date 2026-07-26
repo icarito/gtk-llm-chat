@@ -2303,13 +2303,14 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         client.request_commands(on_commands, on_error)
 
-    def _set_approval_bypass(self, enabled, minutes=10, on_done=None):
-        """Activa/desactiva el bypass temporal de aprobaciones de la sesión
-        actual, ejecutando el comando ad-hoc real `approval-bypass` (no un
-        mensaje de texto plano -- ver openclaw-xmpp OPERATIONS.md y el
-        change xmpp-approval-bypass-and-fallback-cleanup). El nodo se
-        descubre vía disco#items, igual que el resto de comandos del
-        agente; no se hardcodea su presencia, solo el nombre a buscar.
+    def _set_elevated_session(self, enabled, minutes=10, on_done=None):
+        """Activa/desactiva el bypass temporal de sesión (elevatedLevel),
+        ejecutando el comando ad-hoc real `elevated` (no un mensaje de
+        texto plano -- ver openclaw-xmpp OPERATIONS.md y el change
+        xmpp-elevated-session-command, que reemplaza el retirado
+        `approval-bypass`). El nodo se descubre vía disco#items, igual que
+        el resto de comandos del agente; no se hardcodea su presencia,
+        solo el nombre a buscar.
 
         A diferencia de _execute_agent_command, no muestra el diálogo de
         formulario genérico: el segundo paso (mode + minutes) se completa
@@ -2334,9 +2335,9 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         def on_commands(commands):
             command = next((c for c in commands
-                            if getattr(c, 'node', '') == 'approval-bypass'), None)
+                            if getattr(c, 'node', '') == 'elevated'), None)
             if command is None:
-                on_error(_("This agent does not expose approval-bypass."))
+                on_error(_("This agent does not expose elevated."))
                 return
 
             def handle_first(result):
@@ -2366,18 +2367,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         client.request_commands(on_commands, on_error)
 
-    def _query_approval_bypass_status(self, on_done):
-        """Consulta mode=status del comando approval-bypass real, para
-        reflejar en la UI si un bypass sigue activo tras su auto-reversión
-        server-side (sin aviso push -- ver design.md del change de
-        openclaw-xmpp). on_done(active: bool, remaining_minutes: int|None).
+    def _query_elevated_session_status(self, on_done):
+        """Consulta mode=status del comando `elevated` real, para reflejar
+        en la UI si un bypass sigue activo tras su auto-reversión
+        server-side (sin aviso push -- ver design.md de
+        xmpp-elevated-session-command). on_done(active: bool,
+        remaining_minutes: int|None).
 
-        Lee el campo estructurado que el servidor adjunta desde
-        xmpp-approval-unified-contract (var=active/remaining-seconds en un
-        <x type="result">), no el texto libre -- antes esto parseaba
-        /activo/i + /quedan\\s+(\\d+)([ms])/i sobre la prosa en español, que
-        se rompía en silencio con cualquier cambio de wording del lado
-        servidor."""
+        Lee el campo estructurado que el servidor adjunta (var=active/
+        remaining-seconds en un <x type="result">), no el texto libre."""
         session = getattr(self.backend, 'session', None)
         bare_jid = getattr(self.backend, 'bare_jid', None)
         if session is None or bare_jid is None:
@@ -2410,7 +2408,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
 
         def on_commands(commands):
             command = next((c for c in commands
-                            if getattr(c, 'node', '') == 'approval-bypass'), None)
+                            if getattr(c, 'node', '') == 'elevated'), None)
             if command is None:
                 return
 
@@ -4302,7 +4300,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                         GLib.idle_add(
                             lambda: row.set_subtitle(message or ""))
 
-                    self._set_approval_bypass(enabled, on_done=on_done)
+                    self._set_elevated_session(enabled, on_done=on_done)
 
                 bypass_row.connect("notify::active", on_bypass_toggled)
 
@@ -4324,7 +4322,7 @@ class LLMChatWindow(Adw.ApplicationWindow):
                             elif not active:
                                 bypass_row.set_subtitle("")
                         GLib.idle_add(apply)
-                    self._query_approval_bypass_status(on_status)
+                    self._query_elevated_session_status(on_status)
 
                 popover.connect("show", refresh_bypass_status)
                 popover_content.append(bypass_list)

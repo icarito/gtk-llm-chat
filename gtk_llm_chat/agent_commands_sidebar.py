@@ -31,7 +31,7 @@ SECTIONS = (
     (_("Session"), ('context', 'compact', 'clear', 'model',
                     'session-status', 'session-reset')),
     (_("Skills"), ('skill:',)),
-    (_("Administration"), ('agent-', 'approval-bypass')),
+    (_("Administration"), ('agent-', 'elevated')),
 )
 OTHER_SECTION = _("Other")
 
