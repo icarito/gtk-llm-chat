@@ -221,6 +221,7 @@ class XmppSession(GObject.Object):
         self._omemo_decrypting = set()
         self._omemo_decrypted = set()
         self._omemo_decrypt_failed = set()
+        self._omemo_engine_wait_retries = {}
         self._jid = JID.from_string(jid)
         self._password = password
         self._resource = f"{resource}-{_device_resource_suffix()}"
@@ -1081,7 +1082,7 @@ class XmppSession(GObject.Object):
 
                     def resume_message():
                         self._omemo_decrypting.discard(stanza_key)
-                        from .xmpp_omemo import OMEMO_NOT_FOR_US
+                        from .xmpp_omemo import OMEMO_NOT_FOR_US, OMEMO_ENGINE_NOT_READY
                         if body is OMEMO_NOT_FOR_US:
                             # A bare-JID message may be delivered to every
                             # connected resource even when its OMEMO key only
@@ -1089,6 +1090,30 @@ class XmppSession(GObject.Object):
                             # is not a corrupt message and must not create a
                             # failure bubble in this resource.
                             return GLib.SOURCE_REMOVE
+                        if body is OMEMO_ENGINE_NOT_READY:
+                            # The SessionManager is still finishing its async
+                            # initialize() (can take several seconds after
+                            # connecting). A message that races this window —
+                            # typically MAM catch-up on startup — must be
+                            # retried, not marked as permanently failed: once
+                            # marked failed, attach_mam_to_decrypted_request's
+                            # own exclusion of failure bodies means a later
+                            # MAM replay can never resurrect it (see
+                            # gtk_omemo_carbon_self_reprocess_bug_fixed).
+                            retries = self._omemo_engine_wait_retries.get(stanza_key, 0)
+                            if retries >= 20:  # ~20s of retrying, then give up
+                                debug_print(
+                                    f"OMEMO: motor no listo tras reintentos, "
+                                    f"abandonando mensaje de {sender_bare}")
+                                self._omemo_engine_wait_retries.pop(stanza_key, None)
+                            else:
+                                self._omemo_engine_wait_retries[stanza_key] = retries + 1
+
+                                def retry():
+                                    self._on_message(_client, _stanza, properties)
+                                    return GLib.SOURCE_REMOVE
+                                GLib.timeout_add(1000, retry)
+                                return GLib.SOURCE_REMOVE
                         if body is None:
                             debug_print(f"OMEMO: fallo de desencriptación para el mensaje de {sender_bare}")
                             properties.body = fallback_body

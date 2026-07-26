@@ -73,6 +73,12 @@ except ImportError:
 LEGACY_NS = "eu.siacs.conversations.axolotl"
 TWOMEMO_NS = "urn:xmpp:omemo:2"
 OMEMO_NOT_FOR_US = object()
+# Distinct from a real decryption failure: the engine's SessionManager
+# hasn't finished its (async, up to ~60s) initialize() yet. A message that
+# arrives in this window must be retried once the engine is ready, not
+# marked as permanently undecryptable — see decrypt_msg below and its
+# caller in xmpp_client.py.
+OMEMO_ENGINE_NOT_READY = object()
 
 
 # --- XML Conversion Utilities ---
@@ -795,7 +801,7 @@ class OMEMOEngine:
     def decrypt_msg(self, from_bare_jid: str, encrypted_node: Node) -> str | None | object:
         """Desencripta un nodo encriptado entrante."""
         if self.manager is None:
-            return None
+            return OMEMO_ENGINE_NOT_READY
         print(f"[omemo-decrypt] start from={from_bare_jid}", flush=True)
 
         # Convertir a ElementTree
