@@ -1005,12 +1005,27 @@ class XmppSession(GObject.Object):
                         encrypted_node = msg_node.getTag('encrypted', namespace='urn:xmpp:omemo:2')
 
         if encrypted_node is not None:
-            # Self-carbons (propios) from another device arrive with the body
-            # already in plaintext inside the forwarded <message>.  The
+            # Self-carbons (propios) from another device MAY arrive with the
+            # body already in plaintext inside the forwarded <message> (some
+            # clients still send a plain body alongside <encrypted>). The
             # <encrypted> node still exists but its key material targets the
-            # OTHER recipients, not us.  Letting these through to decrypt_msg
+            # OTHER recipients, not us. Letting those through to decrypt_msg
             # wastes CPU and may hit spurious NameError/decryption failures.
             # MAM-replayed own messages likewise: the plain body is sufficient.
+            #
+            # This must only short-circuit on the FIRST pass. Once our own
+            # decrypt_msg() has run, it writes its plaintext into
+            # properties.body and re-invokes _on_message (see
+            # decrypt_in_background/resume_message below) so the rest of the
+            # pipeline (notify_own_carbon/notify_own_message) can see it. On
+            # that second pass `stanza_key` is already in
+            # self._omemo_decrypted, and properties.body being truthy no
+            # longer means "the wire sent plaintext" — it means "we just
+            # decrypted this ourselves". Without excluding that case, a
+            # sender that never puts a plain <body> next to <encrypted> (e.g.
+            # Android) has its own carbon silently dropped right after GTK
+            # decrypts it successfully.
+            stanza_key = id(_stanza)
             is_own = (
                 getattr(properties, 'is_carbon_message', False)
                 and properties.carbon.is_sent
@@ -1019,7 +1034,7 @@ class XmppSession(GObject.Object):
                 and properties.from_ is not None
                 and properties.from_.bare == self._jid.bare
             )
-            if is_own and properties.body:
+            if is_own and properties.body and stanza_key not in self._omemo_decrypted:
                 return
 
             # A live OMEMO stanza can return through MAM seconds later.  The
@@ -1040,7 +1055,6 @@ class XmppSession(GObject.Object):
                             f"[omemo-decrypt] skip-mam-replay id={stanza_id} "
                             f"mam={mam.id}")
                         return
-            stanza_key = id(_stanza)
             fallback_body = _("🔒 Encrypted message could not be decrypted")
 
             if self.omemo_engine is None and stanza_key not in self._omemo_decrypted:
@@ -1136,7 +1150,20 @@ class XmppSession(GObject.Object):
                 # móvil no se ve aquí.
                 body = self._body_with_oob(_stanza, properties.body)
                 conversation.notify_own_carbon(properties.body)
-                conversation.notify_own_message(body)
+                encryption_ns = (
+                    encrypted_node.getNamespace()
+                    if encrypted_node is not None else None
+                )
+                # El stanza id es lo único que permite reconciliar esta fila
+                # con el mismo mensaje cuando MAM lo reentregue (ver
+                # attach_mam_to_decrypted_request): sin guardarlo aquí como
+                # request_id, ese lookup por request_id nunca encuentra la
+                # fila y el reintento de descifrado de MAM se dispara contra
+                # una sesión OMEMO cuyo Double Ratchet ya se consumió al
+                # descifrar este mismo mensaje en vivo — falla siempre y deja
+                # ver el error al reabrir la conversación.
+                conversation.notify_own_message(
+                    body, encryption_ns, _stanza.getAttr('id'))
             return
 
         if getattr(properties, 'is_mam_message', False):
@@ -1939,14 +1966,21 @@ class XmppConversation(ChatBackend):
         self.emit('response-correction', request_id, body)
         self.emit('finished', True)
 
-    def notify_own_message(self, body: str):
+    def notify_own_message(self, body: str, encryption_ns: str | None = None,
+                            request_id: str | None = None):
         """Carbon (XEP-0280) de un mensaje MÍO enviado desde otro dispositivo
         (p.ej. una imagen desde el móvil): hay que guardarlo y pintarlo, porque
         esta ventana no lo envió y no tiene su burbuja.
 
         Los carbons de lo que envío desde AQUÍ también llegan, así que se
         descartan por dedup contra el historial: el envío local ya grabó la
-        fila."""
+        fila.
+
+        request_id es el stanza id del mensaje original (no de este wrapper
+        de carbon): guardarlo permite que attach_mam_to_decrypted_request lo
+        encuentre cuando el archivo MAM reentregue el mismo mensaje más
+        tarde, en vez de reintentar un descifrado OMEMO cuyo Double Ratchet
+        ya se consumió aquí."""
         body = (body or '').strip()
         if not body:
             return
@@ -1956,8 +1990,9 @@ class XmppConversation(ChatBackend):
         if history is not None:
             if history.has_recent_outgoing(self.bare_jid, body):
                 return
-            history.record_message(self.bare_jid, body, 'out', ts)
-        self.emit('own-message', body)
+            history.record_message(
+                self.bare_jid, body, 'out', ts, request_id=request_id)
+        self.emit('own-message', body, encryption_ns or '')
 
     def notify_own_carbon(self, body: str):
         """Carbon (XEP-0280) de una respuesta que YO envié desde otro

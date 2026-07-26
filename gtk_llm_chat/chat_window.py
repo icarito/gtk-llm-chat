@@ -4079,13 +4079,15 @@ class LLMChatWindow(Adw.ApplicationWindow):
         del servidor todavía, sólo la señal de que ya se respondió)."""
         self._mark_sticky_response_resolved(request_id)
 
-    def _on_own_message(self, backend, body):
+    def _on_own_message(self, backend, body, encryption_ns=''):
         """Un mensaje mío que esta ventana no pintó al enviarlo: un adjunto
         (su burbuja no puede existir hasta que la subida devuelve la URL) o un
         carbon de otro dispositivo, como una imagen mandada desde el móvil."""
         if not (body or '').strip():
             return
-        self.display_message(body, sender="user")
+        widget = self.display_message(body, sender="user")
+        if encryption_ns:
+            widget.set_encrypted(encryption_ns)
 
     def _add_sticky_response_card(self, responses, on_selected, detail_text=None,
                                    request_id=None, remove_on_select=True):

@@ -56,8 +56,9 @@ class ChatBackend(GObject.Object):
         # Un mensaje MÍO que hay que pintar y que la ventana no dibujó al
         # enviarlo: un adjunto (la burbuja no puede existir hasta que la subida
         # devuelve la URL) o un carbon XEP-0280 de otro dispositivo, p.ej. una
-        # imagen enviada desde el móvil.
-        'own-message': (GObject.SignalFlags.RUN_LAST, None, (str,)),
+        # imagen enviada desde el móvil. El segundo argumento es el namespace
+        # OMEMO si el carbon llegó cifrado (vacío/None si no).
+        'own-message': (GObject.SignalFlags.RUN_LAST, None, (str, str)),
         'error': (GObject.SignalFlags.RUN_LAST, None, (str,)),
         'finished': (GObject.SignalFlags.RUN_LAST, None, (bool,)),
         'ready': (GObject.SignalFlags.RUN_LAST, None, (str,)),
