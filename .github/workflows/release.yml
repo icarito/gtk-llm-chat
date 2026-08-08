@@ -39,7 +39,7 @@ jobs:
       id-token: write
     steps:
       - name: Download Python dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-dist
           path: dist/
@@ -62,7 +62,7 @@ jobs:
       id-token: write
     steps:
       - name: Download Python dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-dist
           path: dist/
@@ -81,37 +81,37 @@ jobs:
       id-token: write
     steps:
       - name: Download Linux dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: linux-dist
           path: dist/
 
       - name: Download Windows dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: windows-dist
           path: dist/
 
       - name: Download macOS Intel dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: macos-intel-dist
           path: dist/
 
       - name: Download macOS ARM dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: macos-arm-dist
           path: dist/
 
       - name: Download Python dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-dist
           path: dist/
 
       - name: Download Flatpak bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: flatpak-bundle
           path: dist/
